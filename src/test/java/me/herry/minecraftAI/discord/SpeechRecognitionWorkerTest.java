@@ -13,7 +13,10 @@ class SpeechRecognitionWorkerTest {
     private final AtomicLong now = new AtomicLong(1000);
     private VoiceIngress ingress() { var ingress = new VoiceIngress(VoiceIngress.Policy.defaults(), now::get); ingress.participants(Set.of("A")); return ingress; }
     private VoiceIngress.Utterance utterance(VoiceIngress ingress) {
-        for (int i = 0; i < 5; i++) { ingress.frame("A", new byte[PcmAudio.FRAME_BYTES], true, false); now.addAndGet(20); }
+        return utterance(ingress, "A");
+    }
+    private VoiceIngress.Utterance utterance(VoiceIngress ingress, String user) {
+        for (int i = 0; i < 5; i++) { ingress.frame(user, new byte[PcmAudio.FRAME_BYTES], true, false); now.addAndGet(20); }
         now.addAndGet(500); return ingress.tick().completed().getFirst();
     }
     @Test void recognitionKeepsUserRouteAndUsesKoreanMonoAudio() throws Exception {
@@ -62,12 +65,12 @@ class SpeechRecognitionWorkerTest {
         finally { worker.close(); }
     }
     @Test void closeCancelsQueuedRecognitionFutures() throws Exception {
-        var ingress = ingress(); var first = utterance(ingress); var entered = new CountDownLatch(1); var ended = new CountDownLatch(1);
+        var ingress = ingress(); ingress.participants(Set.of("A", "B")); var first = utterance(ingress); var entered = new CountDownLatch(1); var ended = new CountDownLatch(1);
         var worker = new SpeechRecognitionWorker(ingress, (pcm, language) -> {
             entered.countDown(); try { new CountDownLatch(1).await(); return null; } finally { ended.countDown(); }
         }, ignored -> fail("closed result"), code -> fail(code), now::get, 15_000);
         try {
-            worker.submit(first); assertTrue(entered.await(3, TimeUnit.SECONDS)); var queued = worker.submit(utterance(ingress));
+            worker.submit(first); assertTrue(entered.await(3, TimeUnit.SECONDS)); var queued = worker.submit(utterance(ingress, "B"));
             worker.close(); assertTrue(ended.await(3, TimeUnit.SECONDS)); assertTrue(queued.isCancelled());
             assertThrows(java.util.concurrent.CancellationException.class, () -> queued.get(3, TimeUnit.SECONDS));
         } finally { worker.close(); }
