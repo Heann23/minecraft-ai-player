@@ -297,5 +297,6 @@ public final class BreakBlockAction extends AbstractAction {
         memory.forget(MemoryType.WORKBENCH, world.getUID(), target);
         memory.forget(MemoryType.OWN_WORKBENCH, world.getUID(), target);
         memory.forget(MemoryType.FURNACE, world.getUID(), target);
+        memory.forget(MemoryType.OWN_FURNACE, world.getUID(), target);
     }
 }

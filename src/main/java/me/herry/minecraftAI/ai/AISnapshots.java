@@ -1,6 +1,7 @@
 package me.herry.minecraftAI.ai;
 
 import me.herry.minecraftAI.ai.build.BuildJob;
+import me.herry.minecraftAI.ai.crafting.FurnaceJob;
 import me.herry.minecraftAI.persist.AISnapshot;
 import me.herry.minecraftAI.persist.BodyState;
 import org.bukkit.Bukkit;
@@ -21,6 +22,7 @@ final class AISnapshots {
     private static final String WORLD_MODEL = "worldModel";
     private static final String BODY = "body";
     private static final String BUILD = "build";
+    private static final String FURNACE = "furnace";
 
     private AISnapshots() {
     }
@@ -53,6 +55,9 @@ final class AISnapshots {
         snapshot.sections.put(BODY, alive ? BodyState.capture(player) : BodyState.captureDead(player));
         BuildJob job = ai.getBuildJob();
         if (job != null) snapshot.sections.put(BUILD, job.exportState());
+        // 화로에 넣어 둔 것은 서버를 재시작해도 화로에 남아 있으므로, 어느 화로였는지를 기억해 둔다.
+        FurnaceJob furnace = ai.getFurnaceJob();
+        if (furnace != null) snapshot.sections.put(FURNACE, furnace.exportState());
         return snapshot;
     }
 
@@ -71,5 +76,7 @@ final class AISnapshots {
         BodyState.apply(ai.getPlayer(), snapshot.section(BODY), logger);
         Map<String, Object> build = snapshot.section(BUILD);
         if (!build.isEmpty()) ai.setBuildJob(BuildJob.importState(build));
+        Map<String, Object> furnace = snapshot.section(FURNACE);
+        if (!furnace.isEmpty()) ai.setFurnaceJob(FurnaceJob.importState(furnace));
     }
 }

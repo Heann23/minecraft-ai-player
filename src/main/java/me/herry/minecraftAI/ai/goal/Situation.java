@@ -115,6 +115,18 @@ public final class Situation {
     // 직접 놓은 작업대가 바로 근처에 있는지 (다 쓰면 챙겨 간다)
     public boolean ownTableNearby;
 
+    // --- 화로 ---
+    // 재료를 넣어 두고 온 화로가 있는지 (다 구워지면 가서 꺼낸다), 거기까지의 거리
+    public boolean furnaceBusy;
+    public double furnaceDistance;
+    // 넣어 둔 것이 다 구워졌는지, 굽는 것이 음식인지
+    public boolean furnaceDone;
+    public boolean furnaceCooksFood;
+    // 그 화로가 땅속이 아니라 지상에 있는지. 땅속에서 밤을 나는 동안에는 지상의 화로를 가지러 올라가지 않는다.
+    public boolean furnaceOnSurface;
+    // 직접 놓은 빈 화로가 바로 근처에 있는지 (더 구울 것이 없으면 챙겨 간다)
+    public boolean ownFurnaceNearby;
+
     // --- 집 짓기 ---
     // 짓다 만 집이 있는지
     public boolean shelterInProgress;

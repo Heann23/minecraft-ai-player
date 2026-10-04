@@ -50,6 +50,9 @@ public final class GoalReasons {
             case MINE_DIAMOND -> "캘 수 있는 다이아몬드 광석을 발견해서요";
             case SMELT_IRON -> "철 원석이 " + s.rawIron + "개 모여서 주괴로 구울 차례예요";
             case COOK_FOOD -> "날고기 " + s.rawFood + "개를 구워서 더 든든한 음식으로 만들려고요";
+            case TEND_FURNACE -> s.furnaceDone ? "화로에 넣어 둔 것이 다 구워져서 꺼내려고요"
+                    : "화로에 넣어 둔 것이 있어서, 다 구워질 때까지 멀리 가지 않고 곁에서 기다리고 있어요";
+            case PACK_UP_FURNACE -> "더 구울 것이 없어서 화로를 챙겨 가려고요";
             case STOCK_FOOD -> s.preyNearby ? "음식이 " + s.foodCount + "개뿐인데 사냥감이 보여서 미리 모아 두려고요"
                     : "땅속에는 사냥감이 없어서, 내려가기 전에 음식을 챙기려고요 (지금 " + s.foodCount + "개)";
             case BUILD_SHELTER -> s.shelterInProgress ? "짓던 집을 마저 지으려고요 (남은 블록 " + s.buildBlocksNeeded + "개)"
