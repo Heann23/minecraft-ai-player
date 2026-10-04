@@ -249,7 +249,9 @@ public final class NavigationSystem {
 
         boolean running = isRunClear();
         // 점프해서 떠 있는 동안에도 아래로 지나가는 칸을 지나간 것으로 센다. 세지 않으면 지나친 칸으로 되돌아가려고 돌아선다.
-        double above = running || !body.isGrounded() ? RUN_REACH_ABOVE : 1.2;
+        // 물에 떠 있을 때는 해당하지 않는다. 물속의 칸은 잠겨서 지나가야 한다.
+        boolean airborne = !body.isGrounded() && !player.isInWater();
+        double above = running || airborne ? RUN_REACH_ABOVE : 1.2;
         if (horizontalSq < (running ? RUN_REACH_SQ : WAYPOINT_REACH_SQ) && dy > -above && dy < 0.6) {
             index++;
             return;
