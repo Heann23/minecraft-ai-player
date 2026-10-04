@@ -70,8 +70,12 @@ public final class BukkitTerrainView implements TerrainView {
                 return BlockClass.WATER;
             }
             case LAVA, FIRE, SOUL_FIRE, CACTUS, MAGMA_BLOCK, SWEET_BERRY_BUSH, WITHER_ROSE,
-                 POWDER_SNOW, CAMPFIRE, SOUL_CAMPFIRE, COBWEB -> {
+                 POWDER_SNOW, CAMPFIRE, SOUL_CAMPFIRE -> {
                 return BlockClass.DANGER;
+            }
+            // 거미줄을 위험한 칸으로 보면 경로에서 피하기만 해서, 거미줄 한가운데에 들어가 있을 때 나올 길을 찾지 못한다.
+            case COBWEB -> {
+                return BlockClass.WEB;
             }
             default -> {
             }

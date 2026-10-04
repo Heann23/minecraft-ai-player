@@ -26,6 +26,8 @@ public final class AStarSearch {
     // 물은 헤엄쳐 건널 수는 있지만 느리고 위험하므로, 돌아갈 길이 있으면 돌아간다.
     private static final double WATER_COST = 6.0;
     private static final double NEAR_DANGER_COST = 6.0;
+    // 거미줄 한 칸을 지나는 데는 베어 내든 그대로 걸어가든 1초쯤 걸린다 (네 칸을 걷는 시간). 조금 돌아가면 되는 길은 돌아간다.
+    private static final double WEB_COST = 4.0;
     // 부분 경로를 쓰려면 최소한 이만큼은 목표에 가까워져야 한다.
     private static final double MIN_PARTIAL_PROGRESS = 1.0;
 
@@ -207,7 +209,12 @@ public final class AStarSearch {
     }
 
     private static boolean isPassable(BlockClass blockClass) {
-        return blockClass == BlockClass.OPEN || blockClass == BlockClass.WATER;
+        return blockClass == BlockClass.OPEN || blockClass == BlockClass.WATER || blockClass == BlockClass.WEB;
+    }
+
+    // 몸이 들어갈 수 있는 마른 칸인지 (빈칸이거나 거미줄)
+    private static boolean isDry(BlockClass blockClass) {
+        return blockClass == BlockClass.OPEN || blockClass == BlockClass.WEB;
     }
 
     // 설 수 없으면 음수, 설 수 있으면 그 칸에 서는 데 드는 추가 비용.
@@ -217,8 +224,8 @@ public final class AStarSearch {
         BlockClass below = terrain.classify(x, y - 1, z);
 
         double cost;
-        if (feet == BlockClass.OPEN) {
-            if (head != BlockClass.OPEN || below != BlockClass.SOLID) return -1.0;
+        if (isDry(feet)) {
+            if (!isDry(head) || below != BlockClass.SOLID) return -1.0;
             cost = 0.0;
         } else if (feet == BlockClass.WATER) {
             if (!isPassable(head) || below == BlockClass.DANGER) return -1.0;
@@ -228,6 +235,8 @@ public final class AStarSearch {
             return -1.0;
         }
 
+        if (feet == BlockClass.WEB) cost += WEB_COST;
+        if (head == BlockClass.WEB) cost += WEB_COST;
         if (hasDangerAround(terrain, x, y, z)) cost += NEAR_DANGER_COST;
         return cost;
     }

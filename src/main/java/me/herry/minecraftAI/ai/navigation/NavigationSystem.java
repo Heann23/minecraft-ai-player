@@ -1,6 +1,7 @@
 package me.herry.minecraftAI.ai.navigation;
 
 import me.herry.minecraftAI.ai.AIBody;
+import me.herry.minecraftAI.ai.inventory.InventorySystem;
 import me.herry.minecraftAI.ai.perf.TickProfiler;
 import me.herry.minecraftAI.ai.perf.WorkBudget;
 import me.herry.minecraftAI.ai.util.BlockPoint;
@@ -23,6 +24,8 @@ public final class NavigationSystem {
     private static final int MAX_DROP = 3;
     private static final int STUCK_CHECK_INTERVAL = 20;
     private static final double STUCK_MOVE_SQ = 1.0;
+    // 거미줄 안에서는 걷는 속도가 4분의 1이라, 조금이라도 나아가고 있으면 막힌 것으로 보지 않는다.
+    private static final double STUCK_MOVE_IN_WEB_SQ = 0.2 * 0.2;
     // 헤엄쳐 오르거나 떨어지는 것처럼 높이가 이만큼 바뀌었으면 움직인 것이다. 제자리 점프는 착지하면 높이가 같다.
     private static final double STUCK_CLIMB = 1.5;
     private static final double WAYPOINT_REACH_SQ = 0.16;
@@ -43,7 +46,9 @@ public final class NavigationSystem {
     private final Consumer<String> debug;
     private final WorkBudget budget;
     private final TickProfiler profiler;
+    private final InventorySystem inventory;
     private final DoorOpener doors = new DoorOpener();
+    private final WebCutter webs = new WebCutter();
 
     private State state = State.IDLE;
     private String failReason = "";
@@ -63,12 +68,14 @@ public final class NavigationSystem {
     private int stuckTicks;
     private int jumpPulse;
 
-    public NavigationSystem(AIBody body, AIConfig config, Consumer<String> debug, WorkBudget budget, TickProfiler profiler) {
+    public NavigationSystem(AIBody body, AIConfig config, Consumer<String> debug, WorkBudget budget, TickProfiler profiler,
+                            InventorySystem inventory) {
         this.body = body;
         this.config = config;
         this.debug = debug;
         this.budget = budget;
         this.profiler = profiler;
+        this.inventory = inventory;
     }
 
     public void navigateTo(PathGoal goal) {
@@ -83,6 +90,7 @@ public final class NavigationSystem {
 
     public void stop() {
         if (body.isUsable()) doors.finish(body.getPlayer());
+        webs.reset();
         state = State.IDLE;
         search = null;
         path = null;
@@ -191,6 +199,13 @@ public final class NavigationSystem {
 
         BlockPoint waypoint = path.get(index);
         doors.tick(player, waypoint);
+        // 거미줄에 걸려 있거나 다음 칸이 거미줄이면 멈춰 서서 베어 낸다. 베는 동안 서 있는 것은 막힌 것으로 세지 않는다.
+        if (webs.tick(player, body, inventory, waypoint, stuckTicks > 0, debug)) {
+            lastCheck = location;
+            indexAtLastCheck = index;
+            ticksSinceCheck = 0;
+            return;
+        }
         double dx = waypoint.x() + 0.5 - location.getX();
         double dz = waypoint.z() + 0.5 - location.getZ();
         double dy = waypoint.y() - location.getY();
@@ -206,7 +221,7 @@ public final class NavigationSystem {
         }
 
         steer(player, dx, dy, dz, horizontalSq);
-        checkStuck(location);
+        checkStuck(player, location);
     }
 
     private void steer(Player player, double dx, double dy, double dz, double horizontalSq) {
@@ -237,7 +252,7 @@ public final class NavigationSystem {
     }
 
     // 일정 시간마다 위치를 비교해서 제자리에 묶여 있는지 확인하고, 점프와 경로 재계산을 번갈아 시도한다.
-    private void checkStuck(Location location) {
+    private void checkStuck(Player player, Location location) {
         if (++ticksSinceCheck < STUCK_CHECK_INTERVAL) return;
         ticksSinceCheck = 0;
 
@@ -245,7 +260,8 @@ public final class NavigationSystem {
         // 제자리에서 뛰거나 장애물에 밀려 조금 흔들리는 것까지 이동으로 치면, 막혀 있는데도 끝없이 점프만 하게 된다.
         double dx = location.getX() - lastCheck.getX();
         double dz = location.getZ() - lastCheck.getZ();
-        boolean moved = index > indexAtLastCheck || dx * dx + dz * dz >= STUCK_MOVE_SQ
+        double needed = WebCutter.isInWeb(player) ? STUCK_MOVE_IN_WEB_SQ : STUCK_MOVE_SQ;
+        boolean moved = index > indexAtLastCheck || dx * dx + dz * dz >= needed
                 || Math.abs(location.getY() - lastCheck.getY()) >= STUCK_CLIMB;
         lastCheck = location;
         indexAtLastCheck = index;
