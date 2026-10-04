@@ -4,6 +4,7 @@
 # 이런 찌꺼기나 개발 PC 전용 파일이 저장소에 섞여 들어가지 않게 하기 위해서다.
 /*
 !/.gitignore
+!/.github/
 !/README.md
 !/build.gradle.kts
 !/settings.gradle.kts
