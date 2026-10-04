@@ -25,7 +25,7 @@ public record DiscordSettings(boolean enabled, String tokenEnvironment, String g
                         (int) number(values, "backup.daily-retention", 7, 1, 365),
                         number(values, "backup.max-megabytes", 128, 16, 1024) * 1024 * 1024));
     }
-    private static String string(Function<String, Object> values, String key, String fallback) {
+    static String string(Function<String, Object> values, String key, String fallback) {
         Object value = values.apply(key);
         if (value == null) return fallback;
         if (!(value instanceof String text)) throw new IllegalArgumentException(key + " must be a quoted string");
@@ -37,7 +37,7 @@ public record DiscordSettings(boolean enabled, String tokenEnvironment, String g
         if (!(value instanceof Boolean flag)) throw new IllegalArgumentException(key + " must be boolean");
         return flag;
     }
-    private static long number(Function<String, Object> values, String key, long fallback, long min, long max) {
+    static long number(Function<String, Object> values, String key, long fallback, long min, long max) {
         Object value = values.apply(key);
         if (value == null) return fallback;
         if (!(value instanceof Byte || value instanceof Short || value instanceof Integer || value instanceof Long)) throw new IllegalArgumentException(key + " must be integer");

@@ -18,3 +18,13 @@ backup:
   periodic-retention: 24
   daily-retention: 7
   max-megabytes: 128
+
+# 로컬 Ollama 제공자 연결 설정. 모델 설치·봇 접속은 아직 별도 단계다.
+# 설치한 한국어 대화 모델 이름을 지정하며 자동 다운로드하지 않는다.
+providers:
+  llm:
+    endpoint: 'http://127.0.0.1:11434/api/chat'
+    model: ''
+    timeout-seconds: 15
+    context-tokens: 4096
+    output-tokens: 160
