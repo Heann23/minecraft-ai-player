@@ -184,8 +184,13 @@ public final class GatherPlans {
         }
 
         List<Action> dig = feet.y() > level ? TerrainPlans.digStairDown(ai, false, true) : TerrainPlans.digTunnel(ai, true);
-        // 목표 높이 근처인데 물이나 용암 때문에 더 내려갈 수 없으면, 그 높이에서 옆으로 굴을 판다.
-        if (dig.isEmpty() && feet.y() <= level + slack) dig = TerrainPlans.digTunnel(ai, true);
+        // 물이나 용암 때문에 더 내려갈 수 없으면 그 높이에서 옆으로 굴을 판다. 목표 높이 근처면 거기서 광물을 찾는 것이고,
+        // 아직 그보다 높은 땅속이면 막힌 자리를 비켜 가는 것이다 (한 칸 옮긴 뒤 다음 계획에서 다시 내려가 본다).
+        // 높은 땅속에서 옆으로 파지 않으면, 사방이 물이나 용암에 닿은 자리에서 갈 길 없는 탐험만 되풀이하다가 멈춘다.
+        if (dig.isEmpty() && DigRules.shouldTunnelSideways(feet.y(), level, slack, inCave)) {
+            dig = TerrainPlans.digTunnel(ai, true);
+            if (!dig.isEmpty() && feet.y() > level + slack) ai.debug("Cannot dig down from " + feet + ", tunnelling sideways to get around");
+        }
         if (!dig.isEmpty()) return dig;
         // 물 때문에 팔 수 없는 자리라면, 가까운 물의 원천을 막는다.
         List<Action> plug = plugWater(ai);
