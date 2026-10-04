@@ -45,7 +45,11 @@ public final class ConversationTurns implements AutoCloseable {
     public synchronized void join(String userId) {
         ensureOpen();
         if (members.size() >= 64 && !members.contains(userId)) throw new IllegalStateException("participant capacity");
-        members.add(id(userId));
+        if (members.add(id(userId))) {
+            invalidate();
+            // A newcomer did not hear the previous shared transcript.
+            context.clear();
+        }
     }
 
     public synchronized void leave(String userId) {
@@ -129,6 +133,8 @@ public final class ConversationTurns implements AutoCloseable {
     public synchronized void finish(Token token) {
         if (isCurrent(token)) invalidate();
     }
+
+    public synchronized void cancelCurrent() { invalidate(); }
 
     /** May only be registered after the entire permission question was actually heard. */
     public synchronized boolean askCasualPermission(Token token, long validMillis) {

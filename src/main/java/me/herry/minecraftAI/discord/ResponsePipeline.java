@@ -66,6 +66,9 @@ public final class ResponsePipeline implements AutoCloseable {
         if (turns.speechStarted(userId)) cancelPending();
     }
 
+    /** Caller invalidates the current turn first, then stops inference and queued playback. */
+    public synchronized void cancel() { cancelPending(); worker.purge(); }
+
     private void run(Request request) {
         try {
             if (!valid(request)) return;
