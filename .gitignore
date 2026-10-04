@@ -1,0 +1,48 @@
+# 루트에는 아래에 적어 둔 것만 올린다. 플러그인 소스와 빌드 설정뿐이다.
+# 개발 도구의 설정과 지침(CLAUDE.md, AGENTS.md, .claude/, .claude-flow/, .mcp.json), 작업 문서(docs/), 서버 시험 스크립트(scripts/)는 개인 작업 환경이라 올리지 않는다.
+# 셸에서 `>` 나 `<` 를 따옴표 없이 쓰면 `0`, `MAX_JUMP_TICKS)` 같은 0바이트 파일이 루트에 생기는데,
+# 이런 찌꺼기나 개발 PC 전용 파일이 저장소에 섞여 들어가지 않게 하기 위해서다.
+/*
+!/.gitignore
+!/build.gradle.kts
+!/settings.gradle.kts
+!/gradle.properties
+!/gradlew
+!/gradlew.bat
+!/gradle/
+!/src/
+
+# Ruflo 가 실행 중에 만드는 것. 대화 기록과 이 PC 의 경로가 들어 있으므로 공개 저장소에 올리지 않는다.
+.env
+.env.local
+.env.*.local
+.claude-flow/data/
+.claude-flow/logs/
+.claude-flow/sessions/
+.claude-flow/learning/
+.claude-flow/mods/
+.claude-flow/metrics/
+.claude-flow/policy/
+.claude-flow/security/
+.claude-flow/harness-active-policy.json
+.claude-flow/embeddings.json
+.claude-flow/memory-package.json
+.claude/settings.local.json
+.claude/*.bak
+.claude/*.bak-*
+
+# Gradle / IDE (루트 밖에서 생기는 경우까지 막는다)
+.gradle/
+build/
+# 소스의 `ai.build` 패키지(집 짓기)는 이름이 build 일 뿐 빌드 결과물이 아니다. 위 규칙에 걸리지 않게 다시 넣는다.
+!/src/**/build/
+run/
+.idea/
+*.iml
+out/
+
+# 개발 PC 마다 다른 값 (테스트 서버 경로 등)
+local.properties
+
+# 개발 도구(Ruflo)의 훅 설정을 고치는 스크립트. 프로젝트와 무관한 개인 작업 환경용이다.
+scripts/fix-ruflo-hooks.cjs

@@ -1,0 +1,67 @@
+ai:
+  # AI 가 상황을 다시 판단하는 주기 (틱)
+  update-interval: 5
+  # 동시에 생성할 수 있는 AI 수. 이 플러그인은 AI 한 명이 모든 일을 스스로 하도록 만들어져 있다.
+  max-count: 1
+  default-name: AI_Player
+  # AI 주변으로 로드할 청크 반경
+  view-distance: 4
+  # 사망 후 다시 생성될 때까지의 시간 (틱)
+  respawn-delay: 60
+  # AI 의 닉네임 위에 현재 목표를 표시할지
+  show-goal-label: true
+
+perception:
+  block-range: 16
+  block-vertical-range: 8
+  # 주변 엔티티(몬스터, 동물, 아이템)를 인식하는 범위
+  entity-range: 32
+  # 한 틱에 검사할 최대 블록 수. 주변 블록 검색은 여러 틱에 나눠서 진행된다.
+  blocks-per-tick: 800
+  # 같은 자리에서 주변 블록을 다시 검색하기까지의 시간 (틱)
+  rescan-interval: 200
+
+navigation:
+  max-path-distance: 64
+  # 경로 하나를 찾는 데 펼칠 최대 노드 수
+  max-path-nodes: 4000
+  # 한 틱에 펼칠 최대 노드 수 (max-path-nodes 보다 클 수 없다)
+  nodes-per-tick: 400
+  # 이 시간(틱) 동안 제자리면 이동 실패로 처리한다
+  stuck-timeout: 100
+  max-repaths: 3
+
+survival:
+  low-health: 8
+  # low-health 보다 클 수 없다
+  critical-health: 4
+  # 허기가 이 값보다 낮으면 음식을 먹는다
+  eat-below: 14
+
+combat:
+  # 이 거리 안에 들어온 몬스터를 상대로 싸울지 도망갈지 판단한다. perception.entity-range 보다 클 수 없다.
+  engage-range: 16
+  # 도망칠 때 벌리는 거리. engage-range 보다 4 이상 커야 도망친 뒤 다시 끌려 들어가지 않는다.
+  # 관계가 맞지 않으면 서버를 켤 때 자동으로 고치고 콘솔에 경고를 남긴다.
+  flee-distance: 24
+
+performance:
+  # 서버 틱 하나에서 AI 가 "미뤄도 되는 일"(주변 블록 검색, 경로 탐색)에 쓸 수 있는 시간 (밀리초).
+  # 이 시간을 넘기면 남은 일은 다음 틱으로 넘긴다. 0 이면 시간 제한 없이 개수 제한만 적용한다.
+  # 실제로 걸리는 시간은 /ai perf 로 확인할 수 있다.
+  tick-budget-ms: 5.0
+
+persistence:
+  # 서버를 재시작해도 AI 와 그 기억(거점, 상자, 포탈, 진행 상황, 인벤토리)을 되살릴지
+  enabled: true
+  # 서버가 갑자기 꺼져도 잃는 것이 적도록 주기적으로 저장하는 간격 (틱)
+  autosave-interval: 6000
+
+chat:
+  # AI 가 채팅으로 말을 할지 (목표 알림, 사람의 질문에 대한 대답 등)
+  enabled: true
+  # 급하지 않은 말을 다시 하기까지의 최소 간격 (틱)
+  min-interval: 100
+
+debug:
+  enabled: false
