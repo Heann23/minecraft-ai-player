@@ -90,4 +90,30 @@ class ResponsePipelineTest {
         try { assertTrue(pipeline.respond(request(turns, token))); await(entered); assertDoesNotThrow(pipeline::close); await(ended); assertEquals(2, stopFailures.get()); }
         finally { pipeline.close(); }
     }
+    @Test void eachSentenceIsSynthesizedAfterPreviousPlaybackAndFailedLaterSentenceIsNotRemembered() throws Exception {
+        var turns = turns(); Token token = call(turns, "1"); var player = new Player(); var diagnosed = new CountDownLatch(1);
+        var synthesized = new java.util.ArrayList<String>(); var captured = new java.util.concurrent.atomic.AtomicReference<List<Line>>();
+        try (var pipeline = new ResponsePipeline(turns, request -> "첫 문장. 둘째 문장.", text -> {
+            synthesized.add(text); if (synthesized.size() == 2) throw new Exception("TTS private details"); return new byte[3840];
+        }, player, code -> { assertEquals("response-provider-failed", code); captured.set(turns.context()); diagnosed.countDown(); })) {
+            assertTrue(pipeline.respond(request(turns, token))); await(diagnosed);
+            assertEquals(List.of("첫 문장. ", "둘째 문장."), synthesized); assertEquals(1, player.plays.get());
+            assertTrue(captured.get().stream().anyMatch(line -> line.assistant() && line.text().equals("첫 문장. ")));
+            assertFalse(captured.get().stream().anyMatch(line -> line.text().contains("둘째")));
+        }
+    }
+    @Test void duplicateResponseRequestDoesNotStartAnotherInference() throws Exception {
+        var turns = turns(); Token token = call(turns, "1"); var player = new Player(); var entered = new CountDownLatch(1); var release = new CountDownLatch(1);
+        try (var pipeline = new ResponsePipeline(turns, request -> { entered.countDown(); release.await(); return "답변"; }, text -> new byte[3840], player, code -> fail(code))) {
+            assertTrue(pipeline.respond(request(turns, token))); await(entered); assertFalse(pipeline.respond(request(turns, token))); release.countDown(); await(player.done);
+        } finally { release.countDown(); }
+    }
+    @Test void leadingWhitespaceDoesNotAttemptEmptySpeechSynthesis() throws Exception {
+        var turns = turns(); Token token = call(turns, "1"); var player = new Player(); var synthesized = new java.util.ArrayList<String>();
+        try (var pipeline = new ResponsePipeline(turns, request -> "\n안녕하세요.", text -> {
+            assertFalse(text.isBlank()); synthesized.add(text); return new byte[3840];
+        }, player, code -> fail(code))) {
+            pipeline.respond(request(turns, token)); await(player.done); assertEquals(List.of("안녕하세요."), synthesized);
+        }
+    }
 }

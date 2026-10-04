@@ -41,6 +41,7 @@ public final class ResponsePipeline implements AutoCloseable {
     private final Consumer<String> diagnostic;
     private final ThreadPoolExecutor worker;
     private Future<?> pending;
+    private ConversationTurns.Token admitted;
     private boolean closed;
 
     public ResponsePipeline(ConversationTurns turns, Model model, Voice voice, Playback playback, Consumer<String> diagnostic) {
@@ -53,10 +54,10 @@ public final class ResponsePipeline implements AutoCloseable {
     }
 
     public synchronized boolean respond(Request request) {
-        if (closed || !turns.isCurrent(request.turn)) return false;
+        if (closed || !turns.isCurrent(request.turn) || request.turn.equals(admitted)) return false;
         cancelPending();
         worker.purge();
-        try { pending = worker.submit(() -> run(request)); return true; }
+        try { pending = worker.submit(() -> run(request)); admitted = request.turn; return true; }
         catch (java.util.concurrent.RejectedExecutionException e) { diagnostic.accept("response-capacity"); return false; }
     }
 
@@ -70,11 +71,23 @@ public final class ResponsePipeline implements AutoCloseable {
             if (!valid(request)) return;
             String response = request.permissionQuestion ? "말 편하게 해도 될까요?" : model.respond(request);
             if (!valid(request) || !turns.generated(request.turn, response)) return;
-            byte[] pcm = voice.synthesize(response);
-            if (pcm == null || pcm.length == 0 || pcm.length > 48_000 * 4 * 60 || pcm.length % 4 != 0)
-                throw new IllegalArgumentException("voice PCM bounds");
-            if (!valid(request)) return;
-            playback.play(request.turn, response, pcm, () -> valid(request), heard -> turns.played(request.turn, heard));
+            int completedCharacters = 0;
+            for (String sentence : SentenceChunks.split(response)) {
+                if (!valid(request)) return;
+                if (sentence.isBlank()) { completedCharacters += sentence.length(); continue; }
+                byte[] pcm = voice.synthesize(sentence);
+                if (pcm == null || pcm.length == 0 || pcm.length > 48_000 * 4 * 60 || pcm.length % 4 != 0)
+                    throw new IllegalArgumentException("voice PCM bounds");
+                if (!valid(request)) return;
+                int prefix = completedCharacters;
+                java.util.concurrent.atomic.AtomicInteger heard = new java.util.concurrent.atomic.AtomicInteger();
+                playback.play(request.turn, sentence, pcm, () -> valid(request), characters -> {
+                    if (characters >= heard.get() && characters <= sentence.length() && turns.played(request.turn, prefix + characters)) heard.set(characters);
+                });
+                if (!valid(request)) return;
+                if (heard.get() != sentence.length()) { turns.finish(request.turn); return; }
+                completedCharacters += sentence.length();
+            }
             if (valid(request)) {
                 if (request.permissionQuestion) turns.askCasualPermission(request.turn, 30_000);
                 turns.finish(request.turn);
