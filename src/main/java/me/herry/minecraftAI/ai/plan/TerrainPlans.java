@@ -228,7 +228,7 @@ public final class TerrainPlans {
             ai.setDigDirection(toward);
         }
         // 곧장 가는 쪽을 팔 수 없으면(지나온 계단의 바로 밑 등) 옆으로 한 단 비켜서 판다. 다음 계획에서 옆에서 다가간다.
-        List<BlockFace> directions = toward == null ? directionOrder(ai) : List.of(toward, leftOf(toward), leftOf(toward).getOppositeFace());
+        List<BlockFace> directions = toward == null ? directionOrder(ai) : DigRules.sidesToward(toward, dx, dz);
         int dy = target.y() - feet.y();
         int horizontal = Math.max(Math.abs(dx), Math.abs(dz));
 
@@ -431,10 +431,6 @@ public final class TerrainPlans {
         }
         order.add(opposite);
         return order;
-    }
-
-    private static BlockFace leftOf(BlockFace face) {
-        return face.getModX() != 0 ? BlockFace.NORTH : BlockFace.WEST;
     }
 
     private static BlockFace facingOf(float yaw) {
