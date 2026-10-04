@@ -46,6 +46,19 @@ public final class DigRules {
     }
 
     /**
+     * 집 안이나 집 바로 옆에 서 있는지. 여기서 바로 파 내려가면 집의 바닥과 벽 밑을 허물게 되므로, 파기 전에 문밖으로 나간다.
+     * 집보다 한참 아래에 있으면 해당하지 않는다. 깊은 굴이 집 밑을 지나갈 뿐이고, 거기서는 지상의 문밖으로 걸어갈 길도 없다.
+     *
+     * @param dx        집 가운데에서 발까지의 x 거리 (발 - 집)
+     * @param dy        집 바닥 높이에서 발까지의 높이 차 (음수면 집보다 아래)
+     * @param dz        집 가운데에서 발까지의 z 거리
+     * @param clearance 집에서 이만큼 떨어져야 파도 되는 거리
+     */
+    public static boolean isAtBuilding(int dx, int dy, int dz, int clearance) {
+        return Math.max(Math.abs(dx), Math.abs(dz)) <= clearance && dy >= -clearance;
+    }
+
+    /**
      * 걸어서는 어디로도 갈 수 없을 때, 길을 파서 빠져나와야 하는지.
      *
      * @param miningDeep   깊은 땅속에서 광물을 캐는 중인지. 좁은 굴 안에 있는 것이 정상이다.
