@@ -28,3 +28,11 @@ providers:
     timeout-seconds: 15
     context-tokens: 4096
     output-tokens: 160
+  stt:
+    endpoint: 'http://127.0.0.1:8080/inference'
+    timeout-seconds: 15
+  tts:
+    endpoint: 'http://127.0.0.1:5000/synthesize'
+    # 설치한 한국어 Piper 음성 이름. 비워 두면 로컬 서버가 선택한 음성 사용.
+    voice: ''
+    timeout-seconds: 10

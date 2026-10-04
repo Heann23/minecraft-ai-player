@@ -2,14 +2,7 @@ package me.herry.minecraftAI.discord;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
-import com.google.gson.Strictness;
-import com.google.gson.stream.JsonReader;
-import com.google.gson.stream.JsonToken;
 import java.io.IOException;
-import java.io.StringReader;
-import java.nio.ByteBuffer;
-import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.util.function.LongSupplier;
 
@@ -42,13 +35,7 @@ public final class OllamaDialogue implements ResponsePipeline.Model, AutoCloseab
         var response = http.post(settings.endpoint(), "application/json; charset=utf-8", encoded, settings.timeout(), 65_536);
         if (!response.mediaType().equals("application/json")) throw invalid();
         try {
-            String text = StandardCharsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT)
-                    .onUnmappableCharacter(CodingErrorAction.REPORT).decode(ByteBuffer.wrap(response.body())).toString();
-            try (JsonReader reader = new JsonReader(new StringReader(text))) {
-                reader.setStrictness(Strictness.STRICT); reader.setNestingLimit(32);
-                var root = JsonParser.parseReader(reader);
-                if (reader.peek() != JsonToken.END_DOCUMENT || !root.isJsonObject()) throw invalid();
-                var object = root.getAsJsonObject(); var done = object.get("done"); var message = object.get("message");
+                var object = ProviderJson.read(response.body()); var done = object.get("done"); var message = object.get("message");
                 if (done == null || !done.isJsonPrimitive() || !done.getAsJsonPrimitive().isBoolean() || !done.getAsBoolean()
                         || message == null || !message.isJsonObject()) throw invalid();
                 var reply = message.getAsJsonObject();
@@ -57,7 +44,6 @@ public final class OllamaDialogue implements ResponsePipeline.Model, AutoCloseab
                 String content = string(reply, "content").strip();
                 if (content.isEmpty() || content.length() > 4000 || content.contains("<think>") || content.contains("</think>")) throw invalid();
                 return content;
-            }
         } catch (IOException | RuntimeException error) { throw invalid(); }
     }
     private JsonObject payload(ResponsePipeline.Request request) {
@@ -87,9 +73,7 @@ public final class OllamaDialogue implements ResponsePipeline.Model, AutoCloseab
     }
     private static JsonObject message(String role, String content) { var message = new JsonObject(); message.addProperty("role", role); message.addProperty("content", content); return message; }
     private static String string(JsonObject object, String key) throws IOException {
-        var value = object.get(key);
-        if (value == null || !value.isJsonPrimitive() || !value.getAsJsonPrimitive().isString()) throw invalid();
-        return value.getAsString();
+        return ProviderJson.string(object, key);
     }
     private static IOException invalid() { return new IOException("local dialogue response schema or bounds"); }
     @Override public void close() { http.close(); }
