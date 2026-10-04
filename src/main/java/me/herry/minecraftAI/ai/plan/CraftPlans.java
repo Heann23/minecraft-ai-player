@@ -31,7 +31,7 @@ import java.util.List;
  */
 public final class CraftPlans {
     // 작업대에 손이 닿는 거리
-    private static final double TABLE_REACH = 3.5;
+    static final double TABLE_REACH = 3.5;
     // 손이 닿지 않는 작업대나 화로에는 바로 옆 칸까지 다가간다.
     private static final double STATION_CLOSE = 2.0;
     // 화로에 한 번에 넣는 최대 개수 (재료 칸 한 묶음). 넣어 두고 다른 일을 하므로 가진 것을 한꺼번에 넣는다.
