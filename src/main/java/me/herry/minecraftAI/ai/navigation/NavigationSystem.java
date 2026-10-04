@@ -85,6 +85,8 @@ public final class NavigationSystem {
     private int indexAtLastCheck;
     private int ticksSinceCheck;
     private int stuckTicks;
+    // 지난번에 막혔는지 확인한 뒤로 거미줄 안에 있었던 적이 있는지
+    private boolean webbedSinceCheck;
     private int jumpPulse;
 
     public NavigationSystem(AIBody body, AIConfig config, Consumer<String> debug, WorkBudget budget, TickProfiler profiler,
@@ -258,7 +260,8 @@ public final class NavigationSystem {
         }
 
         steer(player, dx, dy, dz, horizontalSq);
-        checkStuck(player, location);
+        if (WebCutter.isInWeb(player)) webbedSinceCheck = true;
+        checkStuck(location);
     }
 
     private void steer(Player player, double dx, double dy, double dz, double horizontalSq) {
@@ -308,7 +311,7 @@ public final class NavigationSystem {
     }
 
     // 일정 시간마다 위치를 비교해서 제자리에 묶여 있는지 확인하고, 점프와 경로 재계산을 번갈아 시도한다.
-    private void checkStuck(Player player, Location location) {
+    private void checkStuck(Location location) {
         if (++ticksSinceCheck < STUCK_CHECK_INTERVAL) return;
         ticksSinceCheck = 0;
 
@@ -316,7 +319,9 @@ public final class NavigationSystem {
         // 제자리에서 뛰거나 장애물에 밀려 조금 흔들리는 것까지 이동으로 치면, 막혀 있는데도 끝없이 점프만 하게 된다.
         double dx = location.getX() - lastCheck.getX();
         double dz = location.getZ() - lastCheck.getZ();
-        double needed = WebCutter.isInWeb(player) ? STUCK_MOVE_IN_WEB_SQ : STUCK_MOVE_SQ;
+        // 거미줄에서 막 빠져나온 직후에도, 그 구간에서 느리게 움직인 것을 막힌 것으로 세지 않는다.
+        double needed = webbedSinceCheck ? STUCK_MOVE_IN_WEB_SQ : STUCK_MOVE_SQ;
+        webbedSinceCheck = false;
         boolean moved = index > indexAtLastCheck || dx * dx + dz * dz >= needed
                 || Math.abs(location.getY() - lastCheck.getY()) >= STUCK_CLIMB;
         lastCheck = location;
