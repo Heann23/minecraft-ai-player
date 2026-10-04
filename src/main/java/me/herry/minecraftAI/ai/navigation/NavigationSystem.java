@@ -29,11 +29,20 @@ public final class NavigationSystem {
     // 헤엄쳐 오르거나 떨어지는 것처럼 높이가 이만큼 바뀌었으면 움직인 것이다. 제자리 점프는 착지하면 높이가 같다.
     private static final double STUCK_CLIMB = 1.5;
     private static final double WAYPOINT_REACH_SQ = 0.16;
+    // 곧은 평지를 달릴 때는 칸의 한가운데를 밟지 않아도 지나간 것으로 본다. 점프 중에는 칸 위를 날아서 지나간다.
+    private static final double RUN_REACH_SQ = 0.7 * 0.7;
+    private static final double RUN_REACH_ABOVE = 1.6;
     private static final double OFF_PATH_SQ = 9.0;
     // 부분 경로를 이어 붙일 수 있는 최대 횟수. 목표에 가까워지지 못하면 그 전에 포기한다.
     private static final int MAX_SEGMENTS = 12;
     private static final double MIN_SEGMENT_PROGRESS = 2.0;
     private static final int JUMP_PULSE_TICKS = 6;
+    // 허기가 이 값 이하이면 달릴 수 없다.
+    private static final int MIN_SPRINT_FOOD = 6;
+    // 달리면서 점프하면 더 빨리 가지만 허기가 훨씬 빨리 준다. 배가 넉넉할 때만 하고, 싸울 상대를 쫓을 때는 달릴 수 있는 한 한다.
+    private static final int SPRINT_JUMP_MIN_FOOD = 18;
+    // 몸이 가는 방향으로 거의 돌아섰을 때만 뛴다. 비스듬히 뛰면 경로에서 벗어난 칸에 내린다.
+    private static final float SPRINT_JUMP_YAW = 10.0F;
     private static final int TRAPPED_NODE_LIMIT = 150;
     // 걸어서 갈 수 있는 범위가 너무 좁아서 어디로도 갈 수 없을 때의 실패 원인
     public static final String FAIL_TRAPPED = "trapped";
@@ -54,10 +63,20 @@ public final class NavigationSystem {
     private String failReason = "";
     private PathGoal goal;
     private World world;
+    private BukkitTerrainView terrain;
     private AStarSearch search;
     private Path path;
     private int index;
     private boolean sprintAllowed = true;
+    // 목적지 바로 앞까지 달릴지. 움직이는 상대를 쫓을 때 쓴다. 평소에는 목적지 네 칸 앞에서 걷기 시작해서 지나치지 않게 한다.
+    private boolean sprintToEnd;
+    // 배가 넉넉하지 않아도 달리며 점프할지. 싸울 상대를 쫓을 때만 쓴다.
+    private boolean jumpWhenHungry;
+    // 지금 향하는 칸부터가 뛰어도 되는 곧은 평지인지 (칸이 바뀔 때만 다시 확인한다)
+    private int runCheckedIndex = -1;
+    private boolean runClear;
+    // 이번 이동에서 점프를 섞어 달리기 시작했다고 이미 적었는지 (디버그 로그는 이동마다 한 번만 남긴다)
+    private boolean runAnnounced;
 
     private int repaths;
     private int segments;
@@ -80,6 +99,9 @@ public final class NavigationSystem {
 
     public void navigateTo(PathGoal goal) {
         this.goal = goal;
+        this.sprintToEnd = false;
+        this.jumpWhenHungry = false;
+        this.runAnnounced = false;
         this.repaths = 0;
         this.segments = 0;
         this.stuckTicks = 0;
@@ -97,6 +119,7 @@ public final class NavigationSystem {
         goal = null;
         // 멈춰 있는 동안 언로드된 월드를 붙잡고 있지 않게 한다.
         world = null;
+        terrain = null;
         body.inputMove(0.0F, 0.0F);
         body.inputJump(false);
         body.inputSprint(false);
@@ -135,10 +158,21 @@ public final class NavigationSystem {
         this.sprintAllowed = sprintAllowed;
     }
 
+    /**
+     * 움직이는 상대를 쫓는 이동으로 표시한다. 목적지 바로 앞까지 달린다. navigateTo 를 부를 때마다 꺼지므로 그 뒤에 부른다.
+     *
+     * @param urgent 싸울 상대를 쫓는 것처럼 급한지. 급하면 배가 넉넉하지 않아도 점프를 섞어 달린다.
+     */
+    public void setChasing(boolean urgent) {
+        this.sprintToEnd = true;
+        this.jumpWhenHungry = urgent;
+    }
+
     private void startSearch() {
         Player player = body.getPlayer();
         world = player.getWorld();
-        BukkitTerrainView terrain = new BukkitTerrainView(world);
+        terrain = new BukkitTerrainView(world);
+        runCheckedIndex = -1;
         // 시작점은 설 수 있는 칸인지와 상관없이 실제로 서 있는 칸이어야 한다.
         // 다른 칸에서 시작하면 실제로는 닿지 않았는데 도착한 것으로 판정될 수 있다.
         BlockPoint start = Positions.feet(player.getLocation());
@@ -211,7 +245,10 @@ public final class NavigationSystem {
         double dy = waypoint.y() - location.getY();
         double horizontalSq = dx * dx + dz * dz;
 
-        if (horizontalSq < WAYPOINT_REACH_SQ && dy > -1.2 && dy < 0.6) {
+        boolean running = isRunClear();
+        // 점프해서 떠 있는 동안에도 아래로 지나가는 칸을 지나간 것으로 센다. 세지 않으면 지나친 칸으로 되돌아가려고 돌아선다.
+        double above = running || !body.isGrounded() ? RUN_REACH_ABOVE : 1.2;
+        if (horizontalSq < (running ? RUN_REACH_SQ : WAYPOINT_REACH_SQ) && dy > -above && dy < 0.6) {
             index++;
             return;
         }
@@ -245,10 +282,29 @@ public final class NavigationSystem {
             jumpPulse--;
             jump = true;
         }
-        body.inputJump(jump);
 
-        boolean sprint = sprintAllowed && !inWater && yawDiff < 30.0F && path.size() - index > 4 && player.getFoodLevel() > 6;
+        int food = player.getFoodLevel();
+        boolean sprint = sprintAllowed && !inWater && yawDiff < 30.0F && (path.size() - index > 4 || sprintToEnd) && food > MIN_SPRINT_FOOD;
         body.inputSprint(sprint);
+        // 곧은 평지를 달릴 때는 점프를 섞어서 더 빨리 간다.
+        boolean fed = food >= SPRINT_JUMP_MIN_FOOD || jumpWhenHungry;
+        if (sprint && fed && body.isGrounded() && yawDiff < SPRINT_JUMP_YAW && isRunClear()) {
+            jump = true;
+            if (!runAnnounced) {
+                runAnnounced = true;
+                debug.accept("Running with jumps");
+            }
+        }
+        body.inputJump(jump);
+    }
+
+    // 지금 향하는 칸부터 몇 칸이, 달리며 점프해도 되는 곧은 평지인지.
+    private boolean isRunClear() {
+        if (runCheckedIndex != index) {
+            runCheckedIndex = index;
+            runClear = terrain != null && RunAhead.isClear(terrain, path, index);
+        }
+        return runClear;
     }
 
     // 일정 시간마다 위치를 비교해서 제자리에 묶여 있는지 확인하고, 점프와 경로 재계산을 번갈아 시도한다.
