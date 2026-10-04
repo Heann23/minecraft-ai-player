@@ -384,7 +384,7 @@ public final class TerrainPlans {
     }
 
     /**
-     * 파면 안 되는 블록이 섞여 있는지: 지나온 굴의 발판, 굴의 끝에서 여기까지 걸어온 길의 바닥, 집의 일부.
+     * 파면 안 되는 블록이 섞여 있는지: 지나온 굴의 발판, 굴의 끝에서 여기까지 걸어온 길의 바닥, 집의 일부, 굽는 중인 화로.
      * 굴 끝에서 몇 칸 걸어온 자리에서 다시 파면 그 사이의 칸은 아직 굴로 기록되지 않았지만, 그 바닥을 파내면 굴과의 사이가 끊긴다.
      * (걸어 다닌 칸을 모두 보호하면 지상에서는 어느 쪽으로도 계단을 낼 수 없게 되므로, 굴과 이어지는 길만 본다.)
      * 집의 블록은 캐는 행동이 어차피 거부하므로, 여기서 걸러서 다른 방향을 시도하게 한다.
@@ -398,6 +398,8 @@ public final class TerrainPlans {
             if (terrain.classify(block.x(), block.y(), block.z()) != BlockClass.SOLID) continue;
             if (DigRules.cutsShaft(block, link::contains)) return true;
             if (home != null && home.isInsideBuilding(world.getUID(), block)) return true;
+            // 넣어 둔 것이 있는 화로를 굴 길에서 파내면 굽던 것이 쏟아진다. 그 칸은 비켜서 판다.
+            if (FurnacePlans.holdsJob(ai, world.getUID(), block)) return true;
         }
         return false;
     }

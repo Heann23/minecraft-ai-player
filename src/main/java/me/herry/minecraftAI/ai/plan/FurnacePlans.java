@@ -6,6 +6,7 @@ import me.herry.minecraftAI.ai.action.BreakBlockAction;
 import me.herry.minecraftAI.ai.action.CollectFurnaceAction;
 import me.herry.minecraftAI.ai.action.CraftItemAction;
 import me.herry.minecraftAI.ai.action.Furnaces;
+import me.herry.minecraftAI.ai.action.NearbyBlocks;
 import me.herry.minecraftAI.ai.action.PickupItemAction;
 import me.herry.minecraftAI.ai.action.WaitAction;
 import me.herry.minecraftAI.ai.crafting.FuelMath;
@@ -25,6 +26,7 @@ import org.jetbrains.annotations.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 /**
  * 화로에 넣어 둔 것을 챙기고, 쓰고 난 화로를 다시 가져가는 행동 계획.
@@ -56,7 +58,7 @@ public final class FurnacePlans {
 
     /**
      * 지금 챙길 수 있는, 넣어 둔 것이 있는 화로. 없으면 null.
-     * 화로가 없어졌으면 기록을 지우고, 너무 멀거나 갈 길이 없었던 화로는 기록만 남겨 두고 지금은 없는 것으로 친다.
+     * 화로가 없어졌으면 기록을 지우고, 너무 먼 화로는 기록만 남겨 두고 지금은 없는 것으로 친다.
      */
     static @Nullable FurnaceJob activeJob(AIPlayer ai) {
         FurnaceJob job = ai.getFurnaceJob();
@@ -69,7 +71,13 @@ public final class FurnacePlans {
             ai.setFurnaceJob(null);
             return null;
         }
-        return ai.getMemory().contains(MemoryType.UNREACHABLE, ai.getWorldId(), job.pos(), ai.getTicks()) ? null : job;
+        return job;
+    }
+
+    // 그 칸이 넣어 둔 것이 있는 화로인지. 굴을 파거나 다른 블록을 캘 때 이 화로를 부수지 않게 한다.
+    public static boolean holdsJob(AIPlayer ai, UUID world, BlockPoint block) {
+        FurnaceJob job = ai.getFurnaceJob();
+        return job != null && job.isAt(world, block);
     }
 
     // 넣어 둔 것이 다 구워졌는지. 화로가 멈춰서 더 기다려도 소용없을 때도 꺼내러 간다.
@@ -83,10 +91,23 @@ public final class FurnacePlans {
 
     /**
      * 넣어 둔 화로로 가서, 다 구워졌으면 꺼내고 아직이면 곁에서 기다린다.
+     * 걸어갈 길이 없었던 화로에는 굴을 파거나 다리를 놓아서 다가간다. 동굴에서 턱을 뛰어내린 뒤에는 걸어서 되돌아갈 수 없다.
+     * 그것도 할 수 없으면 넣어 둔 것을 포기한다. 포기하지 않으면 닿지 못하는 화로 때문에 다른 화로에도 넣지 못한다.
      */
     static List<Action> tendFurnace(AIPlayer ai) {
         FurnaceJob job = activeJob(ai);
         if (job == null) return List.of();
+        boolean noWalkingPath = ai.getMemory().contains(MemoryType.UNREACHABLE, ai.getWorldId(), job.pos(), ai.getTicks());
+        if (noWalkingPath && !NearbyBlocks.canTouch(ai.getPlayer(), job.pos(), CraftPlans.TABLE_REACH)) {
+            List<Action> step = TerrainPlans.stepToward(ai, job.pos(), false);
+            if (!step.isEmpty()) {
+                ai.debug("Making a way back to the furnace at " + job.pos());
+                return step;
+            }
+            ai.debug("No way back to the furnace at " + job.pos() + ", giving up what was put in it");
+            ai.setFurnaceJob(null);
+            return List.of();
+        }
         List<Action> actions = new ArrayList<>();
         CraftPlans.approach(ai, actions, job.pos(), true);
         actions.add(isDone(ai, job) ? new CollectFurnaceAction(job.pos()) : new WaitAction(WAIT_TICKS));
