@@ -37,6 +37,7 @@ import org.bukkit.attribute.Attribute;
 import org.bukkit.attribute.AttributeInstance;
 import org.bukkit.entity.Item;
 import org.bukkit.entity.LivingEntity;
+import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -110,6 +111,7 @@ final class SituationBuilder {
         if (hungry && !situation.foodOnTheWay) ai.getTeam().requestFood(ai);
         situation.preyNearby = SurvivalPlans.nearestPrey(ai) != null;
         situation.underground = TerrainPlans.needsToClimb(ai);
+        situation.surfaceTooLate = SurvivalPlans.tooLateToSurface(ai);
         situation.foodSearchExhausted = ai.getFoodSearch().isExhausted(ai.getTicks());
         TreeJob tree = ai.getTreeJob();
         // 발판을 한 칸 캐고 떨어지는 중에도 아직 발판 위에 있는 것으로 본다.
@@ -167,14 +169,16 @@ final class SituationBuilder {
         // 왼손에 방패를 들고 있으면 크리퍼의 폭발을 막을 수 있다. 방패가 없어도 쓸 만한 무기가 있으면 치고 물러나기를 되풀이한다.
         boolean canFaceBlast = ai.getPlayer().getInventory().getItemInOffHand().getType() == Material.SHIELD
                 || CombatSystem.canHitAndRun(rawWeaponPower, combatMemory.retreatBlockedWithin(now, RETREAT_BLOCKED_WINDOW));
-        CombatSystem.Decision decision = ai.getCombat().decide(situation.health, situation.maxHealth, weaponPower, hostiles, canFaceBlast);
+        // 이미 상대하던 중이면 교전 범위를 조금 넓게 본다. 경계에 걸친 몬스터 때문에 판단이 매번 뒤바뀌지 않게 한다.
+        boolean engagedBefore = combatMemory.wasEngaged();
+        CombatSystem.Decision decision = ai.getCombat().decide(situation.health, situation.maxHealth, weaponPower, hostiles, canFaceBlast, engagedBefore);
         // 도망치던 중에 체력이 조금 회복됐다고 바로 다시 덤비면, 다가갔다가 맞고 물러나기를 반복하게 된다.
         // 한번 도망쳤으면 얼마 동안은 물러나 있고, 그 뒤에도 확실히 이길 수 있을 때만 다시 싸운다.
         if (decision == CombatSystem.Decision.FIGHT) {
             if (combatMemory.isCommittedToFlee(now)) {
                 decision = CombatSystem.Decision.FLEE;
             } else if (combatMemory.fledWithin(now, REENGAGE_WINDOW)) {
-                decision = ai.getCombat().decide(situation.health, situation.maxHealth, weaponPower / REENGAGE_MARGIN, hostiles, canFaceBlast);
+                decision = ai.getCombat().decide(situation.health, situation.maxHealth, weaponPower / REENGAGE_MARGIN, hostiles, canFaceBlast, engagedBefore);
             }
         }
         if (shotFromOutOfReach) decision = CombatSystem.Decision.FLEE;
@@ -244,9 +248,20 @@ final class SituationBuilder {
         // 중기 목표(다음에 이룰 것)와 장기 목표(지금 속한 단계)를 정한다.
         BuildPlans.checkCompletion(ai);
         ProgressFacts facts = Progression.facts(ai);
-        Milestone milestone = Progression.next(facts);
         situation.stage = Progression.stageOf(facts);
+        fillMilestone(ai, inventory, situation, Progression.next(facts));
+        // 땅속에서 밤을 나는 동안에는, 지상에 올라가야 하는 선택 항목(나무가 드는 방패, 집 짓기)을 건너뛰고 그다음 것을 준비한다.
+        // 아침이 되거나 지상에 올라오면 건너뛴 항목으로 돌아간다.
+        while (GoalSystem.leavesForMorning(situation)) {
+            facts.defer(situation.nextMilestone);
+            fillMilestone(ai, inventory, situation, Progression.next(facts));
+        }
+    }
+
+    // 다음에 이룰 것과, 그것에 지금 부족한 재료를 채운다.
+    private static void fillMilestone(AIPlayer ai, InventorySystem inventory, Situation situation, @Nullable Milestone milestone) {
         situation.nextMilestone = milestone;
+        situation.need = Situation.Need.NONE;
         if (milestone == null) return;
         situation.ironNeeded = milestone.ironCost();
         situation.diamondsNeeded = milestone.diamondCost();

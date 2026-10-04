@@ -35,6 +35,16 @@ public final class TargetRules {
         return best;
     }
 
+    /**
+     * 싸우는 도중에 다른 몬스터에게 맞았을 때 그쪽으로 상대를 바꿀지.
+     * 지금 상대에게 이미 손이 닿으면 하던 싸움을 끝내고, 아직 쫓거나 기다리는 중이면 더 가까이에서 때린 쪽부터 상대한다.
+     *
+     * @param reach 손이 닿는 거리
+     */
+    public static boolean shouldSwitch(double targetDistance, double attackerDistance, double reach) {
+        return targetDistance > reach && attackerDistance < targetDistance;
+    }
+
     // 다가갈 길이 없고 손도 닿지 않는 상대인지. 저쪽에서도 이쪽으로 오지 못하므로, 활을 쏘지 않는 한 위협이 아니다.
     public static boolean isOutOfReach(boolean unreachable, double distance) {
         return unreachable && distance > MELEE_RANGE;

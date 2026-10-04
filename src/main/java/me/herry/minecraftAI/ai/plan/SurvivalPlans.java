@@ -5,6 +5,7 @@ import me.herry.minecraftAI.ai.action.Action;
 import me.herry.minecraftAI.ai.action.AttackEntityAction;
 import me.herry.minecraftAI.ai.action.BreakBlockAction;
 import me.herry.minecraftAI.ai.util.BlockPoint;
+import org.bukkit.World;
 import org.bukkit.entity.Player;
 import me.herry.minecraftAI.ai.action.EatFoodAction;
 import me.herry.minecraftAI.ai.action.EscapeHazardAction;
@@ -162,6 +163,12 @@ public final class SurvivalPlans {
     }
 
     // 가장 가까운, 눈에 보이는 사냥감. 벽이나 땅 너머에 있는 동물은 보이지 않으므로 고르지 않는다.
+    // 지금 땅속에서 올라가면 지상에서 밤을 맞게 되는지. 밤낮이 없는 차원에서는 해당 없다.
+    public static boolean tooLateToSurface(AIPlayer ai) {
+        return ai.getPlayer().getWorld().getEnvironment() == World.Environment.NORMAL
+                && ai.getSurvival().tooLateForSurface(ai.getPerception().getTime());
+    }
+
     public static @Nullable LivingEntity nearestPrey(AIPlayer ai) {
         for (LivingEntity animal : ai.getPerception().getAnimals()) {
             if (isUsable(ai, animal) && isPrey(animal) && PerceptionSystem.canSee(ai.getPlayer(), animal)) return animal;

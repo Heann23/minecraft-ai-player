@@ -5,6 +5,8 @@ import me.herry.minecraftAI.ai.survival.SurvivalSystem;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * 먹을 것, 위험, 전투처럼 살아남는 일과 관련된 목표 선택. (GoalSystemTest 에서 나눠 온 것이다.)
@@ -174,5 +176,116 @@ class SurvivalGoalsTest {
         situation.underground = false;
         situation.foodSearchExhausted = true;
         assertEquals(GoalType.FIND_IRON, select(situation));
+    }
+
+    // 회귀: 땅속에서 철 검을 만든 직후 방패에 쓸 나무를 구하러 밤의 지상으로 올라갔다가, 몬스터 열두 마리 사이에서 죽었다.
+    @Test
+    void leavesWoodForMorningWhenBelowGroundAtNight() {
+        Situation situation = new Situation();
+        situation.nextMilestone = Milestone.IRON_SWORD;
+        situation.need = Situation.Need.WOOD;
+        situation.hasPickaxe = true;
+        situation.underground = true;
+        assertEquals(GoalType.FIND_WOOD, select(situation));
+
+        situation.surfaceTooLate = true;
+        assertEquals(GoalType.EXPLORE, select(situation));
+
+        // 아는 나무가 있어도 올라가지 않는다.
+        situation.knowsTree = true;
+        assertEquals(GoalType.EXPLORE, select(situation));
+
+        // 이미 지상에 있으면 하던 대로 한다. 밤의 지상에서 무엇을 할지는 nightPolicy 가 정한다.
+        situation.underground = false;
+        assertEquals(GoalType.COLLECT_WOOD, select(situation));
+    }
+
+    // 상자에 넣거나 꺼내거나 집을 손보는 일도 땅속에서 밤을 나는 동안에는 하러 올라가지 않는다.
+    @Test
+    void doesNotWalkHomeFromBelowGroundAtNight() {
+        Situation storing = new Situation();
+        storing.underground = true;
+        storing.chestAvailable = true;
+        storing.storableSlots = 6;
+        storing.emptySlots = 3;
+        assertEquals(GoalType.STORE_ITEMS, select(storing));
+        storing.surfaceTooLate = true;
+        assertEquals(GoalType.EXPLORE, select(storing));
+
+        Situation fetching = new Situation();
+        fetching.underground = true;
+        fetching.chestHasNeeded = true;
+        assertEquals(GoalType.FETCH_ITEMS, select(fetching));
+        fetching.surfaceTooLate = true;
+        assertEquals(GoalType.EXPLORE, select(fetching));
+
+        Situation upgrading = new Situation();
+        upgrading.underground = true;
+        upgrading.homeUpgradeReady = true;
+        upgrading.homeDistance = 20.0;
+        assertEquals(GoalType.BUILD_SHELTER, select(upgrading));
+        upgrading.surfaceTooLate = true;
+        assertEquals(GoalType.EXPLORE, select(upgrading));
+
+        Situation building = new Situation();
+        building.underground = true;
+        building.nextMilestone = Milestone.SHELTER;
+        building.canBuildHere = true;
+        assertEquals(GoalType.BUILD_SHELTER, select(building));
+        building.surfaceTooLate = true;
+        assertEquals(GoalType.EXPLORE, select(building));
+    }
+
+    // 배가 고픈 것은 아침까지 미룰 수 없다. 땅속에는 먹을 것이 없으므로 밤이어도 구하러 간다.
+    @Test
+    void stillLooksForFoodFromBelowGroundAtNight() {
+        Situation situation = new Situation();
+        situation.underground = true;
+        situation.surfaceTooLate = true;
+        situation.shouldEat = true;
+        situation.food = 6;
+        assertEquals(GoalType.FIND_FOOD, select(situation));
+    }
+
+    /**
+     * 없어도 되는 항목(방패, 집)이 지상에서만 할 수 있는 일로 막혀 있으면, 땅속에서 밤을 나는 동안에는 건너뛰고 그다음 것을 준비한다.
+     * 곡괭이처럼 꼭 있어야 하는 것은 건너뛸 수 없으므로 그때는 아침을 기다린다.
+     */
+    @Test
+    void skipsOptionalSurfaceWorkWhileBelowGroundAtNight() {
+        Situation situation = new Situation();
+        situation.underground = true;
+        situation.surfaceTooLate = true;
+        situation.nextMilestone = Milestone.SHIELD;
+        situation.need = Situation.Need.WOOD;
+        assertTrue(GoalSystem.leavesForMorning(situation));
+
+        // 재료가 다 모인 집 짓기도 지상에서 하는 일이다.
+        situation.nextMilestone = Milestone.SHELTER;
+        situation.need = Situation.Need.NONE;
+        assertTrue(GoalSystem.leavesForMorning(situation));
+
+        // 집에 쓸 돌은 땅속에서 캘 수 있다.
+        situation.need = Situation.Need.STONE;
+        assertFalse(GoalSystem.leavesForMorning(situation));
+
+        // 철이 모자란 방패는 땅속에서 철을 캐면 된다. 재료가 다 있으면 그 자리에서 만든다.
+        situation.nextMilestone = Milestone.SHIELD;
+        situation.need = Situation.Need.IRON;
+        assertFalse(GoalSystem.leavesForMorning(situation));
+        situation.need = Situation.Need.NONE;
+        assertFalse(GoalSystem.leavesForMorning(situation));
+
+        situation.nextMilestone = Milestone.IRON_SWORD;
+        situation.need = Situation.Need.WOOD;
+        assertFalse(GoalSystem.leavesForMorning(situation));
+
+        // 낮이거나 지상에 있으면 건너뛰지 않는다.
+        situation.nextMilestone = Milestone.SHIELD;
+        situation.surfaceTooLate = false;
+        assertFalse(GoalSystem.leavesForMorning(situation));
+        situation.surfaceTooLate = true;
+        situation.underground = false;
+        assertFalse(GoalSystem.leavesForMorning(situation));
     }
 }

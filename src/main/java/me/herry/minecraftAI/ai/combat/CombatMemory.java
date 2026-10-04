@@ -102,6 +102,11 @@ public final class CombatMemory {
         return now - refugeTick <= REFUGE_CAUTION_TICKS;
     }
 
+    // 바로 앞의 판단에서 몬스터를 상대하고 있었는지 (싸우거나 달아나는 중)
+    public boolean wasEngaged() {
+        return lastDecision != CombatSystem.Decision.NONE;
+    }
+
     // 판단이 이전과 달라졌으면 true. 달라질 때만 디버그 로그를 남기기 위한 것이다.
     public boolean updateLastDecision(CombatSystem.Decision decision) {
         if (decision == lastDecision) return false;

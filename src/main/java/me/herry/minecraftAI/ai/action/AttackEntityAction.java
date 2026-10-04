@@ -3,15 +3,19 @@ package me.herry.minecraftAI.ai.action;
 import me.herry.minecraftAI.ai.AIBody;
 import me.herry.minecraftAI.ai.AIPlayer;
 import me.herry.minecraftAI.ai.combat.ShieldRules;
+import me.herry.minecraftAI.ai.combat.TargetRules;
 import me.herry.minecraftAI.ai.inventory.HandPolicy;
+import me.herry.minecraftAI.ai.memory.MemorySystem;
 import me.herry.minecraftAI.ai.navigation.BlockClass;
 import me.herry.minecraftAI.ai.navigation.BukkitTerrainView;
 import me.herry.minecraftAI.ai.util.Positions;
+import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.World;
 import org.bukkit.entity.AbstractSkeleton;
 import org.bukkit.entity.Creeper;
+import org.bukkit.entity.Enemy;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.EquipmentSlot;
@@ -39,9 +43,10 @@ public final class AttackEntityAction extends AbstractAction {
     private static final double CREEPER_SAFE_DISTANCE = 7.5;
     private static final float BACK_AWAY_FACING = 45.0F;
 
-    private final LivingEntity target;
+    // 싸우는 도중에 더 가까이에서 때린 몬스터가 있으면 그쪽으로 바뀐다.
+    private LivingEntity target;
     private final HandPolicy.Purpose purpose;
-    private final EntityChaser chaser = new EntityChaser();
+    private EntityChaser chaser = new EntityChaser();
     private int ticksWithoutHit;
     private boolean holding;
     private int holdTicks;
@@ -85,6 +90,12 @@ public final class AttackEntityAction extends AbstractAction {
             fail("target too far");
             return;
         }
+        // 아직 손이 닿지 않는 상대를 쫓거나 기다리는 동안 더 가까운 몬스터에게 맞았으면 그쪽으로 돌아선다.
+        // 행동을 실패로 끝내고 다시 계획하게 하면, 둘러싸였을 때 맞을 때마다 실패가 쌓여서 한 대도 치지 못한다.
+        if (purpose == HandPolicy.Purpose.FIGHT) {
+            LivingEntity attacker = closerAttacker(ai, player);
+            if (attacker != null) switchTo(ai, player, attacker);
+        }
 
         // 터지려는 크리퍼나 활을 당기는 스켈레톤 앞에서는 치는 것을 멈추고 방패를 든다. 지나가면 방패를 내리고 다시 친다.
         if (hasShield(player)) {
@@ -101,14 +112,6 @@ public final class AttackEntityAction extends AbstractAction {
                 return;
             }
             backingAway = false;
-        }
-
-        // 아직 손이 닿지 않는 상대를 쫓거나 기다리는 동안 다른 몬스터에게 맞았으면, 때린 쪽부터 상대하도록 계획을 다시 세운다.
-        if (purpose == HandPolicy.Purpose.FIGHT && hitBySomeoneElse(ai)
-                && Positions.distance(player.getLocation(), target.getLocation()) > ATTACK_RANGE) {
-            if (holding) ai.getCombatMemory().markUnreachable(target.getUniqueId(), ai.getTicks());
-            fail("attacked by another");
-            return;
         }
 
         if (holding) {
@@ -132,11 +135,31 @@ public final class AttackEntityAction extends AbstractAction {
         ai.getNavigation().stop();
     }
 
-    // 이 행동을 시작한 뒤에 지금 상대가 아닌 다른 것에게 맞았는지
-    private boolean hitBySomeoneElse(AIPlayer ai) {
-        return ai.getMemory().getLastAttack()
-                .filter(attack -> attack.tick() > startTick && !attack.attacker().equals(target.getUniqueId()))
-                .isPresent();
+    // 이 행동을 시작한(또는 상대를 바꾼) 뒤에 나를 때린 몬스터 가운데, 지금 상대 대신 상대해야 할 것. 없으면 null.
+    private @Nullable LivingEntity closerAttacker(AIPlayer ai, Player player) {
+        MemorySystem.AttackRecord attack = ai.getMemory().getLastAttack().orElse(null);
+        if (attack == null || attack.tick() <= startTick || attack.attacker().equals(target.getUniqueId())) return null;
+        if (!(Bukkit.getEntity(attack.attacker()) instanceof LivingEntity attacker) || !(attacker instanceof Enemy)) return null;
+        if (!attacker.isValid() || attacker.isDead() || !attacker.getWorld().equals(player.getWorld())) return null;
+        double current = Positions.distance(player.getLocation(), target.getLocation());
+        double other = Positions.distance(player.getLocation(), attacker.getLocation());
+        return TargetRules.shouldSwitch(current, other, ATTACK_RANGE) ? attacker : null;
+    }
+
+    private void switchTo(AIPlayer ai, Player player, LivingEntity attacker) {
+        // 기다리던 상대는 다가갈 길이 없었던 것이므로, 다음에 다시 고르지 않도록 적어 둔다.
+        if (holding) ai.getCombatMemory().markUnreachable(target.getUniqueId(), ai.getTicks());
+        lowerShield(player);
+        ai.getNavigation().stop();
+        ai.debug("Turning to the " + attacker.getType() + " that hit me");
+        target = attacker;
+        chaser = new EntityChaser();
+        holding = false;
+        holdTicks = 0;
+        ticksWithoutHit = 0;
+        backingAway = false;
+        lastDrawTick = -1L;
+        startTick = ai.getTicks();
     }
 
     private static boolean hasShield(Player player) {

@@ -1,6 +1,7 @@
 package me.herry.minecraftAI.ai.brain;
 
 import me.herry.minecraftAI.ai.combat.CombatSystem;
+import me.herry.minecraftAI.ai.goal.GoalSystem;
 import me.herry.minecraftAI.ai.goal.GoalType;
 import me.herry.minecraftAI.ai.goal.Milestone;
 import me.herry.minecraftAI.ai.goal.Situation;
@@ -17,7 +18,7 @@ public final class GoalReasons {
     public static String explain(GoalType goal, Situation s) {
         String target = s.nextMilestone == null ? "다음 준비물" : s.nextMilestone.label();
         return switch (goal) {
-            case IDLE -> "지금 할 수 있는 일이 없어서 잠깐 기다리고 있어요";
+            case IDLE -> waitsForMorning(s) ? waitingBelow(target) : "지금 할 수 있는 일이 없어서 잠깐 기다리고 있어요";
             case ESCAPE_DANGER -> escapeReason(s);
             case SURVIVE -> s.sealedIn ? "몬스터를 피해 숨은 자리에서 체력이 " + (int) Math.ceil(s.health) + " 에서 회복되기를 기다리고 있어요"
                     : "체력이 " + (int) Math.ceil(s.health) + " 밖에 안 남아서 싸움을 피하고 회복해야 해요";
@@ -74,9 +75,19 @@ public final class GoalReasons {
         return target + "에 다이아몬드가 " + s.diamondsNeeded + "개 필요한데 " + s.diamonds + "개뿐이라서요.";
     }
 
+    // 땅속에서 밤을 나는 중이다. 할 일이 없는 것이 아니라, 올라가야 하는 일을 아침으로 미룬 것이다.
+    private static boolean waitsForMorning(Situation s) {
+        return GoalSystem.staysBelow(s) && s.need == Situation.Need.WOOD;
+    }
+
+    private static String waitingBelow(String target) {
+        return "지금 올라가면 지상에서 밤을 맞게 돼서, " + target + "에 필요한 것은 아침에 올라가서 구하기로 하고 땅속에 머물고 있어요";
+    }
+
     private static String exploreReason(Situation s) {
         Milestone next = s.nextMilestone;
         if (next == null) return "해야 할 일을 다 마쳐서 주변을 둘러보고 있어요";
+        if (waitsForMorning(s)) return waitingBelow(next.label());
         if (!next.isAutomated()) {
             return "다음 단계인 '" + next.label() + "' 준비는 아직 제가 스스로 할 줄 모르는 일이라, 주변을 둘러보면서 기다리고 있어요";
         }

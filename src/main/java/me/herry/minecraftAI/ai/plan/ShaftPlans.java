@@ -52,6 +52,18 @@ final class ShaftPlans {
         return List.of(new FollowPathAction(waypoints));
     }
 
+    /**
+     * 지금 있는 굴의 위쪽이 가까이에서 막혀 있는지. 굴을 따라 한 구간 위의 지점까지 걸어갈 수 있는지를 본다.
+     * 굴 안은 좁아서 닿지 못하는 목적지가 있으면 "갇혔다"는 판정이 나오지만, 굴이 멀쩡하면 갇힌 것이 아니다.
+     */
+    static boolean wayUpBlocked(AIPlayer ai) {
+        BlockPoint feet = ai.getPosition();
+        ShaftRegistry.Shaft shaft = ai.getTeam().getShafts().higher(ai.getWorldId(), feet, SHAFT_CLIMB_RANGE, SHAFT_MIN_DEPTH);
+        if (shaft == null) return false;
+        BlockPoint above = shaft.points().get(Math.max(0, shaft.nearestIndex(feet) - SHAFT_STRIDE));
+        return !ShaftAccess.canReach(new BukkitTerrainView(ai.getPlayer().getWorld()), feet, FollowPathAction.waypointGoal(above));
+    }
+
     // 지금 있는 굴을 따라 입구까지 걸어 올라간다.
     static List<Action> followShaftUp(AIPlayer ai) {
         if (shaftFailedRecently(ai)) return List.of();

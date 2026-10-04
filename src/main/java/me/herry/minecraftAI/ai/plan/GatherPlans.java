@@ -9,6 +9,7 @@ import me.herry.minecraftAI.ai.action.MoveToAction;
 import me.herry.minecraftAI.ai.action.PickupItemAction;
 import me.herry.minecraftAI.ai.action.PlugWaterAction;
 import me.herry.minecraftAI.ai.action.RememberPlaceAction;
+import me.herry.minecraftAI.ai.action.WaitAction;
 import me.herry.minecraftAI.ai.memory.MemoryType;
 import me.herry.minecraftAI.ai.navigation.PathGoal;
 import me.herry.minecraftAI.ai.perception.TreeSpotter;
@@ -44,6 +45,7 @@ public final class GatherPlans {
     private static final int IRON_LEVEL = 24;
     private static final int IRON_LEVEL_SLACK = 8;
     private static final long CAVE_RETRY_WINDOW = 200L;
+    private static final int NIGHT_WAIT_TICKS = 100;
     // 파 놓은 굴의 끝에 이만큼 가까이 있으면 동굴을 돌아다니지 않고 그 굴을 이어서 판다.
     private static final double TUNNEL_FACE_RANGE = 2.0;
     private static final double CHEST_REACH = 3.5;
@@ -84,6 +86,8 @@ public final class GatherPlans {
      */
     static List<Action> explore(AIPlayer ai) {
         if (TerrainPlans.needsToClimb(ai)) {
+            // 땅속에서 밤을 나는 중이면 돌아다니지도 올라가지도 않고 그 자리에서 아침을 기다린다.
+            if (SurvivalPlans.tooLateToSurface(ai)) return List.of(new WaitAction(NIGHT_WAIT_TICKS));
             boolean caveDeadEnd = ai.getMemory().countRecentFailures("ExploreArea", ai.getTicks(), CAVE_RETRY_WINDOW) > 0;
             if (!caveDeadEnd) return List.of(ExploreAreaAction.cave(8.0, 20.0));
             List<Action> climb = TerrainPlans.climbOut(ai);

@@ -85,7 +85,7 @@ public final class GoalSystem {
         register(GoalType.CLEAN_INVENTORY, GoalSystem::cleanInventory);
         register(GoalType.STORE_ITEMS, GoalSystem::storeItems);
         register(GoalType.PICKUP_ITEMS, situation -> situation.dropsNearby && !situation.inventoryFull ? 320.0 : 0.0);
-        register(GoalType.FETCH_ITEMS, situation -> situation.chestHasNeeded && !situation.inventoryFull ? 318.0 : 0.0);
+        register(GoalType.FETCH_ITEMS, situation -> situation.chestHasNeeded && !situation.inventoryFull && !staysBelow(situation) ? 318.0 : 0.0);
         register(GoalType.PACK_UP_TABLE, GoalSystem::packUpTable);
         register(GoalType.SMELT_IRON, GoalSystem::smeltIron);
         register(GoalType.COOK_FOOD, GoalSystem::cookFood);
@@ -164,6 +164,26 @@ public final class GoalSystem {
 
     public void clearCooldowns() {
         cooldownUntil.clear();
+    }
+
+    /**
+     * 땅속에 있는데 밤이거나 곧 밤이면, 지상에서 할 일(나무, 상자, 집)은 아침까지 미루고 올라가지 않는다.
+     * 밤의 지상은 몬스터가 가장 많은 때이고, 그동안 땅속에서 할 수 있는 일이 있다.
+     * 배고픔은 미룰 수 없으므로 먹을 것을 구하는 일은 여기에 들지 않는다.
+     */
+    public static boolean staysBelow(Situation situation) {
+        return situation.underground && situation.surfaceTooLate;
+    }
+
+    /**
+     * 다음에 이룰 것이 없어도 되는 항목(방패, 집)인데 지상에서만 할 수 있는 일로 막혀 있으면,
+     * 땅속에서 밤을 나는 동안에는 건너뛰고 그다음 것을 준비한다.
+     */
+    public static boolean leavesForMorning(Situation situation) {
+        Milestone milestone = situation.nextMilestone;
+        if (milestone == null || !milestone.isOptional() || !staysBelow(situation)) return false;
+        boolean readyToBuild = milestone == Milestone.SHELTER && situation.need == Situation.Need.NONE;
+        return situation.need == Situation.Need.WOOD || readyToBuild;
     }
 
     private static double escapeDanger(Situation situation) {
@@ -292,6 +312,7 @@ public final class GoalSystem {
 
     private static double storeItems(Situation situation) {
         if (!situation.chestAvailable || situation.storableSlots <= 0) return 0.0;
+        if (staysBelow(situation)) return 0.0;
         // 깊은 굴 안에서 넘치는 조약돌 따위를 넣자고 집까지 다녀오지 않는다. 버릴 것이 있으면 그 자리에서 버린다.
         if (situation.underground && situation.junkSlots > 0) return 0.0;
         if (situation.emptySlots <= STORE_BELOW_EMPTY) return 346.0;
@@ -304,6 +325,7 @@ public final class GoalSystem {
      * 블록이 떨어지면 점수가 0 이 되어 돌이나 나무를 구하러 가고(need), 모이면 돌아와서 이어 짓는다.
      */
     private static double buildShelter(Situation situation) {
+        if (staysBelow(situation)) return 0.0;
         if (situation.nextMilestone != Milestone.SHELTER) {
             // 다 지은 집에 빠진 시설(침대, 화로)을 들일 수 있게 됐으면, 집에서 멀지 않을 때 들러서 놓는다.
             return situation.homeUpgradeReady && situation.homeDistance <= HOME_UPGRADE_RANGE ? 256.0 : 0.0;
@@ -330,7 +352,7 @@ public final class GoalSystem {
     }
 
     private static boolean wantsWood(Situation situation) {
-        if (situation.nextMilestone == null) return false;
+        if (situation.nextMilestone == null || staysBelow(situation)) return false;
         if (situation.need == Situation.Need.WOOD) return true;
         // 제련할 철은 모였는데 화로에 넣을 연료가 없으면 나무를 구한다.
         if (situation.need == Situation.Need.IRON && hasEnoughOre(situation) && !situation.hasFuel) return true;

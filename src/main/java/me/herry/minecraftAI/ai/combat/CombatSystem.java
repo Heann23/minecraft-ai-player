@@ -22,6 +22,8 @@ public final class CombatSystem {
     private static final double HIT_AND_RUN_WEAPON = 1.5;
     // 숨을 자리를 막으려면 들어온 쪽의 두 칸을 채울 블록이 있어야 한다.
     private static final int REFUGE_BLOCKS = 2;
+    // 한번 상대하기 시작한 몬스터는 교전 범위보다 이만큼 더 멀어져야 상대하기를 그만둔다.
+    private static final double DISENGAGE_SLACK = 4.0;
     // 체력이 가득하고 무기 공격력이 1.0 일 때 감당할 수 있는 위험도의 합.
     private static final double STRENGTH_SCALE = 3.0;
     private static final double MAX_ARMOR_POINTS = 20.0;
@@ -52,13 +54,24 @@ public final class CombatSystem {
      *                     있으면 크리퍼가 가까이 와도 무조건 물러나지 않고 다른 몬스터처럼 감당할 수 있는지를 따진다.
      */
     public Decision decide(double health, double maxHealth, double weaponPower, List<Hostile> hostiles, boolean canFaceBlast) {
+        return decide(health, maxHealth, weaponPower, hostiles, canFaceBlast, false);
+    }
+
+    /**
+     * @param engagedBefore 바로 앞의 판단에서 이미 몬스터를 상대하고 있었는지(싸우거나 달아나는 중).
+     *                      그랬다면 교전 범위보다 조금 더 멀어질 때까지 계속 상대한다. 범위의 경계에 걸친 몬스터 때문에
+     *                      "달아나기"와 "하던 일"이 판단할 때마다 뒤바뀌는 것을 막는다.
+     */
+    public Decision decide(double health, double maxHealth, double weaponPower, List<Hostile> hostiles, boolean canFaceBlast,
+                           boolean engagedBefore) {
+        double range = engagedBefore ? engageRange + DISENGAGE_SLACK : engageRange;
         double threat = 0.0;
         boolean engaged = false;
         for (Hostile hostile : hostiles) {
             if (!hostile.type().isHostileMob()) continue;
             boolean blast = hostile.type() == ThreatType.CREEPER && hostile.distance() <= CREEPER_FLEE_RANGE;
             if (blast && !canFaceBlast) return Decision.FLEE;
-            if (hostile.distance() <= engageRange) {
+            if (hostile.distance() <= range) {
                 threat += hostile.type().danger();
                 engaged = true;
             }

@@ -75,18 +75,13 @@ public final class Planner {
     public List<Action> planEscape(GoalType goal, AIPlayer ai) {
         // 땅속에서 광물을 캐는 중이라면 좁은 굴 안에 있는 것이 정상이다. 지상으로 올라가지 않는다.
         boolean mining = goal == GoalType.FIND_IRON || goal == GoalType.MINE_IRON || goal == GoalType.MINE_STONE
-                || goal == GoalType.FIND_DIAMOND || goal == GoalType.MINE_DIAMOND;
+                || goal == GoalType.MINE_COAL || goal == GoalType.FIND_DIAMOND || goal == GoalType.MINE_DIAMOND;
         boolean miningDeep = mining && TerrainPlans.isDeepUnderground(ai.getPlayer().getWorld(), ai.getPosition());
         // 파 놓은 굴 안은 좁아서 경로 탐색이 "갇혔다"고 판단하기 쉽지만, 굴을 따라 오갈 수 있으면 갇힌 것이 아니다.
-        // 그 굴을 따라가려다 방금 실패했다면 굴이 끊긴 것이므로 새로 길을 판다.
+        // 그 굴을 따라가려다 방금 실패했거나 굴의 위쪽이 가까이에서 막혀 있으면(계단 칸에 놓인 화로 등) 새로 길을 판다.
+        // 굴이 멀쩡할 때 걸어 나가게 하지는 않는다. 닿지 못하는 광석 하나 때문에 밤의 지상까지 올라가게 된다.
         boolean inShaft = ai.getTeam().getShafts().passesNear(ai.getWorldId(), ai.getPosition(), IN_SHAFT_RANGE);
-        boolean shaftBlocked = ShaftPlans.shaftFailedRecently(ai);
-        if (inShaft && !shaftBlocked && !miningDeep) {
-            // 굴 안에서 갈 곳이 없다면 굴을 따라 걸어 나간다. 굴로 들어설 길조차 없으면(무엇인가 길을 막았으면) 굴이 막힌 것이다.
-            List<Action> walk = ShaftPlans.followShaftUp(ai);
-            if (!walk.isEmpty()) return walk;
-            shaftBlocked = true;
-        }
+        boolean shaftBlocked = ShaftPlans.shaftFailedRecently(ai) || inShaft && !miningDeep && ShaftPlans.wayUpBlocked(ai);
         if (!DigRules.shouldDigOut(miningDeep, inShaft, shaftBlocked)) return List.of();
         return GatherPlans.digWayOut(ai);
     }

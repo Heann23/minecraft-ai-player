@@ -9,12 +9,12 @@ import me.herry.minecraftAI.ai.action.MarkShaftAction;
 import me.herry.minecraftAI.ai.action.MoveToAction;
 import me.herry.minecraftAI.ai.action.PillarUpAction;
 import me.herry.minecraftAI.ai.action.PlaceFillerAction;
-import me.herry.minecraftAI.ai.memory.MemorySystem;
 import me.herry.minecraftAI.ai.navigation.AStarSearch;
 import me.herry.minecraftAI.ai.navigation.BlockClass;
 import me.herry.minecraftAI.ai.navigation.BukkitTerrainView;
 import me.herry.minecraftAI.ai.navigation.Enclosure;
 import me.herry.minecraftAI.ai.navigation.PathGoal;
+import me.herry.minecraftAI.ai.navigation.ShaftAccess;
 import me.herry.minecraftAI.ai.navigation.WaterExitSearch;
 import me.herry.minecraftAI.ai.team.Phrases;
 import me.herry.minecraftAI.ai.team.ShaftRegistry;
@@ -30,7 +30,6 @@ import org.bukkit.entity.Player;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.function.Consumer;
@@ -385,20 +384,19 @@ public final class TerrainPlans {
     }
 
     /**
-     * 파면 안 되는 블록이 섞여 있는지: 지나온 굴의 발판, 방금 걸어온 칸의 바닥, 집의 일부.
-     * 방금 걸어온 칸은 굴로 기록되지 않지만, 그 바닥을 파내면 굴과 굴 사이를 잇던 길이 끊긴다.
+     * 파면 안 되는 블록이 섞여 있는지: 지나온 굴의 발판, 굴의 끝에서 여기까지 걸어온 길의 바닥, 집의 일부.
+     * 굴 끝에서 몇 칸 걸어온 자리에서 다시 파면 그 사이의 칸은 아직 굴로 기록되지 않았지만, 그 바닥을 파내면 굴과의 사이가 끊긴다.
+     * (걸어 다닌 칸을 모두 보호하면 지상에서는 어느 쪽으로도 계단을 낼 수 없게 되므로, 굴과 이어지는 길만 본다.)
      * 집의 블록은 캐는 행동이 어차피 거부하므로, 여기서 걸러서 다른 방향을 시도하게 한다.
      */
     private static boolean undermines(AIPlayer ai, World world, BukkitTerrainView terrain, BlockPoint... blocks) {
         if (cutsShaft(ai, world, terrain, blocks)) return true;
-        Set<BlockPoint> walked = new HashSet<>();
-        for (MemorySystem.Visit visit : ai.getMemory().getRecentPath()) {
-            if (visit.world().equals(world.getUID())) walked.add(visit.pos());
-        }
+        ShaftRegistry.Shaft latest = ai.getTeam().getShafts().latestOf(ai.getName(), world.getUID());
+        List<BlockPoint> link = ShaftAccess.link(terrain, latest == null ? null : latest.end(), ai.getPosition());
         Base home = ai.getWorldModel().homeIn(world.getUID());
         for (BlockPoint block : blocks) {
             if (terrain.classify(block.x(), block.y(), block.z()) != BlockClass.SOLID) continue;
-            if (DigRules.cutsShaft(block, walked::contains)) return true;
+            if (DigRules.cutsShaft(block, link::contains)) return true;
             if (home != null && home.isInsideBuilding(world.getUID(), block)) return true;
         }
         return false;

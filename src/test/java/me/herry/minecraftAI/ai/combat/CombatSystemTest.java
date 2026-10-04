@@ -66,6 +66,24 @@ class CombatSystemTest {
         assertFalse(memory.retreatBlockedWithin(1401, 400));
     }
 
+    // 회귀: 교전 범위의 경계(15~16칸)에 걸친 좀비 때문에 "달아나기"와 "집으로 가기"가 1초마다 뒤바뀌었다.
+    // 이미 상대하던 중이면 범위보다 4칸 더 멀어질 때까지 계속 상대한다. 처음 상대하기 시작하는 거리는 그대로다.
+    @Test
+    void keepsEngagingUntilTheHostileIsWellOutOfRange() {
+        List<Hostile> justOutside = List.of(zombie(11));
+        assertEquals(Decision.NONE, combat.decide(20, 20, STONE_SWORD, justOutside, false, false));
+        assertEquals(Decision.FIGHT, combat.decide(20, 20, STONE_SWORD, justOutside, false, true));
+        assertEquals(Decision.FIGHT, combat.decide(20, 20, STONE_SWORD, List.of(zombie(14)), false, true));
+        assertEquals(Decision.NONE, combat.decide(20, 20, STONE_SWORD, List.of(zombie(14.5)), false, true));
+
+        CombatMemory memory = new CombatMemory();
+        assertFalse(memory.wasEngaged());
+        memory.updateLastDecision(Decision.FLEE);
+        assertTrue(memory.wasEngaged());
+        memory.updateLastDecision(Decision.NONE);
+        assertFalse(memory.wasEngaged());
+    }
+
     @Test
     void noHostilesMeansNoCombat() {
         assertEquals(Decision.NONE, combat.decide(20, 20, HAND, List.of()));

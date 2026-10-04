@@ -128,6 +128,31 @@ class BrainTest {
         assertTrue(reason.contains("할 줄 모르는"), reason);
     }
 
+    // 땅속에서 밤을 나느라 기다리는 중이면, 할 일이 없어서가 아니라 아침을 기다리는 것임을 말한다.
+    @Test
+    void explainsWaitingBelowGroundForMorning() {
+        Situation situation = new Situation();
+        situation.nextMilestone = Milestone.IRON_SWORD;
+        situation.need = Situation.Need.WOOD;
+        situation.underground = true;
+        situation.surfaceTooLate = true;
+
+        for (GoalType goal : List.of(GoalType.EXPLORE, GoalType.IDLE)) {
+            String reason = GoalReasons.explain(goal, situation);
+            assertTrue(reason.contains("아침"), reason);
+            assertTrue(reason.contains("철 검"), reason);
+        }
+
+        // 낮에는 평소의 설명을 한다.
+        situation.surfaceTooLate = false;
+        assertFalse(GoalReasons.explain(GoalType.EXPLORE, situation).contains("아침"));
+
+        // 밤이어도 모자란 것이 땅속에서 구할 수 있는 것이면 아침을 기다리는 것이 아니다.
+        situation.surfaceTooLate = true;
+        situation.need = Situation.Need.IRON;
+        assertFalse(GoalReasons.explain(GoalType.EXPLORE, situation).contains("아침"));
+    }
+
     @Test
     void explanationListsEveryLevelOfGoal() {
         DecisionTrace trace = new DecisionTrace(100L, GoalType.FIND_IRON, 150.0, DecisionTrace.Origin.AUTONOMOUS,

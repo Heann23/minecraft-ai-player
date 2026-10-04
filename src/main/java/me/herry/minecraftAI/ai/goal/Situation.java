@@ -33,6 +33,8 @@ public final class Situation {
 
     public boolean night;
     public SurvivalSystem.NightPolicy nightPolicy = SurvivalSystem.NightPolicy.CONTINUE;
+    // 지금 땅속에서 올라가면 지상에서 밤을 맞게 되는지 (해 질 무렵부터 새벽까지)
+    public boolean surfaceTooLate;
     // 같은 월드에 거점이 있는지, 그리고 거기까지의 수평 거리
     public boolean homeKnown;
     public double homeDistance;

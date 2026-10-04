@@ -49,6 +49,18 @@ class TargetRulesTest {
         assertEquals(1, TargetRules.pick(List.of(nearer, attacker)));
     }
 
+    // 회귀: 쫓던 상대가 아닌 것에게 맞으면 공격을 "실패"로 끝내고 다시 계획했더니, 둘러싸였을 때 맞을 때마다
+    // 실패가 쌓여서 한 대도 치지 못하고 죽었다. 실패로 끝내지 않고, 더 가까이에서 때린 쪽으로 상대를 바꾼다.
+    @Test
+    void turnsToACloserAttackerWhileStillChasing() {
+        // 8칸 떨어진 좀비를 쫓는 중에 옆(2칸)의 좀비에게 맞았다.
+        assertTrue(TargetRules.shouldSwitch(8.0, 2.0, 3.0));
+        // 이미 손이 닿는 상대와 싸우는 중이면 하던 싸움을 끝낸다.
+        assertFalse(TargetRules.shouldSwitch(2.5, 2.0, 3.0));
+        // 더 멀리서 화살을 쏜 스켈레톤을 쫓느라 가까운 상대를 버리지 않는다.
+        assertFalse(TargetRules.shouldSwitch(8.0, 12.0, 3.0));
+    }
+
     @Test
     void otherwisePicksTheNearest() {
         assertEquals(1, TargetRules.pick(List.of(new Candidate(9.0, true, false, false), new Candidate(5.0, true, false, false))));

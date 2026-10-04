@@ -18,6 +18,10 @@ public final class SurvivalSystem {
     // 자연 회복은 허기가 18 이상일 때만 일어난다.
     private static final int REGEN_FOOD_LEVEL = 18;
     private static final int MAX_FOOD_LEVEL = 20;
+    private static final long NIGHT_START = 13000L;
+    private static final long NIGHT_END = 23000L;
+    // 땅속에서 지상에 올라가 일을 보는 데 걸리는 시간 (3분 남짓). 해 지기 전에 이만큼 남지 않았으면 올라가지 않는다.
+    private static final long SURFACE_TRIP_TICKS = 4000L;
 
     private final int lowHealth;
     private final int criticalHealth;
@@ -52,5 +56,13 @@ public final class SurvivalSystem {
 
     public NightPolicy nightPolicy(double weaponPower) {
         return weaponPower >= NIGHT_ACTIVE_POWER ? NightPolicy.CONTINUE : NightPolicy.SHELTER;
+    }
+
+    /**
+     * 지금 땅속에서 올라가면 지상에서 밤을 맞게 되는지. 밤(13000~23000)뿐 아니라 해 지기 얼마 전부터 그렇다.
+     * 굴을 걸어 올라가서 나무를 베거나 집에 다녀오는 데 몇 분이 걸리기 때문이다.
+     */
+    public boolean tooLateForSurface(long timeOfDay) {
+        return timeOfDay >= NIGHT_START - SURFACE_TRIP_TICKS && timeOfDay < NIGHT_END;
     }
 }
