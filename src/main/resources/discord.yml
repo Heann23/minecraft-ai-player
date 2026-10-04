@@ -1,0 +1,20 @@
+# Discord 설정만 관리한다. config.yml의 게임 설정과 독립적이다.
+# 현재 구현은 대화/기억 대역 시험 단계이며 실제 음성 접속은 아직 연결되지 않았다.
+enabled: false
+token-env: MINECRAFTAI_DISCORD_TOKEN
+# Discord ID는 숫자가 아니라 따옴표로 감싼 문자열로 쓴다.
+guild-id: ''
+voice-channel-id: ''
+character-id: herry
+auto-connect: true
+
+conversation:
+  followup-seconds: 60
+  context-lines: 32
+
+backup:
+  enabled: true
+  interval-seconds: 600
+  periodic-retention: 24
+  daily-retention: 7
+  max-megabytes: 128
