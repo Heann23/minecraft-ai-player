@@ -48,6 +48,7 @@ public final class FurnacePlans {
             situation.furnaceCooksFood = job.food();
             situation.furnaceDistance = job.pos().distance(ai.getPosition());
             situation.furnaceDone = isDone(ai, job);
+            situation.furnaceTicksLeft = (int) Math.max(0L, job.readyAt() - ai.getTicks());
             situation.furnaceOnSurface = !Positions.isLoaded(world, job.pos()) || !TerrainPlans.isDeepUnderground(world, job.pos());
         }
         situation.ownFurnaceNearby = ownFurnaceNearby(ai) != null;
