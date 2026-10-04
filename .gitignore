@@ -1,10 +1,14 @@
-# 루트에는 아래에 적어 둔 것만 올린다. 플러그인 소스와 빌드 설정뿐이다.
-# 개발 도구의 설정과 지침(CLAUDE.md, AGENTS.md, .claude/, .claude-flow/, .mcp.json), 작업 문서(docs/), 서버 시험 스크립트(scripts/)는 개인 작업 환경이라 올리지 않는다.
+# 루트에는 아래 허용 목록의 소스, 빌드/CI 설정, README와 공통 개발 지침만 올린다.
+# AGENTS.md와 CLAUDE.md는 공유한다. 개인 도구 설정(.claude/, .claude-flow/, .mcp.json),
+# 작업 문서(docs/), 서버 시험 스크립트(scripts/)는 개인 작업 환경이라 올리지 않는다.
 # 셸에서 `>` 나 `<` 를 따옴표 없이 쓰면 `0`, `MAX_JUMP_TICKS)` 같은 0바이트 파일이 루트에 생기는데,
 # 이런 찌꺼기나 개발 PC 전용 파일이 저장소에 섞여 들어가지 않게 하기 위해서다.
 /*
 !/.gitignore
+!/.github/
 !/README.md
+!/AGENTS.md
+!/CLAUDE.md
 !/build.gradle.kts
 !/settings.gradle.kts
 !/gradle.properties
