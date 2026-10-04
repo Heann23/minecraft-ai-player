@@ -58,6 +58,9 @@ final class SituationBuilder {
     private static final double CORNERED_RANGE = 4.0;
     private static final long CORNERED_WINDOW = 300L;
     private static final long STAND_GROUND_TICKS = 300L;
+    // 달아나기 시작한 뒤에도 이 시간 안에 이만큼 맞았으면 벗어나지 못하고 있는 것이다.
+    private static final long BEATEN_WINDOW = 100L;
+    private static final int BEATEN_HITS = 3;
     // 이 거리 안에 있는 동료는 함께 싸우는 전력으로 친다.
     private static final double ALLY_RANGE = 16.0;
     // 크리퍼에게서 물러날 자리가 없었으면 이 시간 동안은 치고 물러나기를 하지 않고 달아난다.
@@ -100,6 +103,7 @@ final class SituationBuilder {
         double readiness = CombatSystem.readiness(armor == null ? 0.0 : armor.getValue(), situation.food);
         // 가까이 있는 동료의 수만큼 감당할 수 있는 상대가 늘어난다 (동료가 있을 때만).
         int allies = ai.getTeam().countNearbyAllies(ai, ALLY_RANGE);
+        situation.underground = TerrainPlans.needsToClimb(ai);
         fillCombat(ai, perception, situation, weaponPower * readiness * (1 + allies), weaponPower);
 
         situation.night = perception.isNight();
@@ -111,7 +115,6 @@ final class SituationBuilder {
         boolean hungry = situation.shouldEat && !situation.hasFood;
         if (hungry && !situation.foodOnTheWay) ai.getTeam().requestFood(ai);
         situation.preyNearby = SurvivalPlans.nearestPrey(ai) != null;
-        situation.underground = TerrainPlans.needsToClimb(ai);
         situation.surfaceTooLate = SurvivalPlans.tooLateToSurface(ai);
         situation.foodSearchExhausted = ai.getFoodSearch().isExhausted(ai.getTicks());
         TreeJob tree = ai.getTreeJob();
@@ -137,6 +140,8 @@ final class SituationBuilder {
 
     private static void fillCombat(AIPlayer ai, Perception perception, Situation situation, double weaponPower, double rawWeaponPower) {
         List<CombatSystem.Hostile> hostiles = new ArrayList<>();
+        // 보이는지와 상관없이 교전 범위 안에서 감지된 몬스터 전부. 땅속에서 싸우러 나설지 정할 때 쓴다.
+        List<CombatSystem.Hostile> around = new ArrayList<>();
         CombatMemory combatMemory = ai.getCombatMemory();
         long now = ai.getTicks();
         double nearest = Double.MAX_VALUE;
@@ -145,6 +150,9 @@ final class SituationBuilder {
         boolean shotFromOutOfReach = false;
         for (Threat threat : perception.getThreats()) {
             if (!threat.type().isHostileMob() || threat.entity() == null) continue;
+            if (threat.distance() <= ai.getConfig().engageRange) {
+                around.add(new CombatSystem.Hostile(threat.type(), threat.distance(), threat.targetingMe()));
+            }
             // 벽 너머나 땅속 동굴에 있어서 보이지 않고 AI 를 노리지도 않는 몬스터는 상대하지 않는다.
             // 다만 방금까지 보이던 몬스터는 잠깐 가려져도 계속 상대로 친다.
             UUID id = threat.entity().getUniqueId();
@@ -183,12 +191,20 @@ final class SituationBuilder {
                 decision = ai.getCombat().decide(situation.health, situation.maxHealth, weaponPower / REENGAGE_MARGIN, hostiles, canFaceBlast, engagedBefore);
             }
         }
+        // 땅속에서는 보이는 한두 마리를 잡으러 나서면 그 주변의 몬스터가 모두 이쪽을 보고 몰려온다.
+        // 보이지 않는 것까지 합쳐서 감당할 수 없으면 나서지 않고, 몬스터가 아직 멀리 있을 때 물러나 숨는다.
+        boolean outnumbered = decision == CombatSystem.Decision.FIGHT && situation.underground
+                && ai.getCombat().isOutnumbered(situation.health, situation.maxHealth, weaponPower, around);
+        if (outnumbered) decision = CombatSystem.Decision.FLEE;
         if (shotFromOutOfReach) decision = CombatSystem.Decision.FLEE;
         if (decision == CombatSystem.Decision.FLEE) combatMemory.onFlee(now, FLEE_COMMIT_TICKS);
+        combatMemory.trackFleeing(decision == CombatSystem.Decision.FLEE, now);
         // 도망치려 했지만 벗어나지 못했고 적이 바로 옆에 있으면, 맞기만 하느니 맞서 싸운다.
+        // 달아나는 중에도 계속 맞고 있으면(숨으려고 판 구덩이에 좀비가 따라 들어온 경우 등) 벗어나지 못한 것으로 본다.
         // 한번 맞서기로 했으면 적이 한 걸음 멀어졌다고 다시 도망치지 않고 얼마 동안은 계속 싸운다.
-        boolean cornered = nearest <= CORNERED_RANGE && !nearestIsCreeper
-                && ai.getMemory().countRecentFailures("RunAway", now, CORNERED_WINDOW) > 0;
+        boolean stuckFleeing = ai.getMemory().countRecentFailures("RunAway", now, CORNERED_WINDOW) > 0
+                || combatMemory.hitsWhileFleeing(now, BEATEN_WINDOW) >= BEATEN_HITS;
+        boolean cornered = nearest <= CORNERED_RANGE && !nearestIsCreeper && stuckFleeing;
         if (decision == CombatSystem.Decision.FLEE && cornered) combatMemory.onStandGround(now, STAND_GROUND_TICKS);
         if (decision == CombatSystem.Decision.FLEE && !nearestIsCreeper && combatMemory.isStandingGround(now)) {
             decision = CombatSystem.Decision.FIGHT;
@@ -198,7 +214,8 @@ final class SituationBuilder {
         if (combatMemory.updateLastDecision(decision)) {
             ai.debug("Combat decision: " + decision + " (hostiles=" + hostiles.size()
                     + (hostiles.isEmpty() ? "" : ", nearest=" + nearestType + " at " + (int) nearest)
-                    + ", health=" + (int) situation.health + ", weapon=" + weaponPower + ")");
+                    + ", health=" + (int) situation.health + ", weapon=" + weaponPower
+                    + (outnumbered ? ", outnumbered by " + around.size() + " around" : "") + ")");
         }
     }
 
