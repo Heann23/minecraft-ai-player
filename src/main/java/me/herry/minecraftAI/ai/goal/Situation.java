@@ -119,8 +119,9 @@ public final class Situation {
     // 재료를 넣어 두고 온 화로가 있는지 (다 구워지면 가서 꺼낸다), 거기까지의 거리
     public boolean furnaceBusy;
     public double furnaceDistance;
-    // 넣어 둔 것이 다 구워졌는지, 굽는 것이 음식인지
+    // 넣어 둔 것이 다 구워졌는지, 다 구워지기까지 남은 틱 수, 굽는 것이 음식인지
     public boolean furnaceDone;
+    public int furnaceTicksLeft;
     public boolean furnaceCooksFood;
     // 그 화로가 땅속이 아니라 지상에 있는지. 땅속에서 밤을 나는 동안에는 지상의 화로를 가지러 올라가지 않는다.
     public boolean furnaceOnSurface;

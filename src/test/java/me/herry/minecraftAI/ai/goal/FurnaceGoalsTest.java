@@ -25,6 +25,8 @@ class FurnaceGoalsTest {
         situation.canMineIron = true;
         situation.furnaceBusy = true;
         situation.furnaceDistance = 5.0;
+        // 12개를 넣은 직후다 (2분).
+        situation.furnaceTicksLeft = 2400;
         return situation;
     }
 
@@ -47,11 +49,39 @@ class FurnaceGoalsTest {
         assertEquals(GoalType.MINE_IRON, select(situation));
     }
 
-    // 돌아오자마자 다시 떠나면 경계선에서 왔다 갔다 하기만 한다.
+    // 경계 안에 들어서자마자 다시 떠나면 경계선에서 왔다 갔다 하기만 한다. 돌아오기 시작했으면 화로 가까이까지 온다.
     @Test
-    void staysByTheFurnaceOnceItCameBack() {
+    void keepsComingBackUntilItIsClose() {
         Situation situation = smelting();
         situation.currentGoal = GoalType.TEND_FURNACE;
+        situation.furnaceDistance = GoalSystem.FURNACE_LEASH / 2.0 + 1.0;
+        assertEquals(GoalType.TEND_FURNACE, select(situation));
+
+        // 가까이 왔고 시간이 많이 남았으면 다시 다른 일을 한다.
+        situation.furnaceDistance = 2.0;
+        assertEquals(GoalType.FIND_IRON, select(situation));
+    }
+
+    // 남은 시간이 줄수록 화로에서 멀어져도 되는 거리도 준다. 다 구워질 때쯤에는 화로에 돌아와 있어야 한다.
+    @Test
+    void headsBackInTimeToBeThereWhenItIsDone() {
+        assertEquals(GoalSystem.FURNACE_LEASH, GoalSystem.furnaceLeash(2400));
+        assertEquals(36.0, GoalSystem.furnaceLeash(240));
+        assertEquals(GoalSystem.FURNACE_NEAR, GoalSystem.furnaceLeash(0));
+
+        Situation situation = smelting();
+        situation.furnaceTicksLeft = 240;
+        situation.furnaceDistance = 30.0;
+        assertEquals(GoalType.FIND_IRON, select(situation));
+        situation.furnaceDistance = 40.0;
+        assertEquals(GoalType.TEND_FURNACE, select(situation));
+    }
+
+    // 곧 다 구워지면 다른 일을 새로 시작하지 않고 곁에서 기다린다.
+    @Test
+    void waitsByTheFurnaceWhenItIsAlmostDone() {
+        Situation situation = smelting();
+        situation.furnaceTicksLeft = GoalSystem.FURNACE_WAIT_TICKS;
         situation.furnaceDistance = 2.0;
         assertEquals(GoalType.TEND_FURNACE, select(situation));
     }
