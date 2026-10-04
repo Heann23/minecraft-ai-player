@@ -1,7 +1,9 @@
 package me.herry.minecraftAI.ai.plan;
 
 import me.herry.minecraftAI.ai.util.BlockPoint;
+import org.bukkit.block.BlockFace;
 
+import java.util.List;
 import java.util.function.Predicate;
 
 /**
@@ -43,6 +45,22 @@ public final class DigRules {
      */
     public static boolean shouldTunnelSideways(int feetY, int level, int slack, boolean underground) {
         return feetY <= level + slack || underground;
+    }
+
+    /**
+     * 걸어갈 길이 없는 대상 쪽으로 길을 낼 때 시도할 방향의 순서. 곧장 가는 쪽(toward)이 먼저이고,
+     * 그쪽을 팔 수 없을 때 비켜 갈 두 옆 방향 가운데서는 대상에 가까워지는 쪽이 먼저다.
+     * 멀어지는 쪽부터 가면, 방금 판 굴로 되돌아갔다가 다시 오기를 되풀이한다 (화로 두 칸 앞에서 그렇게 멈춰 있었다).
+     *
+     * @param dx 대상까지 남은 x 거리 (대상 - 발)
+     * @param dz 대상까지 남은 z 거리
+     */
+    public static List<BlockFace> sidesToward(BlockFace toward, int dx, int dz) {
+        boolean alongX = toward.getModX() != 0;
+        BlockFace negative = alongX ? BlockFace.NORTH : BlockFace.WEST;
+        boolean negativeIsCloser = (alongX ? dz : dx) < 0;
+        BlockFace first = negativeIsCloser ? negative : negative.getOppositeFace();
+        return List.of(toward, first, first.getOppositeFace());
     }
 
     /**

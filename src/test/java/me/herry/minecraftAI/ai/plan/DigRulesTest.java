@@ -1,10 +1,13 @@
 package me.herry.minecraftAI.ai.plan;
 
 import me.herry.minecraftAI.ai.util.BlockPoint;
+import org.bukkit.block.BlockFace;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
 import java.util.Set;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -106,6 +109,18 @@ class DigRulesTest {
         assertTrue(DigRules.shouldTunnelSideways(-53, -53, 6, true));
         // 얕은 곳에서도 목표 높이 근처면 판다 (철은 y 24 근처).
         assertTrue(DigRules.shouldTunnelSideways(30, 24, 8, false));
+    }
+
+    // 회귀: 화로가 동쪽으로 2칸, 남쪽으로 2칸에 있고 동쪽은 지나온 계단 밑이라 팔 수 없었다.
+    // 옆으로 비킬 때 북쪽(방금 판 굴)부터 골라서, 판 굴을 왔다 갔다 하기만 하고 화로에 닿지 못했다.
+    @Test
+    void sidestepsTowardTheTargetFirst() {
+        assertEquals(List.of(BlockFace.EAST, BlockFace.SOUTH, BlockFace.NORTH), DigRules.sidesToward(BlockFace.EAST, 2, 2));
+        assertEquals(List.of(BlockFace.EAST, BlockFace.NORTH, BlockFace.SOUTH), DigRules.sidesToward(BlockFace.EAST, 2, -1));
+        assertEquals(List.of(BlockFace.SOUTH, BlockFace.WEST, BlockFace.EAST), DigRules.sidesToward(BlockFace.SOUTH, -1, 3));
+        assertEquals(List.of(BlockFace.NORTH, BlockFace.EAST, BlockFace.WEST), DigRules.sidesToward(BlockFace.NORTH, 1, -3));
+        // 옆으로는 남은 거리가 없으면 어느 쪽이든 같다. 세 방향을 모두 시도하기만 하면 된다.
+        assertEquals(3, DigRules.sidesToward(BlockFace.WEST, -4, 0).size());
     }
 
     // 지상에서는 옆으로 파지 않고 자리를 옮겨서 다시 내려간다.
