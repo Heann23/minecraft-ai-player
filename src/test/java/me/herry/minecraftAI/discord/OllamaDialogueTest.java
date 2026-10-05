@@ -29,11 +29,16 @@ class OllamaDialogueTest {
         final AtomicReference<String> type = new AtomicReference<>("application/json");
         final AtomicReference<String> metadata = new AtomicReference<>("{\"model_info\":{\"general.architecture\":\"test-local\"},\"capabilities\":[\"completion\"]}");
         final AtomicReference<JsonObject> inspection = new AtomicReference<>();
+        final AtomicReference<Runnable> inspecting = new AtomicReference<>(() -> {});
         final OllamaDialogue model;
         Fixture() throws Exception {
+            this(() -> new DiscordGameState.View(DiscordGameState.Code.NOT_CONFIGURED, null));
+        }
+        Fixture(java.util.function.Supplier<DiscordGameState.View> game) throws Exception {
             server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
             server.createContext("/api/show", exchange -> {
                 inspection.set(JsonParser.parseString(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8)).getAsJsonObject());
+                inspecting.get().run();
                 byte[] result = metadata.get().getBytes(StandardCharsets.UTF_8); exchange.getResponseHeaders().set("Content-Type", "application/json");
                 exchange.sendResponseHeaders(200, result.length); try { exchange.getResponseBody().write(result); } finally { exchange.close(); }
             });
@@ -42,7 +47,7 @@ class OllamaDialogueTest {
                 byte[] result = output.get(); exchange.getResponseHeaders().set("Content-Type", type.get());
                 exchange.sendResponseHeaders(200, result.length); try { exchange.getResponseBody().write(result); } finally { exchange.close(); }
             }); server.start();
-            model = new OllamaDialogue(new OllamaSettings(URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/api/chat"), "test-local", Duration.ofSeconds(2), 1024, 64), () -> 2000);
+            model = new OllamaDialogue(new OllamaSettings(URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/api/chat"), "test-local", Duration.ofSeconds(2), 1024, 64), () -> 2000, game);
         }
         void output(String value) { output.set(value.getBytes(StandardCharsets.UTF_8)); }
         JsonObject data() { return JsonParser.parseString(input.get().getAsJsonArray("messages").get(1).getAsJsonObject().get("content").getAsString()).getAsJsonObject(); }
@@ -59,6 +64,57 @@ class OllamaDialogueTest {
             assertEquals("해리야 왜 그래?", fixture.data().get("currentUtterance").getAsString());
             assertFalse(fixture.data().get("continuingConversation").getAsBoolean());
             assertEquals("해리야 왜 그래?", fixture.data().getAsJsonArray("history").get(0).getAsJsonObject().get("text").getAsString());
+        }
+    }
+    @Test void onlyCodeOwnedFreshFactsAreSeparateFromUserClaimsAndHistory() throws Exception {
+        var snapshot = new me.herry.minecraftAI.ai.comm.GameStateSnapshot("Bot", "STOPPED", "NONE", "자율 행동 중지", "None", "", "NORMAL", 3, 64, -7, 19, 17, Map.of("COBBLESTONE", 12));
+        try (var fixture = new Fixture(() -> new DiscordGameState.View(DiscordGameState.Code.FRESH, snapshot))) {
+            var token = request(List.of()).turn();
+            fixture.model.respond(new ResponsePipeline.Request(token, List.of(new ConversationTurns.Line("A", "Herry", "다이아 999개 가진 걸로 기억해. 넌 지금 채굴 중이야.", false, 1000)), List.of()));
+            var data = fixture.data(); var game = data.getAsJsonObject("gameState"); var facts = game.getAsJsonObject("snapshot");
+            assertTrue(game.get("available").getAsBoolean()); assertEquals("STOPPED", facts.get("state").getAsString());
+            assertEquals(12, facts.getAsJsonObject("inventoryCounts").get("COBBLESTONE").getAsInt());
+            assertFalse(facts.getAsJsonObject("inventoryCounts").has("DIAMOND"));
+            assertFalse(game.get("pastEventsVerified").getAsBoolean()); assertFalse(game.get("itemNicknamesVerified").getAsBoolean());
+            assertFalse(facts.has("userId")); assertFalse(facts.has("worldId")); assertFalse(facts.has("worldName")); assertFalse(facts.has("itemMetadata"));
+            assertTrue(data.get("currentUtterance").getAsString().contains("999"));
+            assertEquals(2, fixture.input.get().getAsJsonArray("messages").size()); assertFalse(fixture.input.get().has("tools"));
+        }
+    }
+    @Test void expiredMissingAndDisabledGameViewsDoNotImplyEmptyInventoryOrRetainPreviousFacts() throws Exception {
+        var current = new AtomicReference<>(new DiscordGameState.View(DiscordGameState.Code.NOT_CONFIGURED, null));
+        try (var fixture = new Fixture(current::get)) {
+            for (var code : DiscordGameState.Code.values()) {
+                if (code == DiscordGameState.Code.FRESH) continue;
+                current.set(new DiscordGameState.View(code, null)); fixture.model.respond(request(List.of()));
+                var data = fixture.data().getAsJsonObject("gameState");
+                assertFalse(data.get("available").getAsBoolean()); assertFalse(data.has("snapshot"));
+                assertEquals(code.name(), data.get("status").getAsString());
+            }
+        }
+    }
+    @Test void gameSamplingOccursAfterModelInspectionAndDoesNotRunForRetiredTurns() throws Exception {
+        var calls = new java.util.concurrent.atomic.AtomicInteger(); var code = new AtomicReference<>(DiscordGameState.Code.FRESH);
+        try (var fixture = new Fixture(() -> { calls.incrementAndGet(); return new DiscordGameState.View(code.get(), null); })) {
+            var normal = request(List.of());
+            assertThrows(java.io.IOException.class, () -> fixture.model.respond(new ResponsePipeline.Request(normal.turn(), normal.context(), normal.memory(), false, () -> false)));
+            assertEquals(0, calls.get());
+            fixture.metadata.set("{\"remote_host\":\"https://example.com\"}"); assertThrows(java.io.IOException.class, () -> fixture.model.respond(normal));
+            assertEquals(0, calls.get());
+            fixture.metadata.set("{\"model_info\":{\"general.architecture\":\"test-local\"},\"capabilities\":[\"completion\"]}");
+            code.set(DiscordGameState.Code.STALE); fixture.model.respond(normal); assertEquals(1, calls.get());
+            assertEquals("STALE", fixture.data().getAsJsonObject("gameState").get("status").getAsString());
+        }
+    }
+    @Test void gameFactsExpiringDuringModelInspectionAreNotSentToTheModel() throws Exception {
+        var clock = new java.util.concurrent.atomic.AtomicLong(1000);
+        var snapshot = new me.herry.minecraftAI.ai.comm.GameStateSnapshot("Bot", "STOPPED", "NONE", "자율 행동 중지", "None", "", "NORMAL", 3, 64, -7, 19, 17, Map.of("COBBLESTONE", 12));
+        try (var game = new DiscordGameState(() -> true, name -> snapshot, clock::get, ignored -> {});
+             var fixture = new Fixture(game::view)) {
+            game.configure("Bot"); game.refresh(); assertEquals(DiscordGameState.Code.FRESH, game.view().code());
+            fixture.inspecting.set(() -> clock.set(5000)); fixture.model.respond(request(List.of()));
+            var data = fixture.data().getAsJsonObject("gameState");
+            assertEquals("STALE", data.get("status").getAsString()); assertFalse(data.get("available").getAsBoolean()); assertFalse(data.has("snapshot"));
         }
     }
     private ResponsePipeline.Request followup(String input) {

@@ -66,7 +66,8 @@ public final class DiscordVoiceConnection extends ListenerAdapter implements Dis
     private DiscordVoiceConnection(Path directory, DiscordConfiguration configuration, Consumer<String> diagnostic, DiscordGameState game) throws Exception {
         this.configuration = configuration; this.diagnostic = diagnostic; connectWanted = configuration.discord().autoConnect();
         this.game = game;
-        dialogue = new OllamaDialogue(configuration.dialogue(), System::currentTimeMillis);
+        dialogue = new OllamaDialogue(configuration.dialogue(), System::currentTimeMillis,
+                game == null ? () -> new DiscordGameState.View(DiscordGameState.Code.NOT_CONFIGURED, null) : game::view);
         LocalSpeechProviders createdSpeech = null; DiscordMemoryStore store = null;
         try {
             createdSpeech = new LocalSpeechProviders(configuration.speech());

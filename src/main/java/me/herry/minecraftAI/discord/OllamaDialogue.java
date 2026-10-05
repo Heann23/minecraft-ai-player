@@ -9,6 +9,9 @@ import java.util.function.LongSupplier;
 /** Korean dialogue text only. No tools, command interpretation, model management, or Bukkit calls. */
 public final class OllamaDialogue implements ResponsePipeline.Model, AutoCloseable {
     private static final String PROFILE = """
+            게임 사실은 코드가 제공한 gameState만 근거로 답한다. available이 false이면 현재 게임 상태를 모른다고 한다.
+            gameState는 최근 관측값이다. 인벤토리가 과거 행동·발견·획득·분실이나 아이템 별명을 입증하지 않는다.
+            아이템 별명과 사연이 확인되지 않으면 만들어 낸 이름을 실제 소유물로 말하지 않는다. 별명은 제안으로만 말한다.
             너는 Herry(해리), 사용자와 마인크래프트를 함께 즐기는 능청스럽고 활발한 친구다.
             돌에도 이름 붙이는 엉뚱한 수집가처럼 가볍게 비유하되 같은 농담을 반복하지 않는다.
             한국어로 보통 1~3문장만 말한다. 상대가 진지하거나 장난이 불편하다고 하면 사과하고 멈춘다.
@@ -26,9 +29,14 @@ public final class OllamaDialogue implements ResponsePipeline.Model, AutoCloseab
     private final OllamaSettings settings;
     private final LongSupplier clock;
     private final LocalHttp http;
+    private final java.util.function.Supplier<DiscordGameState.View> game;
     private final java.util.concurrent.locks.ReentrantLock inference = new java.util.concurrent.locks.ReentrantLock();
     public OllamaDialogue(OllamaSettings settings, LongSupplier clock) {
+        this(settings, clock, () -> new DiscordGameState.View(DiscordGameState.Code.NOT_CONFIGURED, null));
+    }
+    public OllamaDialogue(OllamaSettings settings, LongSupplier clock, java.util.function.Supplier<DiscordGameState.View> game) {
         this.settings = java.util.Objects.requireNonNull(settings); this.clock = java.util.Objects.requireNonNull(clock);
+        this.game = java.util.Objects.requireNonNull(game);
         if (settings.model().isEmpty()) throw new IllegalArgumentException("local dialogue model is not configured");
         http = new LocalHttp();
     }
@@ -140,8 +148,27 @@ public final class OllamaDialogue implements ResponsePipeline.Model, AutoCloseab
             JsonObject value = new JsonObject(); value.addProperty("speaker", line.speaker()); value.addProperty("target", line.target());
             value.addProperty("text", line.text()); value.addProperty("assistant", line.assistant()); value.addProperty("time", line.timeMillis()); history.add(value);
         }
-        data.add("history", history); JsonArray messages = new JsonArray(); messages.add(message("system", PROFILE)); messages.add(message("user", data.toString()));
+        data.add("history", history); data.add("gameState", gameData());
+        JsonArray messages = new JsonArray(); messages.add(message("system", PROFILE)); messages.add(message("user", data.toString()));
         body.add("messages", messages); return body;
+    }
+    /** Read an immutable view after inference admission and model inspection, never while waiting for the inference lock. */
+    private JsonObject gameData() {
+        var view = java.util.Objects.requireNonNull(game.get()); var result = new JsonObject();
+        result.addProperty("status", view.code().name()); result.addProperty("available", view.code() == DiscordGameState.Code.FRESH);
+        result.addProperty("maximumAgeMillis", 2500);
+        if (view.code() != DiscordGameState.Code.FRESH) return result;
+        var snapshot = view.snapshot(); var facts = new JsonObject();
+        facts.addProperty("aiName", snapshot.aiName()); facts.addProperty("state", snapshot.state());
+        facts.addProperty("goal", snapshot.goal()); facts.addProperty("activity", snapshot.activity());
+        facts.addProperty("action", snapshot.action()); facts.addProperty("lastDecisionReason", snapshot.reason());
+        facts.addProperty("dimension", snapshot.dimension()); facts.addProperty("x", snapshot.x()); facts.addProperty("y", snapshot.y()); facts.addProperty("z", snapshot.z());
+        facts.addProperty("health", snapshot.health()); facts.addProperty("food", snapshot.food());
+        var items = new JsonObject(); snapshot.items().entrySet().stream().sorted(java.util.Map.Entry.comparingByKey())
+                .forEach(item -> items.addProperty(item.getKey(), item.getValue()));
+        facts.add("inventoryCounts", items); result.add("snapshot", facts);
+        result.addProperty("pastEventsVerified", false); result.addProperty("itemNicknamesVerified", false);
+        return result;
     }
     private static JsonObject message(String role, String content) { var message = new JsonObject(); message.addProperty("role", role); message.addProperty("content", content); return message; }
     private static String string(JsonObject object, String key) throws IOException {
