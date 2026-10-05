@@ -55,6 +55,17 @@ public final class DiscordTextConversation implements AutoCloseable {
         var accepted = turns.accept(user, interaction, text.strip(), ConversationTurns.Address.CHARACTER, false);
         if (accepted.token() == null) return CompletableFuture.failedFuture(new IllegalStateException("duplicate text input"));
         cancelWork(user);
+        if (ConfirmedTextReset.requested(text)) {
+            turns.clearContextFor(accepted.token());
+            String answer = ConfirmedTextReset.reply();
+            if (turns.generated(accepted.token(), answer)) {
+                completed.incrementAndGet();
+                return CompletableFuture.completedFuture(new Reply(accepted.token(), answer));
+            }
+            var cancelledReply = new CompletableFuture<Reply>();
+            cancelledReply.cancel(false); cancelled.incrementAndGet();
+            return cancelledReply;
+        }
         if (ConfirmedTextForget.requested(text)) turns.clearContextFor(accepted.token());
         var result = new CompletableFuture<Reply>(); pending.add(result);
         var conversation = turns;
