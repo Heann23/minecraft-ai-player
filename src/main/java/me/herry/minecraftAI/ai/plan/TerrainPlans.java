@@ -124,7 +124,10 @@ public final class TerrainPlans {
         if (!stair.isEmpty()) return stair;
         // 숨어 있는 자리의 바로 위나 옆이 몬스터가 있는 곳이라 뚫을 수 없으면, 옆으로 굴을 파서 자리를 옮긴 다음에 올라간다.
         boolean hidden = RefugePlans.isHidden(ai);
-        List<Action> aside = hidden ? digTunnel(ai, false) : List.<Action>of();
+        // 머리 위가 지나온 굴의 발판이라 캘 수 없을 때도 마찬가지다. 계단은 어느 쪽으로 내든 머리 위를 캐야 하므로 옆으로 한 칸 비켜난다.
+        World world = ai.getPlayer().getWorld();
+        boolean underShaft = cutsShaft(ai, world, new BukkitTerrainView(world), ai.getPosition().offset(0, 2, 0));
+        List<Action> aside = hidden || underShaft ? digTunnel(ai, false) : List.<Action>of();
         // 캘 것 없이 숨은 자리 안에서 걷기만 하는 것은 자리를 옮기는 것이 아니다.
         if (aside.stream().anyMatch(BreakBlockAction.class::isInstance)) return aside;
 
@@ -212,8 +215,14 @@ public final class TerrainPlans {
     // 블록을 하나 쌓고 그 위에 올라선다. 쌓을 블록이 없거나 머리 위가 위험하면 빈 목록.
     public static List<Action> pillarUp(AIPlayer ai, @Nullable Consumer<BlockPoint> onPlaced) {
         if (!PillarUpAction.canPillar(ai)) return List.of();
+        World world = ai.getPlayer().getWorld();
+        BukkitTerrainView terrain = new BukkitTerrainView(world);
+        BlockPoint ceiling = ai.getPosition().offset(0, 2, 0);
         // 올라서려면 머리 위 칸을 캐야 한다. 그 칸이 몬스터가 있는 쪽으로 뚫리면 숨은 자리가 열린다.
-        if (RefugePlans.breaksCover(ai, new BukkitTerrainView(ai.getPlayer().getWorld()), ai.getPosition().offset(0, 2, 0))) return List.of();
+        if (RefugePlans.breaksCover(ai, terrain, ceiling)) return List.of();
+        // 그 칸이 지나온 굴의 발판이면 캐는 행동이 거절한다. 그래도 계획을 세우면 그 자리에서 1초에 몇 번씩 실패만 되풀이한다
+        // (기본 시드의 y 54 에서 10분 동안 그랬다). 다른 방법(벽으로 가서 계단 파기, 자리 옮기기)으로 넘어가게 한다.
+        if (cutsShaft(ai, world, terrain, ceiling)) return List.of();
         ai.debug("Placing a block underfoot to climb up from " + ai.getPosition());
         return List.of(new PillarUpAction(onPlaced));
     }

@@ -384,8 +384,11 @@ final class AIBrain {
             ai.debug("Action failed: " + action.getName() + " (" + action.getFailReason() + ")");
             ai.getMemory().recordFailure(action.getName(), action.getFailReason(), now);
             log.noteFailure(now, currentGoal, action.getName(), action.getFailReason());
-            if (NavigationSystem.FAIL_TRAPPED.equals(action.getFailReason())) trappedStreak++;
-            onPlanFailed(now, action.getName() + ": " + action.getFailReason());
+            boolean trapped = NavigationSystem.FAIL_TRAPPED.equals(action.getFailReason());
+            if (trapped) trappedStreak++;
+            // 길을 한 단 파고 가 보니 아직 갇혀 있는 것은 목표의 실패로 세지 않는다. 바로 다음 단을 판다.
+            if (recovery.countsAsFailure(trapped)) onPlanFailed(now, action.getName() + ": " + action.getFailReason());
+            else trappedStreak = TRAPPED_THRESHOLD;
             // 계획의 나머지는 버리고, 다음 판단 때 현재 상황에 맞춰 다시 세운다.
             plan = null;
             ai.debug("Replanning...");
@@ -395,7 +398,8 @@ final class AIBrain {
     private void onPlanSucceeded() {
         // 길을 파서 빠져나온 것은 목표를 이룬 것이 아니다. 그것까지 성공으로 세면, 길을 내도 닿지 못하는 목표가
         // "실패 → 탈출 → 실패"를 끝없이 되풀이하면서도 쉬지 않는다.
-        if (!escaping) recovery.onPlanSucceeded(currentGoal);
+        if (escaping) recovery.onEscapeStep();
+        else recovery.onPlanSucceeded(currentGoal);
         // 한 단을 파고 나온 직후에는 아직 갇혀 있을 수 있다. 다음 이동이 또 막히면 바로 이어서 판다.
         trappedStreak = escaping ? TRAPPED_THRESHOLD - 1 : 0;
     }
