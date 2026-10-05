@@ -100,6 +100,7 @@ public final class Progression {
             case BUCKET -> Material.BUCKET;
             case DIAMOND_PICKAXE -> Material.DIAMOND_PICKAXE;
             case FLINT_AND_STEEL -> Material.FLINT_AND_STEEL;
+            case WATER_BUCKET -> Material.WATER_BUCKET;
             case OBSIDIAN, NETHER_PORTAL -> Material.OBSIDIAN;
             case BLAZE_RODS -> Material.BLAZE_ROD;
             case ENDER_PEARLS -> Material.ENDER_PEARL;

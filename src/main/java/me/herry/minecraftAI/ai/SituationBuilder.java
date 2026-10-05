@@ -262,6 +262,9 @@ final class SituationBuilder {
         situation.diamonds = inventory.count(Material.DIAMOND);
         situation.gravel = inventory.count(Material.GRAVEL);
         situation.knowsGravel = ResourceLocator.locate(ai, MemoryType.GRAVEL, GatherPlans.ORE_WALK_RANGE) != null;
+        situation.emptyBucket = inventory.has(Material.BUCKET);
+        situation.knowsWater = situation.emptyBucket
+                && ResourceLocator.locate(ai, MemoryType.WATER_SOURCE, GatherPlans.ORE_WALK_RANGE) != null;
         // 좋은 곡괭이만 있고 막 쓸 돌 곡괭이가 없으면, 가진 재료로 만들 수 있을 때 하나 만든다.
         situation.workPickaxeWanted = situation.canMineDiamond && !inventory.hasWorkPickaxe()
                 && ai.getCrafting().plan(Material.STONE_PICKAXE, 1, inventory.snapshot()).isFeasible();

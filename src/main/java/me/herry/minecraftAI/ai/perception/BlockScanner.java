@@ -13,6 +13,7 @@ import org.bukkit.Material;
 import org.bukkit.Tag;
 import org.bukkit.World;
 import org.bukkit.block.Block;
+import org.bukkit.block.data.Levelled;
 import org.bukkit.entity.Player;
 import org.bukkit.loot.Lootable;
 import org.jetbrains.annotations.Nullable;
@@ -143,12 +144,14 @@ public final class BlockScanner {
         if (type == MemoryType.LOOT_CHEST && !isUnopenedLootChest(world.getBlockAt(x, y, z))) return;
         // 돌과 광물은 겉으로 드러난 것만 기억한다. 땅속에 묻힌 블록은 걸어서 닿을 수 없다.
         if (needsExposure(type) && !isExposed(x, y, z)) return;
+        // 물은 양동이로 뜰 수 있는 것만 기억한다: 흐르지 않는 원천이고 위가 트여 있어야 한다.
+        if (type == MemoryType.WATER_SOURCE && !isOpenSource(x, y, z)) return;
         // 실제 플레이어처럼, 빛이 통과하지 않는 블록 너머(벽 뒤의 다른 동굴 등)에 있는 것은 보이지 않는다.
         if (!Visibility.canSeeBlock(opacity, eyeX, eyeY, eyeZ, x, y, z)) return;
 
         foundPerType.put(type, count + 1);
         found++;
-        long ttl = isResource(type) || type == MemoryType.DANGER_PLACE ? RESOURCE_TTL : -1L;
+        long ttl = isResource(type) || type == MemoryType.DANGER_PLACE || type == MemoryType.WATER_SOURCE ? RESOURCE_TTL : -1L;
         memory.remember(type, world.getUID(), new BlockPoint(x, y, z), now, ttl);
     }
 
@@ -186,6 +189,11 @@ public final class BlockScanner {
         return false;
     }
 
+    private boolean isOpenSource(int x, int y, int z) {
+        if (y + 1 >= world.getMaxHeight() || !world.getBlockAt(x, y + 1, z).getType().isAir()) return false;
+        return world.getBlockAt(x, y, z).getBlockData() instanceof Levelled levelled && levelled.getLevel() == 0;
+    }
+
     private static boolean needsExposure(MemoryType type) {
         return type == MemoryType.STONE || type == MemoryType.COAL_ORE || type == MemoryType.IRON_ORE || type == MemoryType.DIAMOND_ORE
                 || type == MemoryType.GRAVEL;
@@ -213,6 +221,7 @@ public final class BlockScanner {
         return switch (material) {
             case STONE, COBBLESTONE, DEEPSLATE, COBBLED_DEEPSLATE, BLACKSTONE -> MemoryType.STONE;
             case GRAVEL -> MemoryType.GRAVEL;
+            case WATER -> MemoryType.WATER_SOURCE;
             case CRAFTING_TABLE -> MemoryType.WORKBENCH;
             case FURNACE -> MemoryType.FURNACE;
             case LAVA -> MemoryType.DANGER_PLACE;

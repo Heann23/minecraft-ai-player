@@ -120,6 +120,9 @@ public final class GoalSystem {
         // 부싯돌은 자갈을 캘 때 열에 한 번쯤 나온다. 캘 자갈이 있으면(아는 것, 가진 것) 바로 하고, 없으면 찾으러 다닌다.
         register(GoalType.GATHER_FLINT, situation -> situation.need != Situation.Need.FLINT || staysBelow(situation) && !hasGravel(situation) ? 0.0
                 : hasGravel(situation) ? 305.0 : 150.0);
+        // 물은 강이나 호수에서 뜬다. 아는 물이 있으면 바로 가고, 없으면 지상에서 찾는다.
+        register(GoalType.FILL_BUCKET, situation -> situation.nextMilestone != Milestone.WATER_BUCKET || !situation.emptyBucket
+                || staysBelow(situation) && !situation.knowsWater ? 0.0 : situation.knowsWater ? 305.0 : 150.0);
         register(GoalType.EXPLORE, situation -> 50.0);
     }
 

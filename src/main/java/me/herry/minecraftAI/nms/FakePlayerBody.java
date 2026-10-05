@@ -15,9 +15,11 @@ import net.minecraft.server.level.ClientInformation;
 import net.minecraft.server.level.ParticleStatus;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.network.CommonListenerCookie;
+import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.HumanoidArm;
 import net.minecraft.world.entity.player.ChatVisiblity;
+import net.minecraft.world.item.ItemStack;
 import org.bukkit.Bukkit;
 import org.bukkit.GameMode;
 import org.bukkit.Location;
@@ -153,5 +155,14 @@ public final class FakePlayerBody implements AIBody {
     @Override
     public boolean isBlockedHorizontally() {
         return handle.horizontalCollision;
+    }
+
+    // 클라이언트가 우클릭 패킷을 보냈을 때 서버가 타는 경로를 그대로 부른다. 시선은 지금의 회전으로 계산된다.
+    @Override
+    public boolean useItem() {
+        if (!isUsable()) return false;
+        ItemStack stack = handle.getItemInHand(InteractionHand.MAIN_HAND);
+        if (stack.isEmpty()) return false;
+        return handle.gameMode.useItem(handle, handle.level(), stack, InteractionHand.MAIN_HAND).consumesAction();
     }
 }

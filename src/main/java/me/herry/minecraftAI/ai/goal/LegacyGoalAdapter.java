@@ -57,6 +57,7 @@ public final class LegacyGoalAdapter {
             case FIND_DIAMOND, MINE_DIAMOND -> new AcquireGoal("DIAMOND",
                     situation == null ? 1 : Math.max(1, situation.diamondsNeeded), origin);
             case GATHER_FLINT -> new AcquireGoal("FLINT", 1, origin);
+            case FILL_BUCKET -> new AcquireGoal("WATER_BUCKET", 1, origin);
             case STOCK_FOOD -> new AcquireGoal(ItemGroups.FOOD, GoalSystem.FOOD_STOCK, origin);
             case CRAFT_WORKBENCH -> new CraftGoal(CraftGoal.CRAFTING_TABLE, 1, origin);
             case CRAFT_WORK_TOOL -> new CraftGoal("STONE_PICKAXE", 1, origin);

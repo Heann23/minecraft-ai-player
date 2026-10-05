@@ -38,6 +38,9 @@ public enum Milestone {
     DIAMOND_PICKAXE(Stage.DIAMOND_AGE, Kind.CRAFT, Cost.diamond(3), "다이아몬드 곡괭이", f -> f.pickaxe.isAtLeast(ToolTier.DIAMOND)),
 
     FLINT_AND_STEEL(Stage.NETHER_ENTRY, Kind.CRAFT, Cost.iron(1), "부싯돌과 부시", f -> f.netherPortalBuilt || f.has("FLINT_AND_STEEL")),
+    // 흑요석은 용암에 물을 부어서 만든다. 흑요석을 다 모았으면 물은 더 필요 없다.
+    WATER_BUCKET(Stage.NETHER_ENTRY, Kind.GATHER, Cost.NONE, "물 양동이",
+            f -> f.netherPortalBuilt || f.has("WATER_BUCKET") || f.count("OBSIDIAN") >= Milestone.PORTAL_OBSIDIAN),
     OBSIDIAN(Stage.NETHER_ENTRY, Kind.GATHER, Cost.NONE, "흑요석 10개",
             f -> f.netherPortalBuilt || f.count("OBSIDIAN") >= Milestone.PORTAL_OBSIDIAN),
     NETHER_PORTAL(Stage.NETHER_ENTRY, Kind.WORLD, Cost.NONE, "네더 포탈", f -> f.netherPortalBuilt),
@@ -86,7 +89,7 @@ public enum Milestone {
     public static final int EYES_NEEDED = 12;
     public static final int ARROWS_NEEDED = 64;
     // 여기까지는 AI 가 스스로 해낼 수 있다. 그 뒤는 단계 정의만 있고, 실제로 수행하는 행동은 아직 없다.
-    private static final Milestone LAST_AUTOMATED = FLINT_AND_STEEL;
+    private static final Milestone LAST_AUTOMATED = WATER_BUCKET;
 
     private final Stage stage;
     private final Kind kind;
