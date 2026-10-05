@@ -34,6 +34,12 @@ public interface AIBody {
     // 벽 등에 수평으로 부딪혀 있는지
     boolean isBlockedHorizontally();
 
+    /**
+     * 손에 든 아이템을 바라보는 쪽으로 쓴다 (빈 양동이로 물 뜨기 등). 진짜 플레이어의 우클릭과 같은 경로를 탄다.
+     * 서버가 받아들였으면 true. 무엇이 바뀌었는지는 부른 쪽이 월드와 가방을 보고 확인한다.
+     */
+    boolean useItem();
+
     default void lookAt(double x, double y, double z) {
         Location eye = getPlayer().getEyeLocation();
         double dx = x - eye.getX();

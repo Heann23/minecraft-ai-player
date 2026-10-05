@@ -99,6 +99,7 @@ class ProgressionTest {
         ProgressFacts gathering = ironAge();
         gathering.pickaxe = ToolTier.DIAMOND;
         gathering.setCount("FLINT_AND_STEEL", 1);
+        gathering.setCount("WATER_BUCKET", 1);
         gathering.tableAvailable = false;
         assertEquals(Milestone.OBSIDIAN, Progression.next(gathering));
     }
@@ -184,8 +185,11 @@ class ProgressionTest {
         assertEquals(Stage.NETHER_ENTRY, Progression.stageOf(facts));
 
         facts.setCount("FLINT_AND_STEEL", 1);
+        assertEquals(Milestone.WATER_BUCKET, Progression.next(facts));
+        facts.setCount("WATER_BUCKET", 1);
         assertEquals(Milestone.OBSIDIAN, Progression.next(facts));
         facts.setCount("OBSIDIAN", Milestone.PORTAL_OBSIDIAN);
+        facts.setCount("WATER_BUCKET", 0);
         assertEquals(Milestone.NETHER_PORTAL, Progression.next(facts));
 
         // 포탈을 만들고 나면 흑요석과 부싯돌은 더 필요 없다.
@@ -235,10 +239,11 @@ class ProgressionTest {
 
     // 스스로 해낼 수 있는 범위가 어디까지인지 정직하게 표시되어 있어야 한다.
     @Test
-    void automationFrontierIsFlintAndSteel() {
+    void automationFrontierIsTheWaterBucket() {
         assertTrue(Milestone.DIAMOND_PICKAXE.isAutomated());
         assertTrue(Milestone.SHELTER.isAutomated());
         assertTrue(Milestone.FLINT_AND_STEEL.isAutomated());
+        assertTrue(Milestone.WATER_BUCKET.isAutomated());
         assertFalse(Milestone.OBSIDIAN.isAutomated());
         assertFalse(Milestone.ENDER_DRAGON.isAutomated());
     }

@@ -29,6 +29,7 @@ public final class Phrases {
             case MINE_IRON -> "철 광석을 캘게요.";
             case MINE_DIAMOND -> "다이아몬드다! 캐러 갈게요.";
             case GATHER_FLINT -> "부싯돌이 나올 때까지 자갈을 캘게요.";
+            case FILL_BUCKET -> "양동이에 물을 떠 올게요.";
             case SMELT_IRON -> "화로에서 철을 제련할게요.";
             case PACK_UP_TABLE -> "작업대는 챙겨 갈게요.";
             case PACK_UP_FURNACE -> "화로는 챙겨 갈게요.";
@@ -83,6 +84,7 @@ public final class Phrases {
             case MINE_IRON -> "철을 캐는";
             case MINE_DIAMOND -> "다이아몬드를 캐는";
             case GATHER_FLINT -> "부싯돌을 구하는";
+            case FILL_BUCKET -> "물을 뜨는";
             case SMELT_IRON -> "철을 제련하는";
             case COOK_FOOD -> "고기를 굽는";
             case PACK_UP_TABLE -> "작업대를 챙기는";

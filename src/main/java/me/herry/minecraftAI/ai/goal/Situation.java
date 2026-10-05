@@ -85,6 +85,9 @@ public final class Situation {
     // 가진 자갈의 개수와, 캐러 갈 수 있는 자갈을 알고 있는지. 부싯돌은 자갈을 캘 때 가끔 나온다.
     public int gravel;
     public boolean knowsGravel;
+    // 빈 양동이가 있는지와, 가서 뜰 수 있는 물을 알고 있는지
+    public boolean emptyBucket;
+    public boolean knowsWater;
     // 화로에 넣을 연료(석탄, 숯, 나무)가 있는지
     public boolean hasFuel;
     // 석탄과 숯의 개수, 횃불의 개수
