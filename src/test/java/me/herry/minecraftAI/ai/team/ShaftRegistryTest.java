@@ -81,7 +81,11 @@ class ShaftRegistryTest {
         assertNotNull(registry.deeper(WORLD, top, 24.0, 4));
 
         // 한 번 막힌 것으로는 막다른 굴로 치지 않는다 (공중에 떠 있었거나 지나가는 몬스터 때문일 수 있다).
-        registry.noteBlockedEnd(WORLD, end, 2.0, 1000L);
+        assertTrue(registry.noteBlockedEnd(WORLD, end, 2.0, 1000L));
+        // 굴의 끝이 아닌 곳에서는 적어 둘 굴이 없다. 한 칸만 기록된 굴도 굴로 치지 않는다.
+        assertFalse(registry.noteBlockedEnd(WORLD, new BlockPoint(10, 60, 0), 2.0, 1000L));
+        registry.record("other", WORLD, new BlockPoint(200, 70, 200));
+        assertFalse(registry.noteBlockedEnd(WORLD, new BlockPoint(200, 70, 200), 2.0, 1000L));
         assertNull(registry.deadEndNear(WORLD, end, 2.0));
         // 곧바로 다시 확인한 것은 같은 일로 친다.
         registry.noteBlockedEnd(WORLD, end, 2.0, 1001L);
