@@ -42,11 +42,13 @@ public final class AttackEntityAction extends AbstractAction {
     // 크리퍼는 7칸 넘게 떨어지면 부풀기를 멈춘다.
     private static final double CREEPER_SAFE_DISTANCE = 7.5;
     private static final float BACK_AWAY_FACING = 45.0F;
+    // 방패를 든 동안에는 평소의 5분의 1 속도로만 걸을 수 있다 (실제 플레이어와 같다).
+    private static final float BLOCKING_PACE = 0.2F;
 
     // 싸우는 도중에 더 가까이에서 때린 몬스터가 있으면 그쪽으로 바뀐다.
     private LivingEntity target;
     private final HandPolicy.Purpose purpose;
-    private EntityChaser chaser = new EntityChaser();
+    private EntityChaser chaser;
     private int ticksWithoutHit;
     private boolean holding;
     private int holdTicks;
@@ -64,6 +66,12 @@ public final class AttackEntityAction extends AbstractAction {
         super("AttackEntity", TIMEOUT);
         this.target = target;
         this.purpose = purpose;
+        this.chaser = newChaser();
+    }
+
+    // 몬스터는 급하게 쫓고, 사냥감은 허기를 아끼며 쫓는다.
+    private EntityChaser newChaser() {
+        return new EntityChaser(purpose == HandPolicy.Purpose.FIGHT);
     }
 
     @Override
@@ -153,7 +161,7 @@ public final class AttackEntityAction extends AbstractAction {
         ai.getNavigation().stop();
         ai.debug("Turning to the " + attacker.getType() + " that hit me");
         target = attacker;
-        chaser = new EntityChaser();
+        chaser = newChaser();
         holding = false;
         holdTicks = 0;
         ticksWithoutHit = 0;
@@ -179,14 +187,22 @@ public final class AttackEntityAction extends AbstractAction {
         return ShieldRules.blocksArrow(drawing, target.getActiveItemUsedTime(), sinceDrawing) ? "arrow" : null;
     }
 
-    // 제자리에 서서 상대를 바라보고 방패를 든다. 방패는 바라보는 쪽에서 오는 폭발과 화살을 막아 준다.
+    /**
+     * 상대를 바라보고 방패를 든다. 방패는 바라보는 쪽에서 오는 폭발과 화살을 막아 준다.
+     * 화살을 막을 때는 방패를 든 채로 천천히 다가간다. 서 있기만 하면 상대가 활을 당길 때마다 발이 묶여서,
+     * 스파이더 조키처럼 빠르게 움직이는 상대와의 거리가 줄지 않는다. 터지려는 크리퍼에게는 다가가지 않는다.
+     */
     private void raiseShield(AIPlayer ai, Player player, String danger) {
         AIBody body = ai.getBody();
         ai.getNavigation().stop();
         Vector center = target.getBoundingBox().getCenter();
         body.lookAt(center.getX(), center.getY(), center.getZ());
-        body.inputMove(0.0F, 0.0F);
+        Location location = player.getLocation();
+        boolean advance = !(target instanceof Creeper) && location.distance(target.getLocation()) > KEEP_MAX
+                && body.isFacing(center.getX(), center.getY(), center.getZ(), FACING_TOLERANCE) && canStep(player, location, true);
+        body.inputMove(advance ? BLOCKING_PACE : 0.0F, 0.0F);
         body.inputSprint(false);
+        body.inputJump(player.isInWater());
         if (!shielding) {
             player.startUsingItem(EquipmentSlot.OFF_HAND);
             shielding = true;
@@ -229,7 +245,7 @@ public final class AttackEntityAction extends AbstractAction {
         // 상대의 공격은 닿지 않고 내 공격만 닿는 거리를 유지한다. 두 기준 사이에서는 움직이지 않아서 앞뒤로 떨지 않는다.
         float forward = 0.0F;
         if (distance > KEEP_MAX) forward = 1.0F;
-        else if (distance < KEEP_MIN && canStepAway(player, location)) forward = -1.0F;
+        else if (distance < KEEP_MIN && canStep(player, location, false)) forward = -1.0F;
         body.inputMove(forward, 0.0F);
         body.inputSprint(false);
         body.inputJump(player.isInWater());
@@ -276,7 +292,7 @@ public final class AttackEntityAction extends AbstractAction {
             body.inputMove(0.0F, 0.0F);
             return;
         }
-        if (!canStepAway(player, location)) {
+        if (!canStep(player, location, false)) {
             ai.getCombatMemory().onRetreatBlocked(ai.getTicks());
             fail("no room to back away");
             return;
@@ -286,11 +302,11 @@ public final class AttackEntityAction extends AbstractAction {
         body.inputMove(facing ? -1.0F : 0.0F, 0.0F);
     }
 
-    // 상대의 반대쪽으로 한 걸음 물러날 자리가 안전한지 (막혀 있지 않고, 낭떠러지나 용암이 아닌지) 확인한다.
-    private boolean canStepAway(Player player, Location location) {
+    // 상대 쪽으로(toward) 또는 반대쪽으로 한 걸음 옮길 자리가 안전한지 (막혀 있지 않고, 낭떠러지나 용암이 아닌지) 확인한다.
+    private boolean canStep(Player player, Location location, boolean toward) {
         Vector away = location.toVector().subtract(target.getLocation().toVector()).setY(0.0);
         if (away.lengthSquared() < 1.0E-6) return false;
-        away.normalize().multiply(STEP_BACK_CHECK);
+        away.normalize().multiply(toward ? -STEP_BACK_CHECK : STEP_BACK_CHECK);
         int x = (int) Math.floor(location.getX() + away.getX());
         int z = (int) Math.floor(location.getZ() + away.getZ());
         int y = Positions.feet(location).y();
