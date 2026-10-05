@@ -136,6 +136,15 @@ public final class DiscordTextConversation implements AutoCloseable {
     public synchronized void discard(Reply reply) {
         var turns = contexts.get(reply.turn().userId()); if (turns != null) turns.finish(reply.turn());
     }
+    /** Cancels this user's pending private reply without erasing their earlier conversation or memories. */
+    public synchronized boolean cancelPending(String user) {
+        var turns = contexts.get(user);
+        if (closed || turns == null) return false;
+        boolean active = turns.busy();
+        cancelWork(user);
+        turns.cancelCurrent();
+        return active;
+    }
     public synchronized void forget(String user) { var turns = contexts.remove(user); if (turns != null) turns.close(); cancelWork(user); }
     public synchronized void reset() {
         contexts.values().forEach(ConversationTurns::close); contexts.clear();

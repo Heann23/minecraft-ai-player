@@ -271,6 +271,13 @@ public final class DiscordSession implements AutoCloseable {
         });
     }
     public PcmPlayback.Frame nextFrame() { return playback.nextFrame(); }
+    public CompletableFuture<Boolean> cancelText(String user) {
+        new DiscordMemory.Subject(settings.guildId(), settings.characterId(), user);
+        CompletableFuture<Boolean> result = new CompletableFuture<>();
+        post(() -> { result.complete(textConversation.cancelPending(user)); return done(); })
+                .whenComplete((ignored, error) -> { if (error != null) result.completeExceptionally(error); });
+        return result;
+    }
     public CompletableFuture<DiscordTextConversation.Reply> textReply(String user, String text, String interaction) {
         CompletableFuture<DiscordTextConversation.Reply> result = new CompletableFuture<>();
         var active = new java.util.concurrent.atomic.AtomicReference<CompletableFuture<DiscordTextConversation.Reply>>();

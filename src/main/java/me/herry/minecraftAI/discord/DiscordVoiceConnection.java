@@ -220,6 +220,9 @@ public final class DiscordVoiceConnection extends ListenerAdapter implements Dis
     private java.util.concurrent.CompletableFuture<String> command(SlashCommandInteractionEvent event) {
         String user = event.getUser().getId(), source = event.getId();
         return switch (event.getSubcommandName()) {
+            case "cancel" -> session.cancelText(user).thenApply(active -> active
+                    ? "내 텍스트 답변 중단을 요청했어요. 이전 대화와 기억은 유지해요."
+                    : "현재 중단할 내 텍스트 답변이 없어요.");
             case "game" -> java.util.concurrent.CompletableFuture.completedFuture(game == null ? "게임 상태 연결을 사용할 수 없어요." : game.describe());
             case "status" -> {
                 var status = session.status();
