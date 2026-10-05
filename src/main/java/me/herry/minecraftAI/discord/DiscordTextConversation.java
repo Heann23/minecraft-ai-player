@@ -81,7 +81,7 @@ public final class DiscordTextConversation implements AutoCloseable {
                 CompletableFuture<DiscordMemory.Snapshot> saved;
                 synchronized (this) {
                     if (!turns.isCurrent(token)) { result.cancel(false); return; }
-                    var key = new DiscordMemory.Key(subject, DiscordMemory.Kind.AVOID_JOKE, "", "all");
+                    var key = new DiscordMemory.Key(subject, change.kind(), "", change.label());
                     saved = store.remember(key, change.value(), DiscordMemory.Evidence.EXPLICIT, "text-" + token.conversation() + "-" + token.turn(), 0);
                 }
                 saved.get(3, TimeUnit.SECONDS);

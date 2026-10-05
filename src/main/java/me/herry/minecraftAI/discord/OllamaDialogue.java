@@ -95,7 +95,7 @@ public final class OllamaDialogue implements ResponsePipeline.Model, AutoCloseab
     private String withoutWrongAddress(String text, ResponsePipeline.Request request) {
         boolean sameName = request.memory().stream().anyMatch(fact -> fact.key().subject().userId().equals(request.turn().userId())
                 && fact.key().kind() == DiscordMemory.Kind.NAME && fact.evidence() == DiscordMemory.Evidence.EXPLICIT && !fact.expired(clock.getAsLong())
-                && (fact.value().equalsIgnoreCase("Herry") || fact.value().equals("해리")));
+                && fact.value().replaceFirst("(?:님|씨)$", "").matches("(?iu)해리|Herry"));
         if (sameName) return text;
         var address = java.util.regex.Pattern.compile("(?iu)((?:^|(?<=[.!?。！])\\s+)(?:안녕하세요[,.!！]?\\s*)?)(?:해리|Herry)(?:님|씨)[,!！]\\s*");
         boolean[] quoted = quotedCharacters(text);

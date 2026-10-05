@@ -164,6 +164,16 @@ class OllamaDialogueTest {
             assertEquals("안녕하세요, 해리님! 반가워요.", fixture.model.respond(request(List.of(name("A", 0)))));
         }
     }
+    @Test void explicitlyPreferredHonorificNameIsPreservedOnlyForItsOwner() throws Exception {
+        try (var fixture = new Fixture()) {
+            fixture.output("{\"done\":true,\"message\":{\"role\":\"assistant\",\"content\":\"해리님, 반가워요.\"}}");
+            var key = new DiscordMemory.Key(new DiscordMemory.Subject("guild", "herry", "A"), DiscordMemory.Kind.NAME, "", "preferred");
+            var fact = new DiscordMemory.Fact(key, "해리님", DiscordMemory.Evidence.EXPLICIT, "confirmed", 1000, 0, 1);
+            assertEquals("해리님, 반가워요.", fixture.model.respond(request(List.of(fact))));
+            assertEquals("반가워요.", fixture.model.respond(new ResponsePipeline.Request(new ConversationTurns.Token(UUID.randomUUID(), 1, 1, "B"),
+                    List.of(new ConversationTurns.Line("B", "Herry", "안녕하세요", false, 1000)), List.of(fact))));
+        }
+    }
     @Test void addressingExamplesAndCharacterSelfIntroductionArePreserved() throws Exception {
         try (var fixture = new Fixture()) {
             for (String reply : List.of("해리님이라는 호칭을 쓰면 돼요.", "저는 해리예요.", "\"해리님, 안녕하세요\"는 인사예요.")) {

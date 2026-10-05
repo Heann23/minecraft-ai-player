@@ -8,7 +8,7 @@ public final class ConfirmedMemoryInput {
     public enum Consent { ALLOWED, REFUSED }
     private static final Pattern NAME = Pattern.compile("^(?:내 이름은|제 이름은) ([가-힣A-Za-z]{1,20}?)(?:이야|야|입니다|예요|이에요)[.!]?$|^([가-힣A-Za-z]{1,20}?)(?:이라고|라고) 불러 ?(?:줘|주세요)[.!]?$" );
     private ConfirmedMemoryInput() {}
-    /** reliableFinal must come from final/confirmed STT, never an interim transcript. */
+    /** Direct confirmed text or reliable final STT only; never an interim transcript or model output. */
     public static Optional<String> introducedName(String text, boolean reliableFinal) {
         if (!reliableFinal || text == null || text.length() > 100) return Optional.empty();
         var matcher = NAME.matcher(text.strip());
