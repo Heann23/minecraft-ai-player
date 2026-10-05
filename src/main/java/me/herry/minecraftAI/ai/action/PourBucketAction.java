@@ -8,10 +8,13 @@ import me.herry.minecraftAI.ai.primitive.PrimitiveTarget;
 import me.herry.minecraftAI.ai.primitive.PrimitiveType;
 import me.herry.minecraftAI.ai.util.BlockPoint;
 import me.herry.minecraftAI.ai.util.Positions;
+import org.bukkit.FluidCollisionMode;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.World;
+import org.bukkit.block.BlockFace;
 import org.bukkit.entity.Player;
+import org.bukkit.util.RayTraceResult;
 
 /**
  * 물 양동이의 물을 블록의 윗면에 붓는다. 그 블록의 윗면을 바라본 뒤 손에 든 양동이를 쓰면,
@@ -79,6 +82,13 @@ public final class PourBucketAction extends AbstractAction implements PrimitiveA
         }
         if (player.getInventory().getItemInMainHand().getType() != Material.WATER_BUCKET) {
             fail("no water bucket");
+            return;
+        }
+        // 시선이 다른 블록이나 다른 면에 먼저 닿으면 물이 엉뚱한 칸에 놓인다. 붓기 전에 확인해서 물을 잃지 않는다.
+        Location eye = player.getEyeLocation();
+        RayTraceResult hit = world.rayTraceBlocks(eye, eye.getDirection(), MAX_REACH, FluidCollisionMode.NEVER, false);
+        if (hit == null || hit.getHitBlock() == null || !Positions.of(hit.getHitBlock()).equals(support) || hit.getHitBlockFace() != BlockFace.UP) {
+            fail("not visible");
             return;
         }
 
