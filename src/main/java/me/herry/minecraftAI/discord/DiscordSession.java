@@ -20,6 +20,7 @@ import java.util.function.Supplier;
 
 /** One channel's event lane, connecting fake or local STT/model/TTS providers without Bukkit access. */
 public final class DiscordSession implements AutoCloseable {
+    public record PersonalReply(String user, long revision, String text) {}
     public record Status(boolean closed, int users, int queuedEvents, long processedInputs, long droppedEvents, long diagnosticFailures,
                          boolean memoryFailure, long memoryRevision, boolean memoryRecovered, long memoryRecoveredAt, int rejectedRecoveryPoints) {}
     private final DiscordSettings settings;
@@ -196,6 +197,13 @@ public final class DiscordSession implements AutoCloseable {
     public CompletableFuture<Void> confirmedJokes(String userId, boolean allowed, String interactionId) {
         return confirmedFact(userId, DiscordMemory.Kind.AVOID_JOKE, "all", allowed ? "ALLOWED" : "AVOID", interactionId);
     }
+    public CompletableFuture<PersonalReply> personalSettings(String user) {
+        var subject = new DiscordMemory.Subject(settings.guildId(), settings.characterId(), user);
+        return memoryOperation(store::snapshot).thenApply(snapshot -> new PersonalReply(user, snapshot.revision(),
+                DiscordPersonalSettings.describe(subject, snapshot, wallClock.getAsLong())));
+    }
+    /** Any memory update invalidates a queued settings reply, including deletion and restore. */
+    public boolean personalCurrent(PersonalReply reply) { return !closed.get() && store.status().revision() == reply.revision(); }
     private CompletableFuture<Void> confirmedFact(String userId, DiscordMemory.Kind kind, String label, String value, String interactionId) {
         var subject = new DiscordMemory.Subject(settings.guildId(), settings.characterId(), userId);
         var key = new DiscordMemory.Key(subject, kind, "", label);

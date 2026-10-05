@@ -69,4 +69,22 @@ class DiscordPersonalPreferencesTest {
         }
         try (var reopened = store()) { assertTrue(reopened.visible(subject("A"), Set.of("A")).get(3, TimeUnit.SECONDS).isEmpty()); }
     }
+    @Test void settingsQueryDoesNotCallModelAndQueuedReplyIsRetiredByDeletionOrRestore() throws Exception {
+        try (var session = session(store(), request -> { throw new AssertionError("Settings query must not call model"); })) {
+            session.confirmedName("A", "민수", "name-a").get(3, TimeUnit.SECONDS);
+            session.confirmedName("B", "지수", "name-b").get(3, TimeUnit.SECONDS);
+            session.confirmedJokes("A", false, "joke-a").get(3, TimeUnit.SECONDS);
+            var own = session.personalSettings("A").get(3, TimeUnit.SECONDS);
+            assertTrue(session.personalCurrent(own)); assertTrue(own.text().contains("민수")); assertFalse(own.text().contains("지수"));
+            var other = session.personalSettings("B").get(3, TimeUnit.SECONDS);
+            assertTrue(other.text().contains("지수")); assertFalse(other.text().contains("민수")); assertFalse(other.text().contains("장난 중단"));
+            String backup = session.backup().get(3, TimeUnit.SECONDS); assertNotNull(backup);
+            session.forget("A").get(3, TimeUnit.SECONDS); assertFalse(session.personalCurrent(own));
+            var cleared = session.personalSettings("A").get(3, TimeUnit.SECONDS);
+            assertTrue(cleared.text().contains("저장한 호칭 없음")); assertFalse(cleared.text().contains("민수"));
+            session.restoreBackup(backup).get(3, TimeUnit.SECONDS); assertFalse(session.personalCurrent(cleared));
+            assertFalse(session.personalSettings("A").get(3, TimeUnit.SECONDS).text().contains("민수"));
+            session.close(); assertFalse(session.personalCurrent(other));
+        }
+    }
 }

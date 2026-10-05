@@ -184,6 +184,17 @@ public final class DiscordVoiceConnection extends ListenerAdapter implements Dis
                 hook.editOriginal("채널 제어에는 서버 관리 권한이 필요해요. 내 기억은 본인만 수정할 수 있어요.").queue(ignored -> {}, failed -> diagnostic.accept("discord-command-reply-failed")); return;
             }
             java.util.concurrent.CompletableFuture<String> result;
+            if (event.getSubcommandName().equals("me")) {
+                session.personalSettings(event.getUser().getId()).whenComplete((reply, failed) -> {
+                    if (failed != null || stopped.get() || !session.personalCurrent(reply)) {
+                        hook.editOriginal("내 설정을 확인하지 못했거나 설정이 바뀌었어요. 다시 확인해 주세요.")
+                                .queue(ignored -> {}, failure -> diagnostic.accept("discord-command-reply-failed")); return;
+                    }
+                    hook.editOriginal(reply.text()).setAllowedMentions(Set.of())
+                            .setCheck(() -> !stopped.get() && session.personalCurrent(reply))
+                            .queue(ignored -> {}, failure -> diagnostic.accept("discord-command-reply-failed"));
+                }); return;
+            }
             if (event.getSubcommandName().equals("chat")) {
                 session.textReply(event.getUser().getId(), java.util.Objects.requireNonNull(event.getOption("message")).getAsString(), event.getId())
                         .whenComplete((reply, failed) -> {
