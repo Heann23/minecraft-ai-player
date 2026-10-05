@@ -80,7 +80,12 @@ public final class LocalHttp implements AutoCloseable {
             if (response.statusCode() != 200) throw new StatusException(response.statusCode(), new Response(type, response.body()));
             return new Response(type, response.body());
         } catch (java.util.concurrent.TimeoutException e) { throw new java.net.http.HttpTimeoutException("local provider deadline"); }
-        catch (java.util.concurrent.ExecutionException | java.util.concurrent.CancellationException e) { throw new IOException("local provider request failed"); }
+        catch (java.util.concurrent.ExecutionException e) {
+            if (e.getCause() instanceof java.net.http.HttpTimeoutException)
+                throw new java.net.http.HttpTimeoutException("local provider deadline");
+            throw new IOException("local provider request failed");
+        }
+        catch (java.util.concurrent.CancellationException e) { throw new IOException("local provider request failed"); }
         catch (IllegalStateException e) { throw new IOException("local provider closed during request"); }
         finally { if (task != null) { task.cancel(true); pending.remove(task); } capacity.release(); }
     }

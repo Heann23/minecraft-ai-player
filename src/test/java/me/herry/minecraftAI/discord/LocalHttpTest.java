@@ -84,6 +84,24 @@ class LocalHttpTest {
             assertInstanceOf(java.net.http.HttpTimeoutException.class, error.getCause());
         } finally { release.countDown(); server.stop(0); }
     }
+    @Test void missingHeadersHaveSameSanitizedTimeoutAsStalledBody() throws Exception {
+        var entered = new CountDownLatch(1); var release = new CountDownLatch(1);
+        var server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/ready", exchange -> { exchange.sendResponseHeaders(200, -1); exchange.close(); });
+        server.createContext("/headers", exchange -> {
+            entered.countDown();
+            try { release.await(10, TimeUnit.SECONDS); } catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); }
+            finally { exchange.close(); }
+        }); server.start();
+        try (var http = new LocalHttp(); var worker = Executors.newSingleThreadExecutor()) {
+            http.get(endpoint(server, "/ready"), DEADLINE, 100);
+            var result = worker.submit(() -> http.get(endpoint(server, "/headers"), Duration.ofSeconds(1), 100));
+            await(entered); var failed = assertThrows(java.util.concurrent.ExecutionException.class, () -> result.get(3, TimeUnit.SECONDS));
+            var timeout = assertInstanceOf(java.net.http.HttpTimeoutException.class, failed.getCause());
+            assertEquals("local provider deadline", timeout.getMessage()); assertNull(timeout.getCause());
+            assertFalse(timeout.toString().contains("127.0.0.1"));
+        } finally { release.countDown(); server.stop(0); }
+    }
     @Test void closeCancelsActiveCallAndRejectsNewRequests() throws Exception {
         var entered = new CountDownLatch(1); var release = new CountDownLatch(1);
         var server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
