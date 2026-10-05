@@ -224,7 +224,12 @@ public final class GatherPlans {
             ai.debug("Target GRAVEL found at " + gravel);
             return mineBlock(ai, gravel);
         }
-        if (ai.getInventory().has(Material.GRAVEL)) return List.of(new PlaceBlockAction(Material.GRAVEL, MemoryType.GRAVEL));
+        if (ai.getInventory().has(Material.GRAVEL)) {
+            // 집 안이나 집 바로 옆에 놓으면 집의 일부가 되어 다시 캘 수 없다. 먼저 문밖으로 나간다.
+            List<Action> leave = HomePlans.leaveBuilding(ai);
+            if (!leave.isEmpty()) return leave;
+            return List.of(new PlaceBlockAction(Material.GRAVEL, MemoryType.GRAVEL));
+        }
         return explore(ai);
     }
 
