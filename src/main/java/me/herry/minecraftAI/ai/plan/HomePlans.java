@@ -190,7 +190,9 @@ public final class HomePlans {
         BlockPoint center = home.center();
         int dx = feet.x() - center.x();
         int dz = feet.z() - center.z();
-        if (Math.max(Math.abs(dx), Math.abs(dz)) > DIG_CLEARANCE) return List.of();
+        // 집 밑을 지나가는 깊은 굴 안에서는 나갈 필요가 없다. 수평 거리만 보면, 굴이 집 아래에 이르렀을 때
+        // 지상의 문밖으로 걸어 나가려다가 길이 없어서 그 자리에서 멈춘다.
+        if (!DigRules.isAtBuilding(dx, feet.y() - center.y(), dz, DIG_CLEARANCE)) return List.of();
 
         // 문이 있으면 문 쪽으로, 없으면 지금 서 있는 쪽으로 나간다.
         BlockPoint entrance = home.entrance();

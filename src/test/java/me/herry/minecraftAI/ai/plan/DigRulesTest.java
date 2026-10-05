@@ -92,4 +92,44 @@ class DigRulesTest {
         assertFalse(DigRules.shouldDigOut(true, false, false));
         assertFalse(DigRules.shouldDigOut(true, true, true));
     }
+
+    // 회귀: 다이아몬드를 찾아 y -45 까지 파 내려간 자리에서 더 내려갈 수 없었다 (목표는 y -53, 여유 6).
+    // 목표 높이 근처가 아니라는 이유로 옆으로도 파지 않아서, 갈 길 없는 탐험만 되풀이하다가 그 자리에서 멈췄다.
+    @Test
+    void tunnelsSidewaysWhenItCannotGoDeeperUnderground() {
+        assertTrue(DigRules.shouldTunnelSideways(-45, -53, 6, true));
+    }
+
+    @Test
+    void tunnelsAtTheOreLevel() {
+        assertTrue(DigRules.shouldTunnelSideways(-47, -53, 6, true));
+        assertTrue(DigRules.shouldTunnelSideways(-53, -53, 6, true));
+        // 얕은 곳에서도 목표 높이 근처면 판다 (철은 y 24 근처).
+        assertTrue(DigRules.shouldTunnelSideways(30, 24, 8, false));
+    }
+
+    // 회귀: 철을 찾아 y 24 에서 굴을 파다가 굴이 집(y 72) 아래에 이르자, "집에서 떨어진 뒤에 판다"며 지상의 문밖으로
+    // 걸어 나가려 했다. 갈 길이 없어서 같은 실패를 되풀이하다가 그 자리에서 멈췄다.
+    @Test
+    void aDeepTunnelUnderTheHouseIsNotAtTheHouse() {
+        assertFalse(DigRules.isAtBuilding(4, 24 - 72, -2, 4));
+        assertFalse(DigRules.isAtBuilding(0, -5, 0, 4));
+    }
+
+    @Test
+    void standingInOrNextToTheHouseIsAtTheHouse() {
+        assertTrue(DigRules.isAtBuilding(0, 0, 0, 4));
+        assertTrue(DigRules.isAtBuilding(4, 1, -4, 4));
+        // 집 바로 밑의 얕은 자리도 집에 붙어 있는 것으로 본다.
+        assertTrue(DigRules.isAtBuilding(1, -3, 1, 4));
+        assertFalse(DigRules.isAtBuilding(5, 0, 0, 4));
+        assertFalse(DigRules.isAtBuilding(0, 0, -5, 4));
+    }
+
+    // 지상에서는 옆으로 파지 않고 자리를 옮겨서 다시 내려간다.
+    @Test
+    void doesNotTrenchAcrossTheSurface() {
+        assertFalse(DigRules.shouldTunnelSideways(64, 24, 8, false));
+        assertFalse(DigRules.shouldTunnelSideways(64, -53, 6, false));
+    }
 }

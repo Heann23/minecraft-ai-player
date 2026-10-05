@@ -32,6 +32,33 @@ public final class DigRules {
     }
 
     /**
+     * 광물을 찾아 내려가다가 더 내려갈 수 없을 때(물이나 용암에 닿는 등), 그 높이에서 옆으로 굴을 파야 하는지.
+     * 목표 높이 근처(slack 이내)면 그 높이에서 광물을 찾는다. 그보다 높아도 이미 땅속이면 옆으로 파서 막힌 자리를 비켜 간다.
+     * 지상에서는 옆으로 파지 않는다. 자리를 옮겨서 다시 내려가면 되고, 지상의 땅을 한 줄로 파헤치게 된다.
+     *
+     * @param feetY       지금 발 높이
+     * @param level       광물이 많이 나오는 높이
+     * @param slack       목표 높이보다 이만큼 위까지는 목표 높이 근처로 친다
+     * @param underground 머리 위로 땅이 두껍게 덮인 땅속인지
+     */
+    public static boolean shouldTunnelSideways(int feetY, int level, int slack, boolean underground) {
+        return feetY <= level + slack || underground;
+    }
+
+    /**
+     * 집 안이나 집 바로 옆에 서 있는지. 여기서 바로 파 내려가면 집의 바닥과 벽 밑을 허물게 되므로, 파기 전에 문밖으로 나간다.
+     * 집보다 한참 아래에 있으면 해당하지 않는다. 깊은 굴이 집 밑을 지나갈 뿐이고, 거기서는 지상의 문밖으로 걸어갈 길도 없다.
+     *
+     * @param dx        집 가운데에서 발까지의 x 거리 (발 - 집)
+     * @param dy        집 바닥 높이에서 발까지의 높이 차 (음수면 집보다 아래)
+     * @param dz        집 가운데에서 발까지의 z 거리
+     * @param clearance 집에서 이만큼 떨어져야 파도 되는 거리
+     */
+    public static boolean isAtBuilding(int dx, int dy, int dz, int clearance) {
+        return Math.max(Math.abs(dx), Math.abs(dz)) <= clearance && dy >= -clearance;
+    }
+
+    /**
      * 걸어서는 어디로도 갈 수 없을 때, 길을 파서 빠져나와야 하는지.
      *
      * @param miningDeep   깊은 땅속에서 광물을 캐는 중인지. 좁은 굴 안에 있는 것이 정상이다.
