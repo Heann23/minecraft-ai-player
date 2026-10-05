@@ -227,6 +227,52 @@ public final class ShaftRegistry {
                 && builder.points.getFirst().equals(shaft.entrance()));
     }
 
+    /**
+     * 이 AI 가 판 굴을 저장 파일에 쓸 수 있는 단순한 값으로 바꾼다. 굴 하나가 한 줄이다: "월드|x,y,z;x,y,z;..."
+     * 막다른 굴이라는 표시는 저장하지 않는다. 되살아난 뒤에 다시 막히면 그때 다시 적는다.
+     */
+    public Map<String, Object> exportState(String owner) {
+        List<String> lines = new ArrayList<>();
+        Deque<Builder> shafts = byOwner.get(owner);
+        if (shafts != null) {
+            for (Builder builder : shafts) {
+                if (builder.points.size() < 2) continue;
+                StringBuilder line = new StringBuilder(builder.world.toString()).append('|');
+                for (int i = 0; i < builder.points.size(); i++) {
+                    if (i > 0) line.append(';');
+                    line.append(builder.points.get(i).encode());
+                }
+                lines.add(line.toString());
+            }
+        }
+        Map<String, Object> state = new LinkedHashMap<>();
+        state.put("shafts", lines);
+        return state;
+    }
+
+    /**
+     * 저장해 둔 굴을 되살린다. 이 AI 의 굴 기록을 저장된 것으로 바꾼다. 읽을 수 없는 줄(망가진 좌표 등)은 건너뛴다.
+     * 서버를 재시작한 뒤 땅속에서 되살아난 AI 가 돌아갈 길과 발판 보호를 잃지 않게 한다.
+     */
+    public void importState(String owner, Map<String, Object> state) {
+        if (!(state.get("shafts") instanceof List<?> lines)) return;
+        Deque<Builder> shafts = new ArrayDeque<>();
+        for (Object line : lines) {
+            String[] parts = String.valueOf(line).split("\\|");
+            if (parts.length != 2) continue;
+            try {
+                Builder builder = new Builder(UUID.fromString(parts[0]));
+                for (String point : parts[1].split(";")) builder.points.add(BlockPoint.parse(point));
+                while (builder.points.size() > MAX_POINTS) builder.points.removeFirst();
+                if (builder.points.size() >= 2) shafts.addLast(builder);
+            } catch (IllegalArgumentException ignored) {
+                // 좌표나 월드 ID 가 망가진 줄. 그 굴만 잃는다.
+            }
+        }
+        while (shafts.size() > MAX_SHAFTS_PER_OWNER) shafts.removeFirst();
+        byOwner.put(owner, shafts);
+    }
+
     private List<Shaft> all(UUID world) {
         List<Shaft> result = new ArrayList<>();
         for (Map.Entry<String, Deque<Builder>> entry : byOwner.entrySet()) {
