@@ -77,6 +77,8 @@ public final class NavigationSystem {
     private boolean runClear;
     // 이번 이동에서 점프를 섞어 달리기 시작했다고 이미 적었는지 (디버그 로그는 이동마다 한 번만 남긴다)
     private boolean runAnnounced;
+    // 경로에 없는 낙하를 이미 알렸는지 (떨어지는 동안 틱마다 알리지 않게)
+    private boolean fallAnnounced;
 
     private int repaths;
     private int segments;
@@ -104,6 +106,7 @@ public final class NavigationSystem {
         this.sprintToEnd = false;
         this.jumpWhenHungry = false;
         this.runAnnounced = false;
+        this.fallAnnounced = false;
         this.repaths = 0;
         this.segments = 0;
         this.stuckTicks = 0;
@@ -224,7 +227,18 @@ public final class NavigationSystem {
     private void tickFollow(Player player) {
         Location location = player.getLocation();
         BlockPoint feet = Positions.feet(location);
-        if (goal.reached(feet.x(), feet.y(), feet.z())) {
+        // 경로는 한 번에 MAX_DROP 칸까지만 내려간다. 그보다 깊이 떨어지고 있으면 길을 벗어나 낭떠러지로 빠진 것이다.
+        boolean falling = !body.isGrounded() && !player.isInWater() && player.getFallDistance() > MAX_DROP + 0.5F;
+        if (!falling) {
+            fallAnnounced = false;
+        } else if (!fallAnnounced) {
+            fallAnnounced = true;
+            // 어디서 어디로 가다가 떨어졌는지 남긴다. 절벽에서 떨어져 죽는 원인을 찾는 단서다.
+            debug.accept("Falling off the path at " + feet + (index < path.size() ? ", was heading to " + path.get(index) : "")
+                    + " (step " + index + " of " + path.size() + (isRunClear() ? ", running" : "") + ")");
+        }
+        // 떨어지면서 목적지 옆을 스쳐 지나가는 것은 도착이 아니다. 그대로 성공으로 끝내면 다음 행동(블록 캐기 등)이 허공에서 실패한다.
+        if (!falling && goal.reached(feet.x(), feet.y(), feet.z())) {
             arrive();
             return;
         }
