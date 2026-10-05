@@ -9,7 +9,7 @@ import me.herry.minecraftAI.ai.survival.SurvivalSystem;
  */
 public final class Situation {
     // 다음 장비를 만들기 위해 지금 부족한 재료의 종류
-    public enum Need { NONE, WOOD, STONE, IRON, DIAMOND, OTHER }
+    public enum Need { NONE, WOOD, STONE, IRON, DIAMOND, FLINT, OTHER }
 
     public GoalType currentGoal = GoalType.IDLE;
 
@@ -82,6 +82,9 @@ public final class Situation {
     // 가진 다이아몬드와 다음 장비에 필요한 개수
     public int diamonds;
     public int diamondsNeeded;
+    // 가진 자갈의 개수와, 캐러 갈 수 있는 자갈을 알고 있는지. 부싯돌은 자갈을 캘 때 가끔 나온다.
+    public int gravel;
+    public boolean knowsGravel;
     // 화로에 넣을 연료(석탄, 숯, 나무)가 있는지
     public boolean hasFuel;
     // 석탄과 숯의 개수, 횃불의 개수

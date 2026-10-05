@@ -50,6 +50,8 @@ public enum GoalType {
     FIND_DIAMOND,
     // 보이는 다이아몬드 광석을 캔다 (철 곡괭이 이상 필요)
     MINE_DIAMOND,
+    // 자갈을 캐서 부싯돌을 얻는다. 아는 자갈이 없으면 가진 자갈을 놓고 다시 캐고, 그것도 없으면 찾으러 다닌다
+    GATHER_FLINT,
     SMELT_IRON,
     // 날고기를 화로에 구워서 더 배부른 음식으로 만든다
     COOK_FOOD,

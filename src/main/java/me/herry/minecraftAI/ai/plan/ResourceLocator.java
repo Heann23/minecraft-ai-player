@@ -114,7 +114,7 @@ public final class ResourceLocator {
 
     private static boolean isResource(MemoryType type) {
         return type == MemoryType.TREE || type == MemoryType.STONE || type == MemoryType.COAL_ORE || type == MemoryType.IRON_ORE
-                || type == MemoryType.DIAMOND_ORE;
+                || type == MemoryType.DIAMOND_ORE || type == MemoryType.GRAVEL;
     }
 
     public static boolean knows(AIPlayer ai, MemoryType type) {

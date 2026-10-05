@@ -16,7 +16,7 @@ import java.util.Set;
  * 도구와 장비 재료, 음식, 연료는 남기고, 그 밖의 잡동사니와 너무 많이 쌓인 블록, 더 좋은 것이 있는 낡은 도구를 버린다.
  */
 public final class JunkPolicy {
-    private enum Pool { STONE, FILLER, LOG, PLANK, STICK, FOOD, TABLE, FURNACE, TORCH }
+    private enum Pool { STONE, FILLER, LOG, PLANK, STICK, FOOD, TABLE, FURNACE, TORCH, GRAVEL }
 
     // 종류별로 이만큼까지만 가지고 다닌다. 넘치는 묶음은 버린다.
     private static final Map<Pool, Integer> CAPS = new EnumMap<>(Map.of(
@@ -28,7 +28,9 @@ public final class JunkPolicy {
             Pool.FOOD, 64,
             Pool.TABLE, 1,
             Pool.FURNACE, 1,
-            Pool.TORCH, 64
+            Pool.TORCH, 64,
+            // 부싯돌을 얻으려고 놓았다가 다시 캘 자갈
+            Pool.GRAVEL, 16
     ));
     // 같은 종류의 도구는 가장 좋은 등급만, 최대 이만큼 남긴다 (하나가 부서져도 바로 바꿔 들 수 있게).
     private static final int MAX_TOOLS_PER_KIND = 2;
@@ -142,6 +144,7 @@ public final class JunkPolicy {
         if (type == Material.FURNACE) return Pool.FURNACE;
         if (type == Material.TORCH) return Pool.TORCH;
         if (type == Material.STICK) return Pool.STICK;
+        if (type == Material.GRAVEL) return Pool.GRAVEL;
         if (Tag.LOGS.isTagged(type)) return Pool.LOG;
         if (Tag.PLANKS.isTagged(type)) return Pool.PLANK;
         if (InventorySystem.isSafeFood(type)) return Pool.FOOD;

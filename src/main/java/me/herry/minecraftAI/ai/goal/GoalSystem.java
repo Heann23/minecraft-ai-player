@@ -117,6 +117,9 @@ public final class GoalSystem {
         register(GoalType.MINE_DIAMOND, situation -> situation.knowsDiamond && situation.canMineDiamond && !situation.inventoryFull ? 314.0 : 0.0);
         register(GoalType.FIND_IRON, situation -> wantsIron(situation) && !situation.knowsIron ? 150.0 : 0.0);
         register(GoalType.FIND_DIAMOND, situation -> wantsDiamond(situation) && !situation.knowsDiamond ? 150.0 : 0.0);
+        // 부싯돌은 자갈을 캘 때 열에 한 번쯤 나온다. 캘 자갈이 있으면(아는 것, 가진 것) 바로 하고, 없으면 찾으러 다닌다.
+        register(GoalType.GATHER_FLINT, situation -> situation.need != Situation.Need.FLINT || staysBelow(situation) && !hasGravel(situation) ? 0.0
+                : hasGravel(situation) ? 305.0 : 150.0);
         register(GoalType.EXPLORE, situation -> 50.0);
     }
 
@@ -447,6 +450,10 @@ public final class GoalSystem {
     }
 
     // 다음 장비에 필요한 만큼 철을 아직 못 모았을 때만 철을 찾으러 다닌다.
+    private static boolean hasGravel(Situation situation) {
+        return situation.knowsGravel || situation.gravel > 0;
+    }
+
     private static boolean wantsIron(Situation situation) {
         return situation.need == Situation.Need.IRON && situation.hasPickaxe && !hasEnoughOre(situation);
     }

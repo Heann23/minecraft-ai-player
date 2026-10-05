@@ -82,6 +82,7 @@ public final class Planner {
         register(GoalType.MINE_IRON, GatherPlans::mineIron);
         register(GoalType.FIND_DIAMOND, GatherPlans::findDiamond);
         register(GoalType.MINE_DIAMOND, GatherPlans::mineDiamond);
+        register(GoalType.GATHER_FLINT, GatherPlans::gatherFlint);
         register(GoalType.EXPLORE, GatherPlans::explore);
         register(GoalType.CRAFT_WORKBENCH, CraftPlans::craftWorkbench);
         register(GoalType.CRAFT_TOOL, CraftPlans::craftTool);

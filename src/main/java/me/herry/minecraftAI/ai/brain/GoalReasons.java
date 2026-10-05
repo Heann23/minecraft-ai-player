@@ -51,6 +51,8 @@ public final class GoalReasons {
             case MINE_IRON -> s.ironVeinNearby ? "눈앞에 철 광맥이 있어서 다 캐려고요" : ironReason(s, target);
             case FIND_DIAMOND -> diamondReason(s, target) + " 다이아몬드가 나오는 깊이까지 내려가서 찾아야 해요";
             case MINE_DIAMOND -> "캘 수 있는 다이아몬드 광석을 발견해서요";
+            case GATHER_FLINT -> s.knowsGravel || s.gravel > 0 ? target + "에 부싯돌이 필요해서 자갈을 캐고 있어요. 자갈을 캐면 가끔 부싯돌이 나와요"
+                    : target + "에 부싯돌이 필요한데 자갈이 없어서 찾고 있어요";
             case SMELT_IRON -> "철 원석이 " + s.rawIron + "개 모여서 주괴로 구울 차례예요";
             case COOK_FOOD -> "날고기 " + s.rawFood + "개를 구워서 더 든든한 음식으로 만들려고요";
             case TEND_FURNACE -> tendReason(s);

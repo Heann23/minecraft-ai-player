@@ -34,7 +34,7 @@ public final class DirectRouteSkill extends RoutedSkill {
             case DefeatGoal defeat -> defeat.target().equals(DefeatGoal.HOSTILE) || defeat.target().equals(DefeatGoal.ALLY_THREAT);
             case InteractGoal ignored -> true;
             case ExploreGoal ignored -> true;
-            case AcquireGoal acquire -> acquire.item().equals("IRON_INGOT");
+            case AcquireGoal acquire -> acquire.item().equals("IRON_INGOT") || acquire.item().equals("FLINT");
             case CraftGoal craft -> craft.item().equals(CraftGoal.CRAFTING_TABLE) || craft.item().equals("TORCH");
             default -> false;
         };
@@ -57,7 +57,9 @@ public final class DirectRouteSkill extends RoutedSkill {
             };
             case ExploreGoal ignored -> GoalType.EXPLORE;
             // 캐 놓은 원석이 있어야 구울 수 있다. 원석부터 구하는 것은 목표를 나누는 쪽의 일이다.
-            case AcquireGoal acquire -> acquire.item().equals("IRON_INGOT") && s.rawIron > 0 ? GoalType.SMELT_IRON : null;
+            // 부싯돌은 자갈을 캐서 얻는다. 자갈이 없으면 찾으러 다니는 것까지 그 목표의 계획이 한다.
+            case AcquireGoal acquire -> acquire.item().equals("FLINT") ? GoalType.GATHER_FLINT
+                    : acquire.item().equals("IRON_INGOT") && s.rawIron > 0 ? GoalType.SMELT_IRON : null;
             case CraftGoal craft -> switch (craft.item()) {
                 // 작업대는 만들어서 놓는 데까지 한다. 놓여 있어야 쓸 수 있다.
                 case CraftGoal.CRAFTING_TABLE -> GoalType.CRAFT_WORKBENCH;
