@@ -164,13 +164,20 @@ public final class PickupItemAction extends AbstractAction implements PrimitiveA
         if (navigation.getState() == NavigationSystem.State.ARRIVED) {
             walkingDirectly = true;
         } else if (navigation.getState() == NavigationSystem.State.FAILED) {
+            // 생성·이동 직후나 점프 뒤에는 아직 onGround가 돌아오지 않았을 수 있다.
+            // 기존 아이템 시간 제한 안에서 착지를 기다리며 바로 접근 불가로 기억하지 않는다.
+            if (!ai.getBody().isGrounded() && !player.isInWater()) {
+                ai.getBody().inputMove(0.0F, 0.0F);
+                ai.getBody().inputJump(false);
+                return;
+            }
             // 아이템이 있는 칸에 설 수 없으면 (블록 틈, 반블록 위 등) 최대한 가까이 가서 직접 걸어 본다.
             if (looseApproach) {
                 String reason = navigation.getFailReason();
                 if (!clearWay(ai, player)) giveUp(ai, "no path (" + reason + ")");
             } else {
                 looseApproach = true;
-                navigation.navigateTo(PathGoal.arrive(Positions.of(current.getLocation()), LOOSE_RADIUS));
+                navigation.navigateTo(PathGoal.arrive(walkingTarget(ai, current.getLocation()), LOOSE_RADIUS));
             }
         }
     }
@@ -183,8 +190,17 @@ public final class PickupItemAction extends AbstractAction implements PrimitiveA
         pathTarget = Positions.of(current.getLocation());
         lastRepath = getElapsed();
         ai.debug("Approaching dropped " + current.getItemStack().getType() + " at " + pathTarget);
-        // 아이템이 있는 바로 그 칸까지 간다. 옆 칸이나 한 칸 위에서 멈추면 아이템이 주워지는 범위에 들지 않을 수 있다.
-        ai.getNavigation().navigateTo(PathGoal.arrive(pathTarget, EXACT_RADIUS));
+        // 드롭은 머리 높이까지 주워진다. 허공의 아이템 좌표와 그 아래에서 설 수 있는 발 높이를 구분한다.
+        ai.getNavigation().navigateTo(PathGoal.arrive(walkingTarget(ai, current.getLocation()), EXACT_RADIUS));
+    }
+
+    private static BlockPoint walkingTarget(AIPlayer ai, Location item) {
+        BlockPoint feet = ai.getPosition();
+        int y = item.getBlockY();
+        // 현재 발 높이에서 플레이어 몸통/픽업 범위에 드는 드롭에는 그 높이로 다가간다.
+        // 더 아래나 위라면 실제 단차를 따라가도록 원래 아이템 높이를 유지한다.
+        if (item.getY() >= feet.y() - 0.5 && item.getY() <= feet.y() + 2.0) y = feet.y();
+        return new BlockPoint(item.getBlockX(), y, item.getBlockZ());
     }
 
     /**
@@ -214,7 +230,7 @@ public final class PickupItemAction extends AbstractAction implements PrimitiveA
         // 새 탐색을 만들지 않고 기존 계단·굴·다리 계획의 안전 검사와 실제 행동을 한 단씩 사용한다.
         if (accessSteps >= MAX_ACCESS_STEPS || !ai.getBody().isGrounded()
                 || !isInRange(player.getLocation(), current.getLocation(), radius)) return false;
-        List<Action> step = TerrainPlans.stepToward(ai, Positions.of(current.getLocation()), false);
+        List<Action> step = TerrainPlans.stepToward(ai, walkingTarget(ai, current.getLocation()), false);
         if (step.isEmpty()) return false;
         for (Action action : step) {
             if (action instanceof BreakBlockAction breaking && breaking.getTarget() instanceof PrimitiveTarget.Block target
