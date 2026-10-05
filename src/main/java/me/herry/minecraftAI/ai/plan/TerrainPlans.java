@@ -124,7 +124,10 @@ public final class TerrainPlans {
         if (!stair.isEmpty()) return stair;
         // 숨어 있는 자리의 바로 위나 옆이 몬스터가 있는 곳이라 뚫을 수 없으면, 옆으로 굴을 파서 자리를 옮긴 다음에 올라간다.
         boolean hidden = RefugePlans.isHidden(ai);
-        List<Action> aside = hidden ? digTunnel(ai, false) : List.<Action>of();
+        // 머리 위가 지나온 굴의 발판이라 캘 수 없을 때도 마찬가지다. 계단은 어느 쪽으로 내든 머리 위를 캐야 하므로 옆으로 한 칸 비켜난다.
+        World world = ai.getPlayer().getWorld();
+        boolean underShaft = cutsShaft(ai, world, new BukkitTerrainView(world), ai.getPosition().offset(0, 2, 0));
+        List<Action> aside = hidden || underShaft ? digTunnel(ai, false) : List.<Action>of();
         // 캘 것 없이 숨은 자리 안에서 걷기만 하는 것은 자리를 옮기는 것이 아니다.
         if (aside.stream().anyMatch(BreakBlockAction.class::isInstance)) return aside;
 
