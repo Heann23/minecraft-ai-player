@@ -96,7 +96,8 @@ final class ShaftPlans {
     static List<Action> leaveDeadEnd(AIPlayer ai) {
         ShaftRegistry shafts = ai.getTeam().getShafts();
         BlockPoint feet = ai.getPosition();
-        shafts.noteBlockedEnd(ai.getWorldId(), feet, DEAD_END_RANGE, ai.getTicks());
+        // 한 칸만 기록된 굴(파기 시작하자마자 막힌 자리)은 굴로 치지 않는다. 기다려도 막다른 굴이 되지 않으니 예전처럼 자리를 옮긴다.
+        if (!shafts.noteBlockedEnd(ai.getWorldId(), feet, DEAD_END_RANGE, ai.getTicks())) return List.of();
         ShaftRegistry.Shaft dead = shafts.deadEndNear(ai.getWorldId(), feet, DEAD_END_RANGE);
         if (dead == null) return List.of(new WaitAction((int) ShaftRegistry.BLOCKED_RECHECK_TICKS));
 

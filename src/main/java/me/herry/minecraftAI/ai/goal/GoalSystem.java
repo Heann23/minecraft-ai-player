@@ -241,6 +241,8 @@ public final class GoalSystem {
     private static double stockFood(Situation situation) {
         if (!situation.hasPickaxe || situation.inventoryFull) return 0.0;
         if (situation.preyNearby) return situation.foodCount < FOOD_STOCK ? 260.0 : 0.0;
+        // 화로에 넣어 둔 음식이 구워지는 중이면 곧 먹을 것이 생긴다. 그것을 두고 사냥감을 찾으러 떠나지 않는다.
+        if (situation.furnaceBusy && situation.furnaceCooksFood) return 0.0;
         // 광물을 찾아 땅속으로 내려갈 차례인데 음식이 모자라면, 내려가기 전에 지상에서 사냥감을 찾는다.
         // 땅속에는 사냥감이 없어서, 빈손으로 내려가면 굶주린 채로 올라와서 구해야 한다.
         boolean aboutToDescend = wantsIron(situation) && !situation.knowsIron || wantsDiamond(situation) && !situation.knowsDiamond;

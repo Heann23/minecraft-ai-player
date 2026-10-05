@@ -167,16 +167,21 @@ public final class ShaftRegistry {
      * pos 가까이에서 끝나는 굴의 끝에서 더 팔 수 없었다고 적어 둔다. 간격을 두고 되풀이되면 그 굴은 막다른 굴이 된다.
      * 막다른 굴은 "이미 파 둔 굴"로 따라 내려가지 않는다. 적어 두지 않으면 다른 데로 옮겨 갔다가도 그 끝으로 되돌아온다.
      * 굴을 더 파서 끝이 달라지면 다시 쓸 수 있는 굴이 된다.
+     *
+     * @return pos 가까이에서 끝나는 굴이 있었는지. 없으면 적어 둔 것도 없다.
      */
-    public void noteBlockedEnd(UUID world, BlockPoint pos, double range, long now) {
+    public boolean noteBlockedEnd(UUID world, BlockPoint pos, double range, long now) {
+        boolean found = false;
         for (Shaft shaft : all(world)) {
             if (shaft.end().distance(pos) > range) continue;
+            found = true;
             EndKey key = new EndKey(world, shaft.end());
             Blocked before = blockedEnds.get(key);
             if (before == null) blockedEnds.put(key, new Blocked(1, now));
             else if (now - before.lastTick() >= BLOCKED_RECHECK_TICKS) blockedEnds.put(key, new Blocked(before.strikes() + 1, now));
         }
         while (blockedEnds.size() > MAX_BLOCKED_ENDS) blockedEnds.remove(blockedEnds.keySet().iterator().next());
+        return found;
     }
 
     public boolean isDeadEnd(Shaft shaft) {

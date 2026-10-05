@@ -9,6 +9,7 @@ import me.herry.minecraftAI.ai.action.MarkShaftAction;
 import me.herry.minecraftAI.ai.action.MoveToAction;
 import me.herry.minecraftAI.ai.action.PillarUpAction;
 import me.herry.minecraftAI.ai.action.PlaceFillerAction;
+import me.herry.minecraftAI.ai.action.WaitAction;
 import me.herry.minecraftAI.ai.navigation.AStarSearch;
 import me.herry.minecraftAI.ai.navigation.BlockClass;
 import me.herry.minecraftAI.ai.navigation.BukkitTerrainView;
@@ -56,7 +57,7 @@ public final class TerrainPlans {
     // 계단을 팔 벽을 찾는 거리
     private static final int WALL_SEARCH = 12;
     // 몬스터가 이 거리 안에 있는 다른 빈 곳으로는 굴을 뚫지 않는다.
-    private static final double COVER_RANGE = 6.0;
+    private static final int HIDDEN_WAIT_TICKS = 100;
 
     private TerrainPlans() {
     }
@@ -122,14 +123,18 @@ public final class TerrainPlans {
         List<Action> stair = digStairUp(ai, directionOrder(ai));
         if (!stair.isEmpty()) return stair;
         // 숨어 있는 자리의 바로 위나 옆이 몬스터가 있는 곳이라 뚫을 수 없으면, 옆으로 굴을 파서 자리를 옮긴 다음에 올라간다.
-        List<Action> aside = RefugePlans.isHidden(ai) ? digTunnel(ai, false) : List.<Action>of();
-        if (!aside.isEmpty()) return aside;
+        boolean hidden = RefugePlans.isHidden(ai);
+        List<Action> aside = hidden ? digTunnel(ai, false) : List.<Action>of();
+        // 캘 것 없이 숨은 자리 안에서 걷기만 하는 것은 자리를 옮기는 것이 아니다.
+        if (aside.stream().anyMatch(BreakBlockAction.class::isInstance)) return aside;
 
         List<Action> pillar = pillarUp(ai, null);
         if (!pillar.isEmpty()) {
             ai.getTeam().say(ai, Phrases.climbingOut(), false);
             return pillar;
         }
+        // 숨은 자리의 사방이 몬스터 쪽이라 어디로도 뚫을 수 없으면 그 안에서 기다린다. 걸어서 옮겨 갈 곳이 없다.
+        if (hidden) return List.of(new WaitAction(HIDDEN_WAIT_TICKS));
         // 동굴 한가운데라 계단을 낼 벽이 바로 옆에 없고 쌓을 블록도 없으면, 가장 가까운 벽 앞으로 가서 그 벽에 계단을 판다.
         List<Action> wall = moveToWall(ai);
         if (!wall.isEmpty()) return wall;
@@ -207,6 +212,8 @@ public final class TerrainPlans {
     // 블록을 하나 쌓고 그 위에 올라선다. 쌓을 블록이 없거나 머리 위가 위험하면 빈 목록.
     public static List<Action> pillarUp(AIPlayer ai, @Nullable Consumer<BlockPoint> onPlaced) {
         if (!PillarUpAction.canPillar(ai)) return List.of();
+        // 올라서려면 머리 위 칸을 캐야 한다. 그 칸이 몬스터가 있는 쪽으로 뚫리면 숨은 자리가 열린다.
+        if (RefugePlans.breaksCover(ai, new BukkitTerrainView(ai.getPlayer().getWorld()), ai.getPosition().offset(0, 2, 0))) return List.of();
         ai.debug("Placing a block underfoot to climb up from " + ai.getPosition());
         return List.of(new PillarUpAction(onPlaced));
     }
@@ -358,7 +365,7 @@ public final class TerrainPlans {
     // 지나갈 칸들을 파내고 destination 으로 이동하는 행동 목록. 안전하게 팔 수 없으면 빈 목록.
     private static List<Action> digThrough(AIPlayer ai, World world, BukkitTerrainView terrain, BlockPoint destination,
                                            boolean record, BlockPoint... blocks) {
-        if (!isDigSafe(world, terrain, blocks) || undermines(ai, world, terrain, blocks) || breaksCover(ai, terrain, blocks)) return List.of();
+        if (!isDigSafe(world, terrain, blocks) || undermines(ai, world, terrain, blocks) || RefugePlans.breaksCover(ai, terrain, blocks)) return List.of();
 
         List<Action> actions = new ArrayList<>();
         for (BlockPoint block : blocks) {
@@ -402,20 +409,6 @@ public final class TerrainPlans {
             if (home != null && home.isInsideBuilding(world.getUID(), block)) return true;
             // 넣어 둔 것이 있는 화로를 굴 길에서 파내면 굽던 것이 쏟아진다. 그 칸은 비켜서 판다.
             if (FurnacePlans.holdsJob(ai, world.getUID(), block)) return true;
-        }
-        return false;
-    }
-
-    // 몬스터가 가까이 있는 다른 빈 곳으로 새로 뚫리는 블록인지. 뚫으면 그 틈으로 몬스터가 보고 때리거나 들어온다.
-    private static boolean breaksCover(AIPlayer ai, BukkitTerrainView terrain, BlockPoint... blocks) {
-        List<LivingEntity> hostiles = ai.getPerception().getHostiles();
-        if (hostiles.isEmpty() || !ai.getCombatMemory().isWaryAfterRefuge(ai.getTicks())) return false;
-        // 지금 내 공간과 이미 이어져 있는 빈칸으로 넓히는 것은 새로 뚫는 것이 아니다.
-        Set<BlockPoint> inside = Enclosure.around(terrain, ai.getPosition()).cells();
-        for (BlockPoint opening : Enclosure.openings(terrain, inside, List.of(blocks))) {
-            for (LivingEntity hostile : hostiles) {
-                if (Positions.of(hostile.getLocation()).distance(opening) <= COVER_RANGE) return true;
-            }
         }
         return false;
     }
