@@ -24,6 +24,7 @@ import me.herry.minecraftAI.ai.plan.FurnacePlans;
 import me.herry.minecraftAI.ai.plan.GatherPlans;
 import me.herry.minecraftAI.ai.plan.HomePlans;
 import me.herry.minecraftAI.ai.plan.ObsidianPlans;
+import me.herry.minecraftAI.ai.plan.PortalPlans;
 import me.herry.minecraftAI.ai.plan.Progression;
 import me.herry.minecraftAI.ai.plan.RefugePlans;
 import me.herry.minecraftAI.ai.plan.ResourceLocator;
@@ -267,6 +268,7 @@ final class SituationBuilder {
         situation.knowsWater = situation.emptyBucket
                 && ResourceLocator.locate(ai, MemoryType.WATER_SOURCE, GatherPlans.ORE_WALK_RANGE) != null;
         situation.waterBucket = inventory.has(Material.WATER_BUCKET);
+        situation.flintAndSteel = inventory.has(Material.FLINT_AND_STEEL);
         situation.canMineObsidian = inventory.bestTier(Tag.ITEMS_PICKAXES).isAtLeast(ToolTier.DIAMOND);
         situation.obsidianWork = situation.canMineObsidian && ObsidianPlans.isWorking(ai);
         situation.knowsLava = situation.waterBucket && situation.canMineObsidian && ObsidianPlans.knowsLake(ai);
@@ -276,6 +278,7 @@ final class SituationBuilder {
 
         // 중기 목표(다음에 이룰 것)와 장기 목표(지금 속한 단계)를 정한다.
         BuildPlans.checkCompletion(ai);
+        PortalPlans.checkCompletion(ai);
         ProgressFacts facts = Progression.facts(ai);
         situation.stage = Progression.stageOf(facts);
         fillMilestone(ai, inventory, situation, Progression.next(facts));

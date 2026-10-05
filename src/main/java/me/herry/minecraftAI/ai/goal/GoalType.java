@@ -56,6 +56,8 @@ public enum GoalType {
     FILL_BUCKET,
     // 용암 호수에 물을 부어 흑요석을 만들고 캔다. 아는 호수가 없으면 깊은 땅속에서 찾는다
     GATHER_OBSIDIAN,
+    // 집 근처에 네더 포탈의 틀을 짓고 부싯돌과 부시로 불을 붙인다
+    BUILD_PORTAL,
     SMELT_IRON,
     // 날고기를 화로에 구워서 더 배부른 음식으로 만든다
     COOK_FOOD,

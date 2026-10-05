@@ -66,6 +66,9 @@ public final class Progression {
         for (Map.Entry<Material, Integer> entry : inventory.snapshotWithEquipment().entrySet()) {
             facts.setCount(entry.getKey().name(), entry.getValue());
         }
+        // 포탈 틀에 이미 놓은 흑요석도 모은 것으로 친다. 놓는 만큼 가방에서는 줄어든다.
+        int placed = PortalPlans.placedObsidian(ai);
+        if (placed > 0) facts.setCount("OBSIDIAN", facts.count("OBSIDIAN") + placed);
         facts.tableAvailable = inventory.has(Material.CRAFTING_TABLE) || nearbyTable(ai) != null;
         facts.furnaceAvailable = inventory.has(Material.FURNACE) || nearbyFurnace(ai) != null;
         Base home = model.getHome();

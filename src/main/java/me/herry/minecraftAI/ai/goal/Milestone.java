@@ -89,7 +89,7 @@ public enum Milestone {
     public static final int EYES_NEEDED = 12;
     public static final int ARROWS_NEEDED = 64;
     // 여기까지는 AI 가 스스로 해낼 수 있다. 그 뒤는 단계 정의만 있고, 실제로 수행하는 행동은 아직 없다.
-    private static final Milestone LAST_AUTOMATED = OBSIDIAN;
+    private static final Milestone LAST_AUTOMATED = NETHER_PORTAL;
 
     private final Stage stage;
     private final Kind kind;

@@ -90,7 +90,7 @@ class FlintGoalsTest {
     @Test
     void flintAndSteelIsWithinTheAutomatedRange() {
         assertTrue(Milestone.FLINT_AND_STEEL.isAutomated());
-        assertFalse(Milestone.NETHER_PORTAL.isAutomated());
+        assertFalse(Milestone.BLAZE_RODS.isAutomated());
     }
 
     // 범용 목표로는 "부싯돌 1개를 가진다"이고, 가지면 이룬 것이다.

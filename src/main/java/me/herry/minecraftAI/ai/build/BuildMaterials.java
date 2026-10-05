@@ -27,6 +27,7 @@ public final class BuildMaterials {
             // 실내는 걸어 다닐 수 있으면 된다. 이미 들여놓은 시설은 치우지 않는다.
             case CLEAR -> BukkitTerrainView.classify(type) == BlockClass.OPEN || isFixture(type);
             case FLOOR, WALL, ROOF -> BukkitTerrainView.classify(type) == BlockClass.SOLID;
+            case FRAME -> type == Material.OBSIDIAN;
             case DOOR -> Tag.DOORS.isTagged(type);
             case WORKBENCH -> type == Material.CRAFTING_TABLE;
             case CHEST -> type == Material.CHEST || type == Material.TRAPPED_CHEST || type == Material.BARREL;
@@ -46,6 +47,7 @@ public final class BuildMaterials {
         return switch (role) {
             case CLEAR -> false;
             case FLOOR, WALL, ROOF -> InventorySystem.isFiller(item);
+            case FRAME -> item == Material.OBSIDIAN;
             case DOOR -> Tag.WOODEN_DOORS.isTagged(item);
             case WORKBENCH -> item == Material.CRAFTING_TABLE;
             case CHEST -> item == Material.CHEST;
