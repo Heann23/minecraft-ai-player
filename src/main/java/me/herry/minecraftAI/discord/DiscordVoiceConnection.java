@@ -67,7 +67,7 @@ public final class DiscordVoiceConnection extends ListenerAdapter implements Dis
             createdSpeech = new LocalSpeechProviders(configuration.speech());
             store = new DiscordMemoryStore(directory.resolve("discord"), configuration.discord().backup(), System::currentTimeMillis);
             session = new DiscordSession(configuration.discord(), store, createdSpeech, dialogue, createdSpeech, diagnostic,
-                    System::currentTimeMillis, () -> TimeUnit.NANOSECONDS.toMillis(System.nanoTime()), true);
+                    System::currentTimeMillis, () -> TimeUnit.NANOSECONDS.toMillis(System.nanoTime()), true, configuration.capturePolicy());
             speech = createdSpeech; audio = new JdaAudioAdapter(session, configuration.minimumRms(), diagnostic);
         } catch (Exception | LinkageError failed) {
             if (store != null) store.close(); if (createdSpeech != null) createdSpeech.close(); dialogue.close(); throw failed;
@@ -188,6 +188,14 @@ public final class DiscordVoiceConnection extends ListenerAdapter implements Dis
             case "forget" -> session.forget(user).thenApply(ignored -> "내 기억과 대화 문맥을 지웠어요. 삭제된 정보는 과거 백업에서도 다시 불러오지 않아요.");
             case "name" -> session.confirmedName(user, java.util.Objects.requireNonNull(event.getOption("name")).getAsString(), source).thenApply(ignored -> "내 호칭을 저장했어요.");
             case "speech" -> session.confirmedSpeechStyle(user, java.util.Objects.requireNonNull(event.getOption("allowed")).getAsBoolean(), source).thenApply(ignored -> "나에게 쓸 말투의 허락·거절을 저장했어요.");
+            case "backup" -> session.backup().thenApply(id -> id == null ? "마지막 백업 이후 기억이 바뀌지 않았어요." : "확정 기억을 백업했어요: " + id);
+            case "backups" -> session.backupIds().thenApply(ids -> ids.isEmpty() ? "아직 기억 백업이 없어요." : "최근 백업 식별자:\n" + String.join("\n", ids));
+            case "restore" -> {
+                if (!java.util.Objects.requireNonNull(event.getOption("confirm")).getAsBoolean())
+                    yield java.util.concurrent.CompletableFuture.completedFuture("복원하지 않았어요. 복원은 음성 대화를 멈추고 현재 기억을 선택한 백업으로 되돌려요. 삭제·정정 기록은 유지해요.");
+                yield audio.restoreBackup(java.util.Objects.requireNonNull(event.getOption("backup")).getAsString())
+                        .thenApply(ignored -> "기억을 복원했어요. 삭제·정정 기록과 이전 대화의 폐기를 적용했어요. /herry listen으로 음성 대화를 다시 받아요.");
+            }
             case "quiet" -> audio.listening(false).thenApply(ignored -> "음성 수신과 답변을 중단했어요. /herry listen으로 다시 받아요.");
             case "listen" -> audio.listening(true).thenApply(ignored -> "음성 대화를 다시 받아요. 연결이 끊겼다면 /herry resume을 사용해 주세요.");
             case "leave" -> {

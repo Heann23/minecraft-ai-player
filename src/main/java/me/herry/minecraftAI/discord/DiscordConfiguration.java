@@ -12,16 +12,21 @@ import org.bukkit.configuration.file.YamlConfiguration;
 
 /** File I/O and pure YAML parsing only; the runtime loads this outside the server thread. */
 public record DiscordConfiguration(DiscordSettings discord, OllamaSettings dialogue, SpeechProviderSettings speech,
-                                   double minimumRms) {
+                                   double minimumRms, long endSilenceMillis) {
     public DiscordConfiguration {
         java.util.Objects.requireNonNull(discord); java.util.Objects.requireNonNull(dialogue); java.util.Objects.requireNonNull(speech);
         if (!Double.isFinite(minimumRms) || minimumRms <= 0 || minimumRms > 1) throw new IllegalArgumentException("audio.minimum-rms");
+        if (endSilenceMillis < 100 || endSilenceMillis > 2500) throw new IllegalArgumentException("audio.end-silence-millis");
+    }
+    public VoiceIngress.Policy capturePolicy() {
+        return new VoiceIngress.Policy(8, 3, 2, 5, 1500, endSilenceMillis, endSilenceMillis + 500);
     }
     public static DiscordConfiguration read(Function<String, Object> values) {
         Object value = values.apply("audio.minimum-rms");
         if (value != null && !(value instanceof Number)) throw new IllegalArgumentException("audio.minimum-rms must be numeric");
         return new DiscordConfiguration(DiscordSettings.read(values), OllamaSettings.read(values), SpeechProviderSettings.read(values),
-                value == null ? 0.01 : ((Number) value).doubleValue());
+                value == null ? 0.01 : ((Number) value).doubleValue(),
+                DiscordSettings.number(values, "audio.end-silence-millis", 1000, 100, 2500));
     }
     public static DiscordConfiguration load(Path directory, Supplier<InputStream> defaults) throws IOException {
         Files.createDirectories(directory); Path file = directory.resolve("discord.yml");

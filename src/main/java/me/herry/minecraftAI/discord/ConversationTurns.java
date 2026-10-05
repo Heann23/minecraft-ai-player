@@ -161,6 +161,10 @@ public final class ConversationTurns implements AutoCloseable {
     }
 
     public synchronized List<Line> context() { return List.copyOf(context); }
+    /** Restore keeps membership and deduplication but retires every old answer and shared transcript. */
+    public synchronized void resetContext() {
+        invalidate(); engaged.clear(); permissionQuestion = null; context.clear();
+    }
 
     /** Deletion clears temporary context and invalidates pending provider output too. */
     public synchronized void forget(String userId) {

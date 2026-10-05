@@ -15,7 +15,7 @@ public final class JdaAudioAdapter implements AudioReceiveHandler, AudioSendHand
     private final double minimumRms;
     private final Consumer<String> diagnostic;
     private volatile Set<String> users = Set.of();
-    private boolean connected, closed, muted;
+    private boolean connected, closed, muted, restoring;
     private long membership;
     private PcmPlayback.Frame pending;
     public JdaAudioAdapter(DiscordSession session, double minimumRms, Consumer<String> diagnostic) {
@@ -31,8 +31,17 @@ public final class JdaAudioAdapter implements AudioReceiveHandler, AudioSendHand
     }
     public synchronized CompletableFuture<Void> listening(boolean enabled) {
         if (closed) return CompletableFuture.failedFuture(new IllegalStateException("Discord audio closed"));
+        if (enabled && restoring) return CompletableFuture.failedFuture(new IllegalStateException("memory restore in progress"));
         muted = !enabled; pending = null;
         return session.quiet(!enabled);
+    }
+    public synchronized CompletableFuture<Void> restoreBackup(String identifier) {
+        MemoryFiles.requireBackupName(identifier);
+        if (closed || restoring) return CompletableFuture.failedFuture(new IllegalStateException("Discord restore unavailable"));
+        restoring = true; muted = true; pending = null;
+        return session.restoreBackup(identifier).whenComplete((ignored, failed) -> {
+            synchronized (JdaAudioAdapter.this) { restoring = false; }
+        });
     }
     public synchronized CompletableFuture<Void> participants(Set<String> ids, Map<String, String> aliases) {
         if (closed || !connected) return CompletableFuture.completedFuture(null);

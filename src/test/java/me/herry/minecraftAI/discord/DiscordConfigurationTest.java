@@ -15,6 +15,8 @@ class DiscordConfigurationTest {
     @Test void createsDefaultFileOnceAndPreservesQuotedIdsFromExistingFile() throws Exception {
         var created = DiscordConfiguration.load(directory, () -> new ByteArrayInputStream("enabled: false\n".getBytes(StandardCharsets.UTF_8)));
         assertFalse(created.discord().enabled()); assertEquals(0.01, created.minimumRms());
+        assertEquals(1000, created.capturePolicy().normalPauseMillis());
+        assertEquals(1500, created.capturePolicy().continuationPauseMillis());
         Files.writeString(directory.resolve("discord.yml"), "enabled: true\nguild-id: '12345678901234567'\nvoice-channel-id: '12345678901234568'\n");
         var loaded = DiscordConfiguration.load(directory, () -> { fail("existing configuration overwritten"); return null; });
         assertTrue(loaded.discord().enabled()); assertEquals("12345678901234567", loaded.discord().guildId());
@@ -36,5 +38,12 @@ class DiscordConfigurationTest {
         for (Object value : new Object[]{"0.01", true, 0, -0.2, 1.1, Double.NaN, Double.POSITIVE_INFINITY})
             assertThrows(IllegalArgumentException.class, () -> DiscordConfiguration.read(Map.of("audio.minimum-rms", value)::get));
         assertEquals(0.02, DiscordConfiguration.read(Map.of("audio.minimum-rms", 0.02)::get).minimumRms());
+    }
+    @Test void pauseSettingRejectsWrongTypesAndBoundsAndDrivesCapturePolicy() {
+        for (Object value : new Object[]{"1000", true, 99, 2501, 500.5, Double.NaN})
+            assertThrows(IllegalArgumentException.class, () -> DiscordConfiguration.read(Map.of("audio.end-silence-millis", value)::get));
+        var configured = DiscordConfiguration.read(Map.of("audio.end-silence-millis", 800)::get);
+        assertEquals(800, configured.capturePolicy().normalPauseMillis());
+        assertEquals(1300, configured.capturePolicy().continuationPauseMillis());
     }
 }

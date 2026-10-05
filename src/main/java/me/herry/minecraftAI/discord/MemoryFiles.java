@@ -14,8 +14,12 @@ import static me.herry.minecraftAI.discord.DiscordMemory.Snapshot;
 final class MemoryFiles {
     private MemoryFiles() {}
     static Snapshot read(Path path) throws IOException {
-        if (!Files.isRegularFile(path) || Files.size(path) > MemoryCodec.MAX_BYTES) throw new IOException("memory file size/type");
-        return MemoryCodec.decode(Files.readAllBytes(path));
+        if (!Files.isRegularFile(path, java.nio.file.LinkOption.NOFOLLOW_LINKS) || Files.size(path) > MemoryCodec.MAX_BYTES) throw new IOException("memory file size/type");
+        try (var input = Files.newInputStream(path, StandardOpenOption.READ, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+            byte[] bytes = input.readNBytes(MemoryCodec.MAX_BYTES + 1);
+            if (bytes.length > MemoryCodec.MAX_BYTES) throw new IOException("memory file size/type");
+            return MemoryCodec.decode(bytes);
+        }
     }
     static void write(Path path, Snapshot snapshot) throws IOException {
         Files.createDirectories(path.getParent());
@@ -32,9 +36,18 @@ final class MemoryFiles {
     static List<Path> backups(Path directory) throws IOException {
         if (!Files.isDirectory(directory)) return List.of();
         try (var paths = Files.list(directory)) {
-            return paths.filter(p -> p.getFileName().toString().matches("(periodic|daily)-[0-9]+-[0-9]+\\.mem"))
+            return paths.filter(p -> validBackupName(p.getFileName().toString()) && Files.isRegularFile(p, java.nio.file.LinkOption.NOFOLLOW_LINKS))
                     .sorted(java.util.Comparator.comparingLong(MemoryFiles::revision).reversed()).toList();
         }
+    }
+    static void requireBackupName(String name) {
+        if (!validBackupName(name)) throw new IllegalArgumentException("backup identifier");
+    }
+    private static boolean validBackupName(String name) {
+        if (name == null || !name.matches("(periodic|daily)-[0-9]{1,19}-[0-9]{1,19}\\.mem")) return false;
+        String[] parts = name.substring(0, name.length() - 4).split("-");
+        try { Long.parseLong(parts[1]); Long.parseLong(parts[2]); return true; }
+        catch (NumberFormatException invalid) { return false; }
     }
     private static long revision(Path path) {
         String[] parts = path.getFileName().toString().replace(".mem", "").split("-");

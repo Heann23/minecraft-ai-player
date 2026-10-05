@@ -12,6 +12,9 @@ auto-connect: true
 audio:
   # RMS 에너지를 사용한 초기 잡음 구분. 음성 인식 신뢰도가 아니며 실제 마이크로 조정한다.
   minimum-rms: 0.01
+  # 발화 종료까지 기다리는 무음 시간. 짧은 문장 사이에서 호출어가 잘리는 것을 줄인다.
+  # 길게 늘리면 응답 시작도 늦어진다. 실제 마이크로 100~2500ms 범위에서 조정한다.
+  end-silence-millis: 1000
 
 conversation:
   followup-seconds: 60

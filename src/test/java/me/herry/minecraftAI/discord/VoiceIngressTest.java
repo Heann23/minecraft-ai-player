@@ -49,6 +49,17 @@ class VoiceIngressTest {
     @Test void delayedNewPacketDoesNotJoinOldUtterance() {
         try (var ingress = ingress()) { speak(ingress, "A", 5, false); now += 500; assertEquals(1, ingress.frame("A", frame((short) 2), true, false).completed().size()); }
     }
+    @Test void configuredPauseKeepsCallwordAndFollowingSentenceInOneUtterance() {
+        var policy = DiscordConfiguration.read(key -> null).capturePolicy();
+        try (var ingress = new VoiceIngress(policy, () -> now)) {
+            ingress.participants(Set.of("A"));
+            speak(ingress, "A", 5, false); now += 600;
+            assertTrue(ingress.tick().completed().isEmpty());
+            speak(ingress, "A", 5, false); now += 1000;
+            var complete = ingress.tick().completed();
+            assertEquals(1, complete.size()); assertEquals(PcmAudio.FRAME_BYTES * 10, complete.getFirst().pcm().length);
+        }
+    }
     @Test void botsAndNonParticipantsDoNotAllocateCapture() {
         try (var ingress = ingress()) { assertTrue(ingress.frame("bot", new byte[1], true, false).onsets().isEmpty()); assertTrue(ingress.tick().completed().isEmpty()); }
     }

@@ -6,7 +6,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class DiscordVoiceCommandsTest {
     @Test void onlyServerManagersCanControlAnotherPersonsVoiceSession() {
-        for (String action : Set.of("leave", "resume", "quiet", "listen")) {
+        for (String action : Set.of("leave", "resume", "quiet", "listen", "backup", "backups", "restore")) {
             assertFalse(DiscordVoiceCommands.allowed("guild", "guild", action, false));
             assertTrue(DiscordVoiceCommands.allowed("guild", "guild", action, true));
         }
@@ -20,11 +20,16 @@ class DiscordVoiceCommandsTest {
     }
     @Test void personalCommandsExposeNoTargetUserOrGameExecutionOption() {
         var definition = DiscordVoiceCommands.definition();
-        assertEquals("herry", definition.getName()); assertEquals(8, definition.getSubcommands().size());
+        assertEquals("herry", definition.getName()); assertEquals(11, definition.getSubcommands().size());
         for (var command : definition.getSubcommands()) {
             assertTrue(command.getOptions().stream().noneMatch(option -> option.getName().equals("user") || option.getName().equals("target") || option.getName().equals("ai")));
             if (command.getName().equals("name")) assertEquals(20, command.getOptions().getFirst().getMaxLength());
             if (command.getName().equals("speech")) assertTrue(command.getOptions().getFirst().isRequired());
+            if (command.getName().equals("restore")) {
+                assertEquals(2, command.getOptions().size()); assertTrue(command.getOptions().stream().allMatch(option -> option.isRequired()));
+                assertEquals(72, command.getOptions().getFirst().getMaxLength());
+                assertEquals("confirm", command.getOptions().get(1).getName());
+            }
         }
     }
 }

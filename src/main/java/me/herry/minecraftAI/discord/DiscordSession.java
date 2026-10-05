@@ -41,18 +41,24 @@ public final class DiscordSession implements AutoCloseable {
     private Set<String> participants = Set.of();
     private Map<String, String> names = Map.of();
     private volatile int userCount;
+    private boolean memoryMaintenance;
 
     /** Takes ownership of the memory store and providers' tasks. The owner closes the session on shutdown. */
     public DiscordSession(DiscordSettings settings, DiscordMemoryStore store, SpeechRecognitionWorker.Recognizer recognizer,
                           ResponsePipeline.Model model, ResponsePipeline.Voice voice, Consumer<String> diagnostic,
                           LongSupplier wallClock, LongSupplier monotonicMillis, boolean automaticTick) {
+        this(settings, store, recognizer, model, voice, diagnostic, wallClock, monotonicMillis, automaticTick, VoiceIngress.Policy.defaults());
+    }
+    public DiscordSession(DiscordSettings settings, DiscordMemoryStore store, SpeechRecognitionWorker.Recognizer recognizer,
+                          ResponsePipeline.Model model, ResponsePipeline.Voice voice, Consumer<String> diagnostic,
+                          LongSupplier wallClock, LongSupplier monotonicMillis, boolean automaticTick, VoiceIngress.Policy capturePolicy) {
         this.settings = java.util.Objects.requireNonNull(settings); this.store = java.util.Objects.requireNonNull(store);
         java.util.Objects.requireNonNull(recognizer); java.util.Objects.requireNonNull(model); java.util.Objects.requireNonNull(voice);
         java.util.Objects.requireNonNull(wallClock); java.util.Objects.requireNonNull(monotonicMillis); java.util.Objects.requireNonNull(diagnostic);
         if (settings.guildId().isEmpty()) throw new IllegalArgumentException("Discord session requires configured guild");
         this.diagnostic = code -> { try { diagnostic.accept(code); } catch (RuntimeException failedSink) { diagnosticFailures.incrementAndGet(); } };
         turns = new ConversationTurns(wallClock, settings.followupMillis(), settings.contextLines());
-        memory = new ConversationMemory(turns, store); ingress = new VoiceIngress(VoiceIngress.Policy.defaults(), monotonicMillis);
+        memory = new ConversationMemory(turns, store); ingress = new VoiceIngress(java.util.Objects.requireNonNull(capturePolicy), monotonicMillis);
         playback = new PcmPlayback(); responses = new ResponsePipeline(turns, model, voice, playback, this.diagnostic);
         events = new ThreadPoolExecutor(1, 1, 0, TimeUnit.MILLISECONDS, new ArrayBlockingQueue<>(128), r -> daemon(r, "MinecraftAI-discord-events"));
         speech = new SpeechRecognitionWorker(ingress, recognizer, result -> post(() -> recognized(result))
@@ -83,9 +89,9 @@ public final class DiscordSession implements AutoCloseable {
     /** Fast network entry point: copy one frame, enqueue, and return. No provider or disk work here. */
     public CompletableFuture<Void> audio(String userId, byte[] pcm, boolean speechDetected, boolean continuationExpected) {
         PcmAudio.requireFrame(pcm); byte[] owned = pcm.clone();
-        return post(() -> { captured(ingress.frame(userId, owned, speechDetected, continuationExpected)); return done(); });
+        return post(() -> { if (!memoryMaintenance) captured(ingress.frame(userId, owned, speechDetected, continuationExpected)); return done(); });
     }
-    public CompletableFuture<Void> tick() { return post(() -> { captured(ingress.tick()); return done(); }); }
+    public CompletableFuture<Void> tick() { return post(() -> { if (!memoryMaintenance) captured(ingress.tick()); return done(); }); }
 
     /** Always called on the event lane; the earlier STT worker check is insufficient. */
     private CompletableFuture<Void> recognized(SpeechRecognitionWorker.Result result) {
@@ -119,11 +125,15 @@ public final class DiscordSession implements AutoCloseable {
     }
 
     public CompletableFuture<Void> quiet(boolean value) {
-        return post(() -> { turns.quiet(value); responses.cancel(); ingress.reset(); speech.refreshRoutes(); return done(); });
+        return post(() -> {
+            if (memoryMaintenance && !value) throw new IllegalStateException("memory restore in progress");
+            turns.quiet(value); responses.cancel(); ingress.reset(); speech.refreshRoutes(); return done();
+        });
     }
     public CompletableFuture<Void> forget(String userId) {
         var subject = new DiscordMemory.Subject(settings.guildId(), settings.characterId(), userId);
         return post(() -> {
+            if (memoryMaintenance) throw new IllegalStateException("memory restore in progress");
             ingress.reset(); speech.refreshRoutes(); turns.cancelCurrent(); responses.cancel();
             return memory.forget(subject);
         });
@@ -141,8 +151,36 @@ public final class DiscordSession implements AutoCloseable {
         var key = new DiscordMemory.Key(subject, kind, "", label);
         if (interactionId == null || !interactionId.matches("[A-Za-z0-9_-]{1,80}")) throw new IllegalArgumentException("confirmation source");
         return post(() -> {
+            if (memoryMaintenance) throw new IllegalStateException("memory restore in progress");
             ingress.reset(); speech.refreshRoutes(); turns.forget(userId); responses.cancel();
             return store.remember(key, value, DiscordMemory.Evidence.EXPLICIT, "slash-" + interactionId, 0).thenApply(snapshot -> null);
+        });
+    }
+    public CompletableFuture<String> backup() {
+        return memoryOperation(() -> store.backup().thenApply(path -> path == null ? null : path.getFileName().toString()));
+    }
+    public CompletableFuture<List<String>> backupIds() { return memoryOperation(store::backupIds); }
+    private <T> CompletableFuture<T> memoryOperation(Supplier<CompletableFuture<T>> operation) {
+        CompletableFuture<T> result = new CompletableFuture<>();
+        post(() -> {
+            if (memoryMaintenance) throw new IllegalStateException("memory restore in progress");
+            return operation.get().thenAccept(result::complete);
+        }).whenComplete((ignored, error) -> { if (error != null) result.completeExceptionally(error); });
+        return result;
+    }
+    /** Transport pauses first and stays paused after either success or failure. */
+    public CompletableFuture<Void> restoreBackup(String identifier) {
+        MemoryFiles.requireBackupName(identifier);
+        return post(() -> {
+            if (memoryMaintenance) throw new IllegalStateException("memory restore in progress");
+            memoryMaintenance = true; turns.quiet(true); turns.resetContext(); responses.cancel(); ingress.reset(); speech.refreshRoutes();
+            CompletableFuture<Void> result = new CompletableFuture<>();
+            store.restoreBackup(identifier).whenComplete((snapshot, error) -> post(() -> {
+                memoryMaintenance = false;
+                if (error == null) result.complete(null); else result.completeExceptionally(error);
+                return done();
+            }).whenComplete((ignored, failure) -> { if (failure != null) result.completeExceptionally(failure); }));
+            return result;
         });
     }
     public PcmPlayback.Frame nextFrame() { return playback.nextFrame(); }

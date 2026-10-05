@@ -145,6 +145,14 @@ public final class DiscordMemoryStore implements AutoCloseable {
             return state;
         });
     }
+    /** Opaque file identifiers only; never expose arbitrary paths or personal memory in a control reply. */
+    public CompletableFuture<List<String>> backupIds() {
+        return submit(() -> MemoryFiles.backups(backups).stream().limit(20).map(path -> path.getFileName().toString()).toList());
+    }
+    public CompletableFuture<Snapshot> restoreBackup(String identifier) {
+        MemoryFiles.requireBackupName(identifier);
+        return restore(backups.resolve(identifier));
+    }
 
     public CompletableFuture<Snapshot> snapshot() { return submit(() -> state); }
     public Status status() { return new Status(state.revision(), recovered, recoveredAt, closed.get()); }
