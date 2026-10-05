@@ -23,6 +23,7 @@ audio:
   end-silence-millis: 1000
 
 conversation:
+  # /herry status는 본문 없이 텍스트 처리·대기·완료·취소·실패 횟수를 표시한다(재시작 때 초기화).
   # /herry me는 모델을 호출하지 않고 본인이 확정한 이름·말투·장난 설정만 개인 회신으로 보여 준다.
   # 개인 말투: /herry speech allowed:true|false, 개인 장난 설정: /herry joke allowed:true|false.
   # 본인이 직접 확정한 설정만 기억하며 /herry forget으로 이름·개인 설정·임시 문맥을 함께 지운다.

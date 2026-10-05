@@ -265,6 +265,7 @@ public final class DiscordSession implements AutoCloseable {
         return result;
     }
     public boolean textCurrent(DiscordTextConversation.Reply reply) { return textConversation.current(reply); }
+    public DiscordTextConversation.Status textStatus() { return textConversation.status(); }
     public void textSubmitted(DiscordTextConversation.Reply reply) { textConversation.submitted(reply); }
     public void textDiscard(DiscordTextConversation.Reply reply) { textConversation.discard(reply); }
     public boolean submitted(PcmPlayback.Frame frame) { return playback.submitted(frame); }

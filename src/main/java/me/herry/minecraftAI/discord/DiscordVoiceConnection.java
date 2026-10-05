@@ -226,7 +226,8 @@ public final class DiscordVoiceConnection extends ListenerAdapter implements Dis
                         + " · 참가자: " + status.users() + "명 · 기억 저장: " + (status.memoryFailure() ? "확인 필요" : "정상")
                         + " · 기억 버전: " + status.memoryRevision()
                         + (status.memoryRecovered() ? " · 백업에서 자동 복구됨: " + java.time.Instant.ofEpochMilli(status.memoryRecoveredAt()) : "")
-                        + (status.rejectedRecoveryPoints() > 0 ? " · 제외한 손상/미래 백업: " + status.rejectedRecoveryPoints() + "개" : ""));
+                        + (status.rejectedRecoveryPoints() > 0 ? " · 제외한 손상/미래 백업: " + status.rejectedRecoveryPoints() + "개" : "")
+                        + "\n" + session.textStatus().describe() + "\n완료는 답변 준비 완료이며 Discord 전달 확인은 별도예요.");
             }
             case "forget" -> session.forget(user).thenApply(ignored -> "내 기억과 대화 문맥을 지웠어요. 삭제된 정보는 과거 백업에서도 다시 불러오지 않아요.");
             case "name" -> session.confirmedName(user, java.util.Objects.requireNonNull(event.getOption("name")).getAsString(), source).thenApply(ignored -> "내 호칭을 저장했어요.");

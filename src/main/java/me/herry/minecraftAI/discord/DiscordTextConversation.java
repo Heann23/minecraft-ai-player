@@ -8,6 +8,12 @@ import java.util.function.LongSupplier;
 /** Private, bounded text context per user. Reuses dialogue and confirmed memory; no speech or game access. */
 public final class DiscordTextConversation implements AutoCloseable {
     public record Reply(ConversationTurns.Token turn, String text) {}
+    public record Status(boolean closed, boolean running, int queued, long completed, long cancelled, long failed, long rejected) {
+        public String describe() {
+            return "텍스트 대화: " + (closed ? "종료됨" : running ? "답변 준비 중" : "대기 중") + " · 대기 " + queued + "건"
+                    + " · 완료 " + completed + " · 취소 " + cancelled + " · 실패 " + failed + " · 요청 초과 " + rejected;
+        }
+    }
     private record Work(ConversationTurns turns, ConversationTurns.Token token,
                         CompletableFuture<Reply> result, FutureTask<Void> task) {}
     private final DiscordSettings settings;
@@ -17,6 +23,10 @@ public final class DiscordTextConversation implements AutoCloseable {
     private final LinkedHashMap<String, ConversationTurns> contexts = new LinkedHashMap<>();
     private final LinkedHashMap<String, Work> work = new LinkedHashMap<>();
     private final Set<CompletableFuture<Reply>> pending = ConcurrentHashMap.newKeySet();
+    private final java.util.concurrent.atomic.AtomicLong completed = new java.util.concurrent.atomic.AtomicLong();
+    private final java.util.concurrent.atomic.AtomicLong cancelled = new java.util.concurrent.atomic.AtomicLong();
+    private final java.util.concurrent.atomic.AtomicLong failed = new java.util.concurrent.atomic.AtomicLong();
+    private final java.util.concurrent.atomic.AtomicLong rejected = new java.util.concurrent.atomic.AtomicLong();
     private final ThreadPoolExecutor worker = new ThreadPoolExecutor(1, 1, 0, TimeUnit.MILLISECONDS,
             new ArrayBlockingQueue<>(4), task -> { var thread = new Thread(task, "MinecraftAI-discord-text"); thread.setDaemon(true); return thread; });
     private boolean closed;
@@ -43,10 +53,12 @@ public final class DiscordTextConversation implements AutoCloseable {
         work.put(user, new Work(turns, accepted.token(), result, task));
         result.whenComplete((reply, error) -> {
             pending.remove(result);
-            if (result.isCancelled()) cancel(user, conversation, accepted.token(), result);
+            if (result.isCancelled()) { cancelled.incrementAndGet(); cancel(user, conversation, accepted.token(), result); }
+            else if (error == null) completed.incrementAndGet();
         });
         try { worker.execute(task); }
         catch (RejectedExecutionException full) {
+            rejected.incrementAndGet();
             work.remove(user); turns.finish(accepted.token()); result.completeExceptionally(new IllegalStateException("text conversation busy"));
         }
         return result;
@@ -62,7 +74,10 @@ public final class DiscordTextConversation implements AutoCloseable {
             if (!turns.generated(token, answer)) { result.cancel(false); return; }
             result.complete(new Reply(token, answer));
         } catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); turns.finish(token); result.cancel(false); }
-        catch (Exception failure) { turns.finish(token); result.completeExceptionally(new IllegalStateException("text conversation unavailable")); }
+        catch (Exception failure) {
+            turns.finish(token);
+            if (result.completeExceptionally(new IllegalStateException("text conversation unavailable"))) failed.incrementAndGet();
+        }
         finally { synchronized (this) { var active = work.get(user); if (active != null && active.result() == result) work.remove(user); } }
     }
     private synchronized void cancel(String user, ConversationTurns turns, ConversationTurns.Token token, CompletableFuture<Reply> result) {
@@ -91,6 +106,10 @@ public final class DiscordTextConversation implements AutoCloseable {
     public synchronized void reset() {
         contexts.values().forEach(ConversationTurns::close); contexts.clear();
         for (String user : java.util.List.copyOf(work.keySet())) cancelWork(user);
+    }
+    /** Aggregate work counters only; no user identifiers, names, inputs or model output. Completion precedes Discord delivery. */
+    public synchronized Status status() {
+        return new Status(closed, worker.getActiveCount() > 0, worker.getQueue().size(), completed.get(), cancelled.get(), failed.get(), rejected.get());
     }
     @Override public synchronized void close() { if (closed) return; closed = true; reset(); worker.shutdownNow(); pending.forEach(reply -> reply.cancel(false)); }
 }
