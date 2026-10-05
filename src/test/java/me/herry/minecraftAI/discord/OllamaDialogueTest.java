@@ -140,6 +140,27 @@ class OllamaDialogueTest {
             assertEquals("안녕하세요라는 말은 인사예요.", fixture.model.respond(followup("그 말이 무슨 뜻이야?")));
         }
     }
+    private DiscordMemory.Fact name(String user, long expiry) {
+        return new DiscordMemory.Fact(new DiscordMemory.Key(new DiscordMemory.Subject("guild", "herry", user), DiscordMemory.Kind.NAME, "", "preferred"),
+                "해리", DiscordMemory.Evidence.EXPLICIT, "confirmed", 1000, expiry, 1);
+    }
+    @Test void charactersHonorificCallIsNotMistakenForUsersConfirmedName() throws Exception {
+        try (var fixture = new Fixture()) {
+            fixture.output("{\"done\":true,\"message\":{\"role\":\"assistant\",\"content\":\"안녕하세요, 해리님! 반가워요.\"}}");
+            assertEquals("안녕하세요, 반가워요.", fixture.model.respond(request(List.of())));
+            assertEquals("안녕하세요, 반가워요.", fixture.model.respond(request(List.of(name("B", 0), name("A", 1500)))));
+            assertEquals("안녕하세요, 해리님! 반가워요.", fixture.model.respond(request(List.of(name("A", 0)))));
+        }
+    }
+    @Test void addressingExamplesAndCharacterSelfIntroductionArePreserved() throws Exception {
+        try (var fixture = new Fixture()) {
+            for (String reply : List.of("해리님이라는 호칭을 쓰면 돼요.", "저는 해리예요.", "\"해리님, 안녕하세요\"는 인사예요.")) {
+                var object = new JsonObject(); object.addProperty("done", true); var message = new JsonObject();
+                message.addProperty("role", "assistant"); message.addProperty("content", reply); object.add("message", message); fixture.output(object.toString());
+                assertEquals(reply, fixture.model.respond(request(List.of())));
+            }
+        }
+    }
     @Test void anotherPersonsGreetingCannotSuppressFirstGreetingToCurrentSpeaker() throws Exception {
         try (var fixture = new Fixture()) {
             fixture.output("{\"done\":true,\"message\":{\"role\":\"assistant\",\"content\":\"안녕하세요. 해리예요.\"}}");
