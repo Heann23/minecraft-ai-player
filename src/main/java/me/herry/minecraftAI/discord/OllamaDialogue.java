@@ -96,7 +96,26 @@ public final class OllamaDialogue implements ResponsePipeline.Model, AutoCloseab
         boolean sameName = request.memory().stream().anyMatch(fact -> fact.key().subject().userId().equals(request.turn().userId())
                 && fact.key().kind() == DiscordMemory.Kind.NAME && fact.evidence() == DiscordMemory.Evidence.EXPLICIT && !fact.expired(clock.getAsLong())
                 && (fact.value().equalsIgnoreCase("Herry") || fact.value().equals("해리")));
-        return sameName ? text : text.replaceFirst("(?iu)^((?:안녕하세요[,.!！]?\\s*)?)(?:해리|Herry)(?:님|씨)[,!！]\\s*", "$1").strip();
+        if (sameName) return text;
+        var address = java.util.regex.Pattern.compile("(?iu)((?:^|(?<=[.!?。！])\\s+)(?:안녕하세요[,.!！]?\\s*)?)(?:해리|Herry)(?:님|씨)[,!！]\\s*");
+        boolean[] quoted = quotedCharacters(text);
+        var matcher = address.matcher(text); var result = new StringBuilder(); int copied = 0;
+        while (matcher.find()) {
+            int nameStart = matcher.start() + matcher.group(1).length();
+            if (quoted[nameStart]) continue;
+            result.append(text, copied, matcher.start()).append(matcher.group(1)); copied = matcher.end();
+        }
+        return result.append(text, copied, text.length()).toString().strip();
+    }
+    private static boolean[] quotedCharacters(String text) {
+        boolean[] quoted = new boolean[text.length()]; char close = 0;
+        for (int i = 0; i < text.length(); i++) {
+            char value = text.charAt(i); quoted[i] = close != 0;
+            if (i > 0 && text.charAt(i - 1) == '\\') continue;
+            if (close != 0) { if (value == close) close = 0; continue; }
+            close = switch (value) { case '"', '\'' -> value; case '“' -> '”'; case '‘' -> '’'; case '「' -> '」'; case '『' -> '』'; default -> 0; };
+        }
+        return quoted;
     }
     /** Remove only repeated leading greeting/identity phrases; preserve quoted explanations and answer content. */
     private static String withoutPreface(String text) {

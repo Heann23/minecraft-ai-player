@@ -173,6 +173,25 @@ class OllamaDialogueTest {
             }
         }
     }
+    @Test void laterSentenceCannotAddressUserByCharacterNameButQuotesAndConfirmedSameNameRemain() throws Exception {
+        try (var fixture = new Fixture()) {
+            for (var entry : Map.of("잠깐 쉬어도 좋아요. 해리님, 어떻게 지내세요?", "잠깐 쉬어도 좋아요. 어떻게 지내세요?",
+                    "잘 들었어요! Herry씨, 이어서 말해 주세요.", "잘 들었어요! 이어서 말해 주세요.",
+                    "안녕하세요. 해리님! 반가워요.", "안녕하세요. 반가워요.").entrySet()) {
+                var body = new JsonObject(); body.addProperty("done", true); var message = new JsonObject();
+                message.addProperty("role", "assistant"); message.addProperty("content", entry.getKey()); body.add("message", message); fixture.output(body.toString());
+                assertEquals(entry.getValue(), fixture.model.respond(request(List.of())));
+                assertEquals(entry.getKey(), fixture.model.respond(request(List.of(name("A", 0)))));
+            }
+            for (String quote : List.of("\"안녕하세요. 해리님, 반가워요.\"는 호칭 예시예요.",
+                    "예시는 ‘안녕하세요. 해리님, 반가워요.’예요.", "예시는 「안녕하세요. 해리님, 반가워요.」예요.",
+                    "'안녕하세요. 해리님, 반가워요.'는 인사예요.")) {
+                var body = new JsonObject(); body.addProperty("done", true); var message = new JsonObject();
+                message.addProperty("role", "assistant"); message.addProperty("content", quote); body.add("message", message); fixture.output(body.toString());
+                assertEquals(quote, fixture.model.respond(request(List.of())));
+            }
+        }
+    }
     @Test void anotherPersonsGreetingCannotSuppressFirstGreetingToCurrentSpeaker() throws Exception {
         try (var fixture = new Fixture()) {
             fixture.output("{\"done\":true,\"message\":{\"role\":\"assistant\",\"content\":\"안녕하세요. 해리예요.\"}}");
