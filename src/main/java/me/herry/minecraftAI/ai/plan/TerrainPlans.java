@@ -89,7 +89,10 @@ public final class TerrainPlans {
     public static boolean needsToClimb(AIPlayer ai) {
         World world = ai.getPlayer().getWorld();
         BlockPoint feet = ai.getPosition();
-        return isDeepUnderground(world, feet) || isInPit(world, feet);
+        // 좁은 굴의 바깥은 낮은 지면일 수 있다. 실제로 기록한 굴 안이고 입구가 위에 있으면 그 길로 올라간다.
+        boolean inRecordedShaft = !isUnderOpenSky(world, feet)
+                && ai.getTeam().getShafts().higher(world.getUID(), feet, 2.0, 4) != null;
+        return inRecordedShaft || isDeepUnderground(world, feet) || isInPit(world, feet);
     }
 
     // 주변(반경 3칸)의 지면이 발보다 높은 곳이 많은지. 갇혔을 때 위로 나갈지 아래로 나갈지 정한다.
