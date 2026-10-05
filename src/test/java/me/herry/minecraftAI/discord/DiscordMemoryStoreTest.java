@@ -66,6 +66,20 @@ class DiscordMemoryStoreTest {
         try (var store = open()) { name(store, "민수"); backup = store.backup().join(); store.forget(A).join(); store.restore(backup).join(); assertTrue(store.snapshot().join().facts().isEmpty()); }
         try (var store = open()) { assertTrue(store.snapshot().join().facts().isEmpty()); }
     }
+    @Test void automaticRecoveryReportsSkippedCorruptAndFutureBackupsWithoutPersonalContents() throws Exception {
+        long savedAt;
+        try (var store = open()) { name(store, "민수"); savedAt = store.snapshot().join().createdAt(); store.backup().join(); }
+        Files.write(directory.resolve("backups/periodic-2000-99.mem"), new byte[]{1, 2, 3});
+        MemoryFiles.write(directory.resolve("backups/periodic-2000-98.mem"), Snapshot.empty(now + 1));
+        Files.write(directory.resolve("data/current.mem"), new byte[]{4, 5, 6});
+        try (var recovered = open()) {
+            assertTrue(recovered.status().recovered()); assertEquals(savedAt, recovered.status().recoveredAt());
+            assertEquals(2, recovered.status().rejectedRecoveryPoints());
+            assertFalse(recovered.status().toString().contains("민수"));
+            assertEquals("민수", recovered.visible(A, Set.of("A")).join().getFirst().value());
+            assertFalse(recovered.hasFailure());
+        }
+    }
     @Test void forgettingEitherRelationParticipantDeletesRelation() throws Exception {
         try (var store = open()) {
             store.remember(RELATION, "친구", Evidence.EXPLICIT, "1", 0).join(); Path backup = store.backup().join();

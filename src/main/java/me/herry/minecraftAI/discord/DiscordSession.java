@@ -20,7 +20,8 @@ import java.util.function.Supplier;
 
 /** One channel's event lane, connecting fake or local STT/model/TTS providers without Bukkit access. */
 public final class DiscordSession implements AutoCloseable {
-    public record Status(boolean closed, int users, int queuedEvents, long processedInputs, long droppedEvents, long diagnosticFailures, boolean memoryFailure) {}
+    public record Status(boolean closed, int users, int queuedEvents, long processedInputs, long droppedEvents, long diagnosticFailures,
+                         boolean memoryFailure, long memoryRevision, boolean memoryRecovered, long memoryRecoveredAt, int rejectedRecoveryPoints) {}
     private final DiscordSettings settings;
     private final DiscordMemoryStore store;
     private final ConversationTurns turns;
@@ -229,7 +230,11 @@ public final class DiscordSession implements AutoCloseable {
     }
     public PcmPlayback.Frame nextFrame() { return playback.nextFrame(); }
     public boolean submitted(PcmPlayback.Frame frame) { return playback.submitted(frame); }
-    public Status status() { return new Status(closed.get(), userCount, events.getQueue().size(), processedInputs.get(), dropped.get(), diagnosticFailures.get(), store.hasFailure()); }
+    public Status status() {
+        var memoryStatus = store.status();
+        return new Status(closed.get(), userCount, events.getQueue().size(), processedInputs.get(), dropped.get(), diagnosticFailures.get(), store.hasFailure(),
+                memoryStatus.revision(), memoryStatus.recovered(), memoryStatus.recoveredAt(), memoryStatus.rejectedRecoveryPoints());
+    }
 
     private void captured(VoiceIngress.Events captured) {
         for (VoiceIngress.Onset onset : captured.onsets()) { responses.interrupt(onset.route().userId()); speech.refreshRoutes(); }

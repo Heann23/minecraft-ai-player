@@ -115,7 +115,7 @@ Discord 연결이나 로컬 제공자가 실패해도 게임 AI는 계속 실행
 
 | Discord 명령 | 기능 |
 |---|---|
-| `/herry status` | 음성 연결과 기억 저장 상태 확인 |
+| `/herry status` | 음성 연결·기억 저장·백업 자동 복구 여부와 시각 확인 |
 | `/herry name name:<호칭>` | 본인의 이름·호칭 직접 확정 |
 | `/herry speech allowed:<true 또는 false>` | 본인에게 반말할 허락 또는 거절 저장 |
 | `/herry forget` | 본인의 기억과 임시 대화 문맥 삭제 |

@@ -33,7 +33,7 @@ public final class DiscordMemoryStore implements AutoCloseable {
         }
         public static BackupPolicy defaults() { return new BackupPolicy(true, 600_000, 24, 7, 128L * 1024 * 1024); }
     }
-    public record Status(long revision, boolean recovered, long recoveredAt, boolean closed) {}
+    public record Status(long revision, boolean recovered, long recoveredAt, boolean closed, int rejectedRecoveryPoints) {}
     private final Path data, backups, current, journal;
     private final LongSupplier clock;
     private final BackupPolicy policy;
@@ -46,6 +46,7 @@ public final class DiscordMemoryStore implements AutoCloseable {
     private volatile Throwable lastFailure;
     private boolean recovered;
     private long recoveredAt, backedRevision = -1;
+    private int rejectedRecoveryPoints;
 
     public DiscordMemoryStore(Path discordDirectory, BackupPolicy policy, LongSupplier clock) throws IOException {
         this.clock = java.util.Objects.requireNonNull(clock);
@@ -155,7 +156,7 @@ public final class DiscordMemoryStore implements AutoCloseable {
     }
 
     public CompletableFuture<Snapshot> snapshot() { return submit(() -> state); }
-    public Status status() { return new Status(state.revision(), recovered, recoveredAt, closed.get()); }
+    public Status status() { return new Status(state.revision(), recovered, recoveredAt, closed.get(), rejectedRecoveryPoints); }
     /** Diagnostics have no transcript, names, token, or file contents. */
     public boolean hasFailure() { return lastFailure != null; }
 
@@ -206,7 +207,8 @@ public final class DiscordMemoryStore implements AutoCloseable {
                 Snapshot candidate = MemoryFiles.read(backup);
                 long now = clock.getAsLong();
                 if (candidate.createdAt() <= now && candidate.facts().values().stream().noneMatch(f -> f.recordedAt() > now)) return candidate;
-            } catch (IOException ignored) { }
+                rejectedRecoveryPoints++;
+            } catch (IOException invalidBackup) { rejectedRecoveryPoints++; }
         }
         return null;
     }

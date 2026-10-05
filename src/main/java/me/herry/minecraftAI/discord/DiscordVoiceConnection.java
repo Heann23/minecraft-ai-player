@@ -66,6 +66,7 @@ public final class DiscordVoiceConnection extends ListenerAdapter implements Dis
         try {
             createdSpeech = new LocalSpeechProviders(configuration.speech());
             store = new DiscordMemoryStore(directory.resolve("discord"), configuration.discord().backup(), System::currentTimeMillis);
+            if (store.status().recovered()) diagnostic.accept("discord-memory-recovered-from-backup");
             session = new DiscordSession(configuration.discord(), store, createdSpeech, dialogue, createdSpeech, diagnostic,
                     System::currentTimeMillis, () -> TimeUnit.NANOSECONDS.toMillis(System.nanoTime()), true, configuration.capturePolicy(), configuration.greetOnJoin());
             speech = createdSpeech; audio = new JdaAudioAdapter(session, configuration.minimumRms(), diagnostic);
@@ -183,8 +184,14 @@ public final class DiscordVoiceConnection extends ListenerAdapter implements Dis
     private java.util.concurrent.CompletableFuture<String> command(SlashCommandInteractionEvent event) {
         String user = event.getUser().getId(), source = event.getId();
         return switch (event.getSubcommandName()) {
-            case "status" -> java.util.concurrent.CompletableFuture.completedFuture("음성 연결: " + (event.getGuild().getAudioManager().isConnected() ? "연결됨" : "연결 안 됨")
-                    + " · 참가자: " + session.status().users() + "명 · 기억 저장: " + (session.status().memoryFailure() ? "확인 필요" : "정상"));
+            case "status" -> {
+                var status = session.status();
+                yield java.util.concurrent.CompletableFuture.completedFuture("음성 연결: " + (event.getGuild().getAudioManager().isConnected() ? "연결됨" : "연결 안 됨")
+                        + " · 참가자: " + status.users() + "명 · 기억 저장: " + (status.memoryFailure() ? "확인 필요" : "정상")
+                        + " · 기억 버전: " + status.memoryRevision()
+                        + (status.memoryRecovered() ? " · 백업에서 자동 복구됨: " + java.time.Instant.ofEpochMilli(status.memoryRecoveredAt()) : "")
+                        + (status.rejectedRecoveryPoints() > 0 ? " · 제외한 손상/미래 백업: " + status.rejectedRecoveryPoints() + "개" : ""));
+            }
             case "forget" -> session.forget(user).thenApply(ignored -> "내 기억과 대화 문맥을 지웠어요. 삭제된 정보는 과거 백업에서도 다시 불러오지 않아요.");
             case "name" -> session.confirmedName(user, java.util.Objects.requireNonNull(event.getOption("name")).getAsString(), source).thenApply(ignored -> "내 호칭을 저장했어요.");
             case "speech" -> session.confirmedSpeechStyle(user, java.util.Objects.requireNonNull(event.getOption("allowed")).getAsBoolean(), source).thenApply(ignored -> "나에게 쓸 말투의 허락·거절을 저장했어요.");
