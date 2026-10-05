@@ -31,19 +31,19 @@ import java.util.List;
  */
 public final class CraftPlans {
     // 작업대에 손이 닿는 거리
-    private static final double TABLE_REACH = 3.5;
+    static final double TABLE_REACH = 3.5;
     // 손이 닿지 않는 작업대나 화로에는 바로 옆 칸까지 다가간다.
     private static final double STATION_CLOSE = 2.0;
-    // 한 번에 제련하는 최대 개수와 한 번에 만드는 횃불 개수
-    private static final int SMELT_BATCH = 16;
+    // 화로에 한 번에 넣는 최대 개수 (재료 칸 한 묶음). 넣어 두고 다른 일을 하므로 가진 것을 한꺼번에 넣는다.
+    private static final int SMELT_BATCH = 64;
+    // 한 번에 만드는 횃불 개수
     private static final int TORCH_BATCH = 8;
     private static final int TORCHES_PER_COAL = 4;
-    // 한 번에 굽는 고기 수. 배가 고플 때는 기다리는 시간을 줄이려고 조금만 굽는다.
-    private static final int COOK_BATCH = 8;
+    // 배가 고플 때는 다 익기를 기다렸다가 먹어야 하므로 조금만 굽는다.
     private static final int HUNGRY_COOK_BATCH = 2;
-    // 이 거리 안에 있는 자기 작업대만 챙겨 간다. 멀리 두고 온 것은 거점으로 남겨 둔다.
-    private static final double PACK_RANGE = 8.0;
-    private static final double PACK_DROP_RADIUS = 6.0;
+    // 이 거리 안에 있는 자기 작업대와 화로만 챙겨 간다. 멀리 두고 온 것은 거점으로 남겨 둔다.
+    static final double PACK_RANGE = 8.0;
+    static final double PACK_DROP_RADIUS = 6.0;
     // 블록을 놓을 자리가 없을 때 자리를 찾아 옮겨 가는 거리
     private static final double RELOCATE_MIN = 5.0;
     private static final double RELOCATE_MAX = 10.0;
@@ -92,6 +92,8 @@ public final class CraftPlans {
      * 셋 다 안 되면(조약돌이나 작업대가 없을 때) 집에 있는 화로까지 돌아간다.
      */
     static List<Action> smeltIron(AIPlayer ai) {
+        // 넣어 둔 것이 있으면 그것부터 챙긴다. 화로의 칸은 하나씩이라 꺼내기 전에는 더 넣을 수 없다.
+        if (FurnacePlans.activeJob(ai) != null) return FurnacePlans.tendFurnace(ai);
         int raw = ai.getInventory().count(Material.RAW_IRON);
         if (raw <= 0) return List.of();
 
@@ -103,7 +105,9 @@ public final class CraftPlans {
             // 계획을 다시 세울 때 화로가 가까워져 있으면 그때 제련한다.
             return List.of(new MoveToAction(PathGoal.reach(home.furnace(), TABLE_REACH), false));
         }
-        actions.add(new SmeltItemAction(Material.RAW_IRON, Math.min(raw, SMELT_BATCH)));
+        int batch = Math.min(raw, SMELT_BATCH);
+        FurnacePlans.splitLogsForFuel(ai, actions, batch);
+        actions.add(new SmeltItemAction(Material.RAW_IRON, batch));
         return actions;
     }
 
@@ -117,9 +121,10 @@ public final class CraftPlans {
 
     /**
      * 날고기를 화로에 굽는다. 근처에 화로가 없으면 가진 화로를 놓고, 화로도 없으면 조약돌로 만들어서 놓는다.
-     * 구울 방법이 없으면 빈 목록.
+     * 구울 방법이 없으면 빈 목록. 넣은 뒤에는 기다리지 않고, 다 구워지면 꺼낸다 (FurnacePlans.tendFurnace).
      */
     static List<Action> cookFood(AIPlayer ai) {
+        if (FurnacePlans.activeJob(ai) != null) return FurnacePlans.tendFurnace(ai);
         Material raw = ai.getInventory().mostRawFood();
         if (raw == null || !ai.getInventory().hasFuel()) return List.of();
 
@@ -127,7 +132,8 @@ public final class CraftPlans {
         if (!prepareFurnace(ai, actions)) return List.of();
         // 배가 고플 때는 조금만 구워서 빨리 먹는다. 한 개에 10초가 걸린다.
         boolean hungry = ai.getPlayer().getFoodLevel() < ai.getConfig().eatBelow;
-        int batch = Math.min(ai.getInventory().count(raw), hungry ? HUNGRY_COOK_BATCH : COOK_BATCH);
+        int batch = Math.min(ai.getInventory().count(raw), hungry ? HUNGRY_COOK_BATCH : SMELT_BATCH);
+        FurnacePlans.splitLogsForFuel(ai, actions, batch);
         actions.add(new SmeltItemAction(raw, batch));
         ai.getTeam().say(ai, Phrases.cooking(), false);
         return actions;
@@ -214,7 +220,7 @@ public final class CraftPlans {
      * 멀리 있을 때뿐 아니라, 가까워도 벽에 가려 있을 때(집 밖에서 집 안의 작업대 등)도 돌아서 다가간다.
      * 바로 옆 칸에서는 사이를 가로막는 블록이 있을 수 없다.
      */
-    private static void approach(AIPlayer ai, List<Action> actions, BlockPoint station, boolean rememberUnreachable) {
+    static void approach(AIPlayer ai, List<Action> actions, BlockPoint station, boolean rememberUnreachable) {
         if (NearbyBlocks.canTouch(ai.getPlayer(), station, TABLE_REACH)) return;
         actions.add(new MoveToAction(PathGoal.reach(station, STATION_CLOSE), rememberUnreachable));
     }

@@ -66,6 +66,14 @@ public final class GoalSystem {
     public static final double HOME_UPGRADE_RANGE = 48.0;
     // 숨은 자리에서 체력이 이 비율까지 돌아오면 다시 나간다.
     public static final double REFUGE_LEAVE_HEALTH = 0.8;
+    // 화로에 넣어 둔 것이 있는 동안에는 아무리 시간이 많이 남아도 화로에서 이보다 멀리 가지 않는다.
+    public static final double FURNACE_LEASH = 48.0;
+    // 다 구워질 때쯤 화로에 돌아와 있도록, 남은 시간 동안 걸어서 돌아올 수 있는 거리까지만 간다 (한 틱에 이만큼 걷는다고 넉넉히 잡는다).
+    public static final double FURNACE_RETURN_PACE = 0.15;
+    // 남은 시간이 얼마 없어도 화로에서 이만큼은 떨어져 있어도 된다.
+    public static final double FURNACE_NEAR = 6.0;
+    // 다 구워지기까지 이만큼밖에 안 남았으면 다른 일을 새로 시작하지 않고 화로 곁에서 기다린다.
+    public static final int FURNACE_WAIT_TICKS = 200;
 
     private final Map<GoalType, GoalEvaluator> evaluators = new EnumMap<>(GoalType.class);
     private final Map<GoalType, Long> cooldownUntil = new EnumMap<>(GoalType.class);
@@ -89,6 +97,8 @@ public final class GoalSystem {
         register(GoalType.PACK_UP_TABLE, GoalSystem::packUpTable);
         register(GoalType.SMELT_IRON, GoalSystem::smeltIron);
         register(GoalType.COOK_FOOD, GoalSystem::cookFood);
+        register(GoalType.TEND_FURNACE, GoalSystem::tendFurnace);
+        register(GoalType.PACK_UP_FURNACE, GoalSystem::packUpFurnace);
         register(GoalType.CRAFT_TORCH, situation -> situation.canCraftTorch && situation.torches < TORCH_MIN ? 295.0 : 0.0);
         register(GoalType.STOCK_FOOD, GoalSystem::stockFood);
         register(GoalType.MINE_COAL, GoalSystem::mineCoal);
@@ -240,6 +250,8 @@ public final class GoalSystem {
 
     // 캔 철이 다음 장비를 만들 만큼 모였으면 화로에서 제련한다.
     private static double smeltIron(Situation situation) {
+        // 화로에 넣어 둔 것이 있으면 그것을 꺼낸 다음에 넣는다.
+        if (situation.furnaceBusy) return 0.0;
         if (situation.need != Situation.Need.IRON || situation.rawIron <= 0 || !situation.hasFuel) return 0.0;
         return situation.rawIron + situation.ironIngots >= situation.ironNeeded ? 300.0 : 0.0;
     }
@@ -268,9 +280,41 @@ public final class GoalSystem {
      * 그렇지 않으면 날고기가 몇 개 모였을 때 미리 구워 둔다.
      */
     private static double cookFood(Situation situation) {
+        if (situation.furnaceBusy) return 0.0;
         if (!situation.canCook || situation.rawFood <= 0) return 0.0;
         if (situation.shouldEat && situation.readyFood == 0 && !situation.starving) return 520.0;
         return situation.rawFood >= COOK_MIN ? 305.0 : 0.0;
+    }
+
+    /**
+     * 화로에 넣어 둔 것을 챙긴다. 굽는 동안에는 화로 앞에 서 있지 않고 다른 일을 하다가, 다 구워지면 가서 꺼낸다.
+     * 넣어 둔 것을 두고 떠나지 않도록, 화로에서 멀어져도 되는 거리를 정해 두고 그보다 멀어지면 화로로 돌아온다.
+     * 그 거리는 남은 시간이 줄수록 짧아져서, 다 구워질 때쯤에는 화로 곁에 와 있게 된다.
+     */
+    private static double tendFurnace(Situation situation) {
+        if (!situation.furnaceBusy) return 0.0;
+        // 땅속에서 밤을 나는 동안에는 지상에 있는 화로를 가지러 올라가지 않는다. 아침에 꺼낸다.
+        if (staysBelow(situation) && situation.furnaceOnSurface) return 0.0;
+        // 배가 고픈데 익힌 음식이 없으면, 굽고 있는 고기가 다 익기를 기다렸다가 꺼내 먹는다 (굶주린 상태면 날것이라도 먹는다).
+        boolean waitingToEat = situation.furnaceCooksFood && situation.shouldEat && situation.readyFood == 0 && !situation.starving;
+        if (waitingToEat) return 520.0;
+        if (situation.furnaceDone) return 317.0;
+        if (situation.furnaceTicksLeft <= FURNACE_WAIT_TICKS) return 299.0;
+        // 돌아오기 시작했으면 화로 가까이 올 때까지 계속 온다. 경계 안에 들어서자마자 다시 떠나면 경계선에서 왔다 갔다 하기만 한다.
+        boolean tending = situation.currentGoal == GoalType.TEND_FURNACE;
+        double leash = furnaceLeash(situation.furnaceTicksLeft);
+        return situation.furnaceDistance > (tending ? leash / 2.0 : leash) ? 299.0 : 0.0;
+    }
+
+    // 다 구워지기까지 ticksLeft 틱이 남았을 때 화로에서 떨어져 있어도 되는 거리
+    public static double furnaceLeash(int ticksLeft) {
+        return Math.max(FURNACE_NEAR, Math.min(FURNACE_LEASH, ticksLeft * FURNACE_RETURN_PACE));
+    }
+
+    // 직접 놓은 화로는, 더 구울 것이 없으면 캐서 들고 다닌다. 화로는 곡괭이로 캐야 아이템으로 나온다.
+    private static double packUpFurnace(Situation situation) {
+        if (!situation.ownFurnaceNearby || situation.furnaceBusy || situation.inventoryFull || !situation.hasPickaxe) return 0.0;
+        return smeltIron(situation) > 0.0 || cookFood(situation) > 0.0 ? 0.0 : 315.0;
     }
 
     // 직접 놓은 작업대는, 그 자리에서 더 만들 것이 없으면 캐서 들고 다닌다.

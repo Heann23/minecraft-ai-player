@@ -402,7 +402,7 @@ final class AIBrain {
      */
     private static boolean failsWhereItStands(GoalType goal) {
         return switch (goal) {
-            case STORE_ITEMS, FETCH_ITEMS, SLEEP, RETURN_HOME, BUILD_SHELTER, LOOT_CHEST, SHARE_FOOD, ASSIST_ALLY -> false;
+            case STORE_ITEMS, FETCH_ITEMS, SLEEP, RETURN_HOME, BUILD_SHELTER, LOOT_CHEST, SHARE_FOOD, ASSIST_ALLY, TEND_FURNACE -> false;
             default -> true;
         };
     }

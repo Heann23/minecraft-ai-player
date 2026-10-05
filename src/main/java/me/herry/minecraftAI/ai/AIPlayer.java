@@ -7,6 +7,7 @@ import me.herry.minecraftAI.ai.build.BuildJob;
 import me.herry.minecraftAI.ai.combat.CombatMemory;
 import me.herry.minecraftAI.ai.combat.CombatSystem;
 import me.herry.minecraftAI.ai.crafting.CraftingSystem;
+import me.herry.minecraftAI.ai.crafting.FurnaceJob;
 import me.herry.minecraftAI.ai.goal.GoalType;
 import me.herry.minecraftAI.ai.goal.Milestone;
 import me.herry.minecraftAI.ai.goal.Situation;
@@ -70,6 +71,7 @@ public final class AIPlayer {
     private BlockFace digDirection;
     private @Nullable TreeJob treeJob;
     private @Nullable BuildJob buildJob;
+    private @Nullable FurnaceJob furnaceJob;
     private LivingEntity assistTarget;
     private long assistUntil;
     private long sleepRetryAfter;
@@ -255,6 +257,15 @@ public final class AIPlayer {
 
     public void setBuildJob(@Nullable BuildJob buildJob) {
         this.buildJob = buildJob;
+    }
+
+    // 화로에 넣어 두고 온 것. 없으면 null.
+    public @Nullable FurnaceJob getFurnaceJob() {
+        return furnaceJob;
+    }
+
+    public void setFurnaceJob(@Nullable FurnaceJob furnaceJob) {
+        this.furnaceJob = furnaceJob;
     }
 
     // 제거되기 전에 진행 중인 행동과 이동 입력을 정리한다.

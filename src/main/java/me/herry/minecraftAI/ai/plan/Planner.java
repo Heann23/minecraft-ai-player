@@ -51,6 +51,8 @@ public final class Planner {
         register(GoalType.SMELT_IRON, CraftPlans::smeltIron);
         register(GoalType.COOK_FOOD, CraftPlans::cookFood);
         register(GoalType.PACK_UP_TABLE, CraftPlans::packUpTable);
+        register(GoalType.TEND_FURNACE, FurnacePlans::tendFurnace);
+        register(GoalType.PACK_UP_FURNACE, FurnacePlans::packUpFurnace);
         register(GoalType.CRAFT_TORCH, CraftPlans::craftTorch);
         register(GoalType.PICKUP_ITEMS, GatherPlans::pickupItems);
         register(GoalType.CLEAN_INVENTORY, ai -> List.of(new DropJunkAction()));

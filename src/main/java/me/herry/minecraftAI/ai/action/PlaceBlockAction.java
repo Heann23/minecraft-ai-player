@@ -117,8 +117,9 @@ public final class PlaceBlockAction extends AbstractAction {
     private void remember(AIPlayer ai) {
         if (rememberAs == null) return;
         ai.getMemory().rememberPermanent(rememberAs, world.getUID(), spot, ai.getTicks());
-        // 직접 놓은 작업대는 다 쓴 뒤에 다시 챙겨 간다.
+        // 직접 놓은 작업대와 화로는 다 쓴 뒤에 다시 챙겨 간다.
         if (rememberAs == MemoryType.WORKBENCH) ai.getMemory().rememberPermanent(MemoryType.OWN_WORKBENCH, world.getUID(), spot, ai.getTicks());
+        if (rememberAs == MemoryType.FURNACE) ai.getMemory().rememberPermanent(MemoryType.OWN_FURNACE, world.getUID(), spot, ai.getTicks());
         ai.getTeam().sharePlaced(ai, rememberAs, spot);
         // 아직 거점이 없으면 처음 작업대를 놓은 자리를 임시 거점으로 삼는다. 집을 지으면 그 자리로 옮겨진다.
         if (rememberAs == MemoryType.WORKBENCH) ai.getWorldModel().ensureHome(world.getUID(), spot);
