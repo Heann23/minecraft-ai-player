@@ -1,0 +1,82 @@
+name: Update Latest Release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# Serialize updates across release tags and manual runs.
+concurrency:
+  group: latest-release
+  cancel-in-progress: false
+
+jobs:
+  update-latest:
+    if: github.event_name == 'workflow_dispatch' || (github.event.release.draft == false && github.event.release.prerelease == false)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Mark the highest stable SemVer release as latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          releases_file=$(mktemp)
+          trap 'rm -f "$releases_file"' EXIT
+
+          # Collect every page before comparing versions globally.
+          gh api --paginate --slurp \
+            "repos/$REPO/releases?per_page=100" > "$releases_file"
+
+          latest_id=$(python3 - "$releases_file" <<'PY'
+          import json
+          import re
+          import sys
+
+          # Accept an optional v prefix and stable SemVer, including build metadata.
+          # A -prerelease suffix is excluded even if GitHub marks it as a full release.
+          stable_version = re.compile(
+              r"v?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)"
+              r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?"
+          )
+
+          with open(sys.argv[1], encoding="utf-8") as source:
+              pages = json.load(source)
+
+          candidates = []
+          for page in pages:
+              for release in page:
+                  if release["draft"] or release["prerelease"]:
+                      continue
+                  match = stable_version.fullmatch(release["tag_name"])
+                  if match is None:
+                      continue
+                  version = tuple(int(part) for part in match.groups())
+                  candidates.append((version, release))
+
+          if candidates:
+              # Build metadata has no SemVer precedence. Break equal-version ties
+              # with the oldest release ID so republishing an equivalent version
+              # cannot displace the existing candidate.
+              _, latest = max(candidates, key=lambda item: (item[0], -item[1]["id"]))
+              print(f"Highest stable release: {latest['tag_name']}", file=sys.stderr)
+              print(latest["id"])
+          PY
+          )
+
+          if [[ -z "$latest_id" ]]; then
+            echo "No stable SemVer releases found; leaving Latest unchanged."
+            exit 0
+          fi
+
+          gh api --method PATCH \
+            "repos/$REPO/releases/$latest_id" \
+            -f make_latest=true --silent
+          echo "Latest release updated (release ID: $latest_id)."
