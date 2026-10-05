@@ -200,7 +200,10 @@ public final class DiscordVoiceConnection extends ListenerAdapter implements Dis
                 session.textReply(event.getUser().getId(), java.util.Objects.requireNonNull(event.getOption("message")).getAsString(), event.getId())
                         .whenComplete((reply, failed) -> {
                             if (failed != null || stopped.get() || !session.textCurrent(reply)) {
-                                hook.editOriginal("대화를 처리하지 못했어요. 잠시 뒤 다시 시도해 주세요.").queue(ignored -> {}, failure -> diagnostic.accept("discord-command-reply-failed"));
+                                boolean replaced = !stopped.get() && (failed == null || failed instanceof java.util.concurrent.CancellationException
+                                        || failed.getCause() instanceof java.util.concurrent.CancellationException);
+                                hook.editOriginal(replaced ? "이 답변은 취소되었거나 새 요청으로 바뀌었어요. 필요하면 다시 요청해 주세요."
+                                        : "대화를 처리하지 못했어요. 잠시 뒤 다시 시도해 주세요.").queue(ignored -> {}, failure -> diagnostic.accept("discord-command-reply-failed"));
                                 return;
                             }
                             hook.editOriginal(reply.text()).setAllowedMentions(Set.of())

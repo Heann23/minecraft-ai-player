@@ -52,19 +52,18 @@ public final class DiscordTextConversation implements AutoCloseable {
             if (contexts.size() == 32) { var oldest = contexts.firstEntry(); forget(oldest.getKey()); }
             turns = new ConversationTurns(clock, settings.followupMillis(), settings.contextLines()); turns.join(user); contexts.put(user, turns);
         }
+        boolean pendingBefore = turns.busy();
         var accepted = turns.accept(user, interaction, text.strip(), ConversationTurns.Address.CHARACTER, false);
         if (accepted.token() == null) return CompletableFuture.failedFuture(new IllegalStateException("duplicate text input"));
         cancelWork(user);
         if (ConfirmedTextReset.requested(text)) {
             turns.clearContextFor(accepted.token());
             String answer = ConfirmedTextReset.reply();
-            if (turns.generated(accepted.token(), answer)) {
-                completed.incrementAndGet();
-                return CompletableFuture.completedFuture(new Reply(accepted.token(), answer));
-            }
-            var cancelledReply = new CompletableFuture<Reply>();
-            cancelledReply.cancel(false); cancelled.incrementAndGet();
-            return cancelledReply;
+            return fixedReply(turns.generated(accepted.token(), answer), accepted.token(), answer);
+        }
+        if (ConfirmedTextCancel.requested(text)) {
+            String answer = ConfirmedTextCancel.reply(pendingBefore);
+            return fixedReply(turns.acknowledgeControl(accepted.token(), answer), accepted.token(), answer);
         }
         if (ConfirmedTextForget.requested(text)) turns.clearContextFor(accepted.token());
         var result = new CompletableFuture<Reply>(); pending.add(result);
@@ -82,6 +81,16 @@ public final class DiscordTextConversation implements AutoCloseable {
             work.remove(user); turns.finish(accepted.token()); result.completeExceptionally(new IllegalStateException("text conversation busy"));
         }
         return result;
+    }
+    /** A fixed answer needs no model or store; if its turn was retired meanwhile the reply is cancelled instead. */
+    private CompletableFuture<Reply> fixedReply(boolean stored, ConversationTurns.Token token, String answer) {
+        if (stored) {
+            completed.incrementAndGet();
+            return CompletableFuture.completedFuture(new Reply(token, answer));
+        }
+        var cancelledReply = new CompletableFuture<Reply>();
+        cancelledReply.cancel(false); cancelled.incrementAndGet();
+        return cancelledReply;
     }
     private void generate(String user, String input, ConversationTurns turns, ConversationTurns.Token token, CompletableFuture<Reply> result) {
         try {
