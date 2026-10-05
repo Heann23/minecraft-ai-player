@@ -88,6 +88,11 @@ public final class Situation {
     // 빈 양동이가 있는지와, 가서 뜰 수 있는 물을 알고 있는지
     public boolean emptyBucket;
     public boolean knowsWater;
+    // 물 양동이와 다이아몬드 곡괭이가 있는지, 갈 수 있는 용암 호수를 아는지, 받침 위에서 물을 흘려 놓고 흑요석을 캐는 중인지
+    public boolean waterBucket;
+    public boolean canMineObsidian;
+    public boolean knowsLava;
+    public boolean obsidianWork;
     // 화로에 넣을 연료(석탄, 숯, 나무)가 있는지
     public boolean hasFuel;
     // 석탄과 숯의 개수, 횃불의 개수

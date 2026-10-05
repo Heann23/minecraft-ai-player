@@ -123,6 +123,7 @@ public final class GoalSystem {
         // 물은 강이나 호수에서 뜬다. 아는 물이 있으면 바로 가고, 없으면 지상에서 찾는다.
         register(GoalType.FILL_BUCKET, situation -> situation.nextMilestone != Milestone.WATER_BUCKET || !situation.emptyBucket
                 || staysBelow(situation) && !situation.knowsWater ? 0.0 : situation.knowsWater ? 305.0 : 150.0);
+        register(GoalType.GATHER_OBSIDIAN, GoalSystem::gatherObsidian);
         register(GoalType.EXPLORE, situation -> 50.0);
     }
 
@@ -453,6 +454,17 @@ public final class GoalSystem {
     }
 
     // 다음 장비에 필요한 만큼 철을 아직 못 모았을 때만 철을 찾으러 다닌다.
+    /**
+     * 흑요석은 용암 호수에 물을 부어 굳힌 뒤 다이아몬드 곡괭이로 캔다.
+     * 물을 흘려 놓고 캐는 중에는 끝까지 한다. 그동안 물 양동이가 비어 있어서 다음 단계가 "물 양동이"로 보이지만
+     * 물을 뜨러 가지 않고(FILL_BUCKET 305), 구멍에 떨어진 흑요석도 물을 거둔 뒤에 줍는다(PICKUP_ITEMS 320).
+     */
+    private static double gatherObsidian(Situation situation) {
+        if (situation.obsidianWork) return 322.0;
+        if (situation.nextMilestone != Milestone.OBSIDIAN || !situation.canMineObsidian || !situation.waterBucket) return 0.0;
+        return situation.knowsLava ? 305.0 : 150.0;
+    }
+
     private static boolean hasGravel(Situation situation) {
         return situation.knowsGravel || situation.gravel > 0;
     }

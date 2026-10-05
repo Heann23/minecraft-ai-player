@@ -54,6 +54,8 @@ public enum GoalType {
     GATHER_FLINT,
     // 빈 양동이로 물을 뜬다. 아는 물이 없으면 지상에서 찾는다
     FILL_BUCKET,
+    // 용암 호수에 물을 부어 흑요석을 만들고 캔다. 아는 호수가 없으면 깊은 땅속에서 찾는다
+    GATHER_OBSIDIAN,
     SMELT_IRON,
     // 날고기를 화로에 구워서 더 배부른 음식으로 만든다
     COOK_FOOD,

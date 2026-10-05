@@ -260,7 +260,7 @@ class SkillAndPlannerTest {
         assertTrue(skills.candidates(ReachGoal.dimension(ReachGoal.Place.NETHER)).isEmpty());
         assertTrue(skills.candidates(new BuildGoal(BuildGoal.Structure.NETHER_PORTAL)).isEmpty());
         assertTrue(skills.candidates(new DefeatGoal("BLAZE", 6)).isEmpty());
-        assertTrue(skills.candidates(new AcquireGoal("OBSIDIAN", 10)).isEmpty());
+        assertTrue(skills.candidates(new AcquireGoal("ENDER_PEARL", 12)).isEmpty());
     }
 
     // 기존 목표를 옮겨 적은 것은 범용 스킬이 가로채지 않는다.

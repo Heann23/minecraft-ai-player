@@ -46,6 +46,7 @@ public final class BreakBlockAction extends AbstractAction implements PrimitiveA
     private final boolean homeAllowed;
     // 물에 닿은 블록은 캐지 않을지. 광석을 캘 때 쓴다. 물 옆의 블록을 캐면 굴에 물이 차서 떠 있는 채로 아무것도 못 하게 된다.
     private final boolean avoidWater;
+    private final boolean underWater;
     private World world;
     private Material expected;
     // 지금 실제로 캐고 있는 블록. 목표 블록이 다른 블록에 가려져 있으면 가리고 있는 블록이 된다.
@@ -68,21 +69,31 @@ public final class BreakBlockAction extends AbstractAction implements PrimitiveA
      *                    그 밖의 채굴이나 길 내기가 집의 벽과 바닥을 허물지 않게 하기 위한 구분이다.
      */
     public BreakBlockAction(BlockPoint target, boolean homeAllowed) {
-        this(target, homeAllowed, false);
+        this(target, homeAllowed, false, false);
     }
 
-    private BreakBlockAction(BlockPoint target, boolean homeAllowed, boolean avoidWater) {
+    private BreakBlockAction(BlockPoint target, boolean homeAllowed, boolean avoidWater, boolean underWater) {
         super("BreakBlock", TIMEOUT);
         this.target = target;
         this.homeAllowed = homeAllowed;
         this.avoidWater = avoidWater;
+        this.underWater = underWater;
     }
 
     /**
      * 돌이나 광석을 캐는 행동. 대상이나 그것을 가린 블록이 물에 닿아 있으면 캐지 않는다.
      */
     public static BreakBlockAction mine(BlockPoint target) {
-        return new BreakBlockAction(target, false, true);
+        return new BreakBlockAction(target, false, true, false);
+    }
+
+    /**
+     * 용암 호수 위에 물을 흘려 만든 흑요석을 캐는 행동. 그 칸 위에 물이 있을 때만 캔다.
+     * 위에 물이 있으면 아래에서 드러난 용암이 곧바로 흑요석이 되므로, 이때만은 아래의 용암을 허용한다.
+     * 옆이 용암인 칸(판의 가장자리)은 캐지 않는다. 캐면 그 용암이 흘러든다.
+     */
+    public static BreakBlockAction underWater(BlockPoint target) {
+        return new BreakBlockAction(target, false, false, true);
     }
 
     @Override
@@ -235,7 +246,12 @@ public final class BreakBlockAction extends AbstractAction implements PrimitiveA
             return;
         }
         // 용암 옆의 블록을 캐면 용암이 흘러나온다.
-        if (touchesLava(block)) {
+        boolean covered = underWater && next.equals(target);
+        if (covered && block.getRelative(BlockFace.UP).getType() != Material.WATER) {
+            fail("no water above");
+            return;
+        }
+        if (covered ? touchesLavaBeside(block) : touchesLava(block)) {
             ai.getMemory().remember(MemoryType.DANGER_PLACE, world.getUID(), target, ai.getTicks(), DANGER_TTL);
             fail("lava next to target");
             return;
@@ -283,6 +299,19 @@ public final class BreakBlockAction extends AbstractAction implements PrimitiveA
 
     private static boolean touchesLava(Block block) {
         return touches(block, Material.LAVA);
+    }
+
+    // 아래를 뺀 다섯 면에 용암이 닿아 있는지
+    private static boolean touchesLavaBeside(Block block) {
+        World world = block.getWorld();
+        for (BlockFace face : FACES) {
+            if (face == BlockFace.DOWN) continue;
+            int x = block.getX() + face.getModX();
+            int z = block.getZ() + face.getModZ();
+            if (!world.isChunkLoaded(x >> 4, z >> 4)) continue;
+            if (block.getRelative(face).getType() == Material.LAVA) return true;
+        }
+        return false;
     }
 
     private static boolean touches(Block block, Material liquid) {
