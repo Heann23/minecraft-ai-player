@@ -260,6 +260,8 @@ final class SituationBuilder {
         situation.canMineDiamond = inventory.bestTier(Tag.ITEMS_PICKAXES).isAtLeast(ToolTier.IRON);
         situation.knowsDiamond = situation.canMineDiamond && GatherPlans.knowsOre(ai, MemoryType.DIAMOND_ORE);
         situation.diamonds = inventory.count(Material.DIAMOND);
+        situation.gravel = inventory.count(Material.GRAVEL);
+        situation.knowsGravel = ResourceLocator.locate(ai, MemoryType.GRAVEL, GatherPlans.ORE_WALK_RANGE) != null;
         // 좋은 곡괭이만 있고 막 쓸 돌 곡괭이가 없으면, 가진 재료로 만들 수 있을 때 하나 만든다.
         situation.workPickaxeWanted = situation.canMineDiamond && !inventory.hasWorkPickaxe()
                 && ai.getCrafting().plan(Material.STONE_PICKAXE, 1, inventory.snapshot()).isFeasible();
@@ -301,14 +303,17 @@ final class SituationBuilder {
         boolean stone = false;
         boolean iron = false;
         boolean diamond = false;
+        boolean flint = false;
         for (Material material : missing) {
             if (Tag.LOGS.isTagged(material) || Tag.PLANKS.isTagged(material) || material == Material.STICK) return Situation.Need.WOOD;
             if (Tag.ITEMS_STONE_TOOL_MATERIALS.isTagged(material) || material == Material.COBBLESTONE) stone = true;
             if (material == Material.IRON_INGOT) iron = true;
             if (material == Material.DIAMOND) diamond = true;
+            if (material == Material.FLINT) flint = true;
         }
         if (stone) return Situation.Need.STONE;
         if (iron) return Situation.Need.IRON;
-        return diamond ? Situation.Need.DIAMOND : Situation.Need.OTHER;
+        if (diamond) return Situation.Need.DIAMOND;
+        return flint ? Situation.Need.FLINT : Situation.Need.OTHER;
     }
 }

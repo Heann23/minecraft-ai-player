@@ -11,6 +11,8 @@ public enum MemoryType {
     COAL_ORE(true),
     IRON_ORE(true),
     DIAMOND_ORE(true),
+    // 자갈. 캐면 가끔 부싯돌이 나온다. 흔해서 저장하지 않는다. 부싯돌을 얻으려고 직접 놓은 자갈도 여기에 적는다.
+    GRAVEL(false),
     WORKBENCH(true),
     // 이 AI 가 직접 놓은 작업대. 다 쓰고 나면 다시 캐서 들고 다닌다. 남이 놓은 작업대는 가져가지 않는다.
     OWN_WORKBENCH(true),

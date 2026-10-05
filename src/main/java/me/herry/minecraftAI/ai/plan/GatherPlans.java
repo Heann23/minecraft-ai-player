@@ -7,6 +7,7 @@ import me.herry.minecraftAI.ai.action.ExploreAreaAction;
 import me.herry.minecraftAI.ai.action.LootChestAction;
 import me.herry.minecraftAI.ai.action.MoveToAction;
 import me.herry.minecraftAI.ai.action.PickupItemAction;
+import me.herry.minecraftAI.ai.action.PlaceBlockAction;
 import me.herry.minecraftAI.ai.action.PlugWaterAction;
 import me.herry.minecraftAI.ai.action.RememberPlaceAction;
 import me.herry.minecraftAI.ai.action.WaitAction;
@@ -211,6 +212,20 @@ public final class GatherPlans {
 
     static List<Action> mineDiamond(AIPlayer ai) {
         return mineOre(ai, MemoryType.DIAMOND_ORE);
+    }
+
+    /**
+     * 자갈을 캐서 부싯돌을 얻는다. 아는 자갈이 있으면 그것을 캐고, 없으면 가진 자갈을 놓았다가 다시 캔다
+     * (놓은 자리는 기억해 두므로 다음 계획이 그것을 캔다). 자갈이 하나도 없으면 찾으러 다닌다.
+     */
+    static List<Action> gatherFlint(AIPlayer ai) {
+        BlockPoint gravel = ResourceLocator.locate(ai, MemoryType.GRAVEL, ORE_WALK_RANGE);
+        if (gravel != null) {
+            ai.debug("Target GRAVEL found at " + gravel);
+            return mineBlock(ai, gravel);
+        }
+        if (ai.getInventory().has(Material.GRAVEL)) return List.of(new PlaceBlockAction(Material.GRAVEL, MemoryType.GRAVEL));
+        return explore(ai);
     }
 
     static List<Action> mineCoal(AIPlayer ai) {

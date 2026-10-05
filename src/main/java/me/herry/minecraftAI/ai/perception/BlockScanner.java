@@ -187,7 +187,8 @@ public final class BlockScanner {
     }
 
     private static boolean needsExposure(MemoryType type) {
-        return type == MemoryType.STONE || type == MemoryType.COAL_ORE || type == MemoryType.IRON_ORE || type == MemoryType.DIAMOND_ORE;
+        return type == MemoryType.STONE || type == MemoryType.COAL_ORE || type == MemoryType.IRON_ORE || type == MemoryType.DIAMOND_ORE
+                || type == MemoryType.GRAVEL;
     }
 
     private static boolean isResource(MemoryType type) {
@@ -211,6 +212,7 @@ public final class BlockScanner {
         if (Tag.BEDS.isTagged(material)) return MemoryType.BED;
         return switch (material) {
             case STONE, COBBLESTONE, DEEPSLATE, COBBLED_DEEPSLATE, BLACKSTONE -> MemoryType.STONE;
+            case GRAVEL -> MemoryType.GRAVEL;
             case CRAFTING_TABLE -> MemoryType.WORKBENCH;
             case FURNACE -> MemoryType.FURNACE;
             case LAVA -> MemoryType.DANGER_PLACE;

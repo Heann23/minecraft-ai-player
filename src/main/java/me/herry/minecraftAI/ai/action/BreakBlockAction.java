@@ -304,6 +304,7 @@ public final class BreakBlockAction extends AbstractAction implements PrimitiveA
         memory.forget(MemoryType.COAL_ORE, world.getUID(), target);
         memory.forget(MemoryType.IRON_ORE, world.getUID(), target);
         memory.forget(MemoryType.DIAMOND_ORE, world.getUID(), target);
+        memory.forget(MemoryType.GRAVEL, world.getUID(), target);
         memory.forget(MemoryType.WORKBENCH, world.getUID(), target);
         memory.forget(MemoryType.OWN_WORKBENCH, world.getUID(), target);
         memory.forget(MemoryType.FURNACE, world.getUID(), target);

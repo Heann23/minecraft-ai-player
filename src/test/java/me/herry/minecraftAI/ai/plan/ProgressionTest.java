@@ -235,10 +235,11 @@ class ProgressionTest {
 
     // 스스로 해낼 수 있는 범위가 어디까지인지 정직하게 표시되어 있어야 한다.
     @Test
-    void automationFrontierIsTheDiamondPickaxe() {
+    void automationFrontierIsFlintAndSteel() {
         assertTrue(Milestone.DIAMOND_PICKAXE.isAutomated());
         assertTrue(Milestone.SHELTER.isAutomated());
-        assertFalse(Milestone.FLINT_AND_STEEL.isAutomated());
+        assertTrue(Milestone.FLINT_AND_STEEL.isAutomated());
+        assertFalse(Milestone.OBSIDIAN.isAutomated());
         assertFalse(Milestone.ENDER_DRAGON.isAutomated());
     }
 }
