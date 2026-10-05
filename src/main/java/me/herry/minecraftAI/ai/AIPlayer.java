@@ -72,6 +72,7 @@ public final class AIPlayer {
     private @Nullable TreeJob treeJob;
     private @Nullable BuildJob buildJob;
     private @Nullable FurnaceJob furnaceJob;
+    private long furnaceBlockedSince = -1L;
     private LivingEntity assistTarget;
     private long assistUntil;
     private long sleepRetryAfter;
@@ -267,6 +268,16 @@ public final class AIPlayer {
 
     public void setFurnaceJob(@Nullable FurnaceJob furnaceJob) {
         this.furnaceJob = furnaceJob;
+        furnaceBlockedSince = -1L;
+    }
+
+    // 넣어 둔 화로까지 길을 낼 수 없게 된 시각. 막혀 있지 않으면 음수.
+    public long getFurnaceBlockedSince() {
+        return furnaceBlockedSince;
+    }
+
+    public void setFurnaceBlockedSince(long furnaceBlockedSince) {
+        this.furnaceBlockedSince = furnaceBlockedSince;
     }
 
     // 제거되기 전에 진행 중인 행동과 이동 입력을 정리한다.

@@ -21,6 +21,8 @@ public record FurnaceJob(UUID world, BlockPoint pos, boolean food, int count, lo
     // 다 구워졌어야 할 시각을 이만큼 넘겼는데도 재료가 남아 있으면 화로가 멈춘 것이다 (연료가 떨어졌거나 누가 빼 갔다).
     // 더 기다리지 않고 남은 것을 꺼낸다.
     public static final long OVERDUE_TICKS = 200L;
+    // 넣어 둔 화로까지 길을 낼 수 없는 채로 이만큼(2분) 지나면 포기한다. 그 전에는 조금 뒤에, 옮겨 간 자리에서 다시 해 본다.
+    public static final long GIVE_UP_TICKS = 2400L;
 
     public static FurnaceJob start(UUID world, BlockPoint pos, boolean food, int count, long now) {
         return new FurnaceJob(world, pos, food, count, now + (long) count * TICKS_PER_ITEM);
@@ -32,6 +34,16 @@ public record FurnaceJob(UUID world, BlockPoint pos, boolean food, int count, lo
 
     public boolean isOverdue(long now) {
         return now >= readyAt + OVERDUE_TICKS;
+    }
+
+    /**
+     * 화로까지 길을 낼 수 없을 때 넣어 둔 것을 포기할지. 한 번 막혔다고 바로 포기하지 않는다.
+     * 몬스터를 피해 숨은 직후나 물가처럼 그 자리에서만 팔 수 없는 경우가 많다.
+     *
+     * @param blockedSince 길을 낼 수 없게 된 시각 (AI 틱). 막힌 적이 없으면 음수.
+     */
+    public static boolean shouldGiveUp(long blockedSince, long now) {
+        return blockedSince >= 0 && now - blockedSince >= GIVE_UP_TICKS;
     }
 
     public Map<String, Object> exportState() {

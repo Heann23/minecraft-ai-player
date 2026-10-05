@@ -12,6 +12,7 @@ import me.herry.minecraftAI.ai.action.PlaceBlockAction;
 import me.herry.minecraftAI.ai.action.SmeltItemAction;
 import me.herry.minecraftAI.ai.crafting.CraftingSystem;
 import me.herry.minecraftAI.ai.goal.Milestone;
+import me.herry.minecraftAI.ai.goal.Situation;
 import me.herry.minecraftAI.ai.memory.MemoryEntry;
 import me.herry.minecraftAI.ai.memory.MemoryType;
 import me.herry.minecraftAI.ai.navigation.PathGoal;
@@ -63,7 +64,7 @@ public final class CraftPlans {
     }
 
     static List<Action> craftTool(AIPlayer ai) {
-        Milestone milestone = Progression.next(ai);
+        Milestone milestone = chosenMilestone(ai);
         if (milestone == null) return List.of();
 
         Material target = Progression.materialOf(milestone);
@@ -75,6 +76,15 @@ public final class CraftPlans {
         actions.add(new CraftItemAction(target, 1));
         ai.getTeam().say(ai, Phrases.willCraft(milestone), true);
         return actions;
+    }
+
+    /**
+     * 판단할 때 고른 "다음에 이룰 것". 땅속에서 밤을 나는 동안에는 지상에서만 준비할 수 있는 항목(방패, 집)을 건너뛰고
+     * 그다음 것을 고르는데, 여기서 순서대로 다시 고르면 건너뛴 항목을 만들려다가 계획이 서지 않는다.
+     */
+    private static @Nullable Milestone chosenMilestone(AIPlayer ai) {
+        Situation situation = ai.getLastSituation();
+        return situation == null || situation.nextMilestone == null ? Progression.next(ai) : situation.nextMilestone;
     }
 
     // 굴을 팔 때 막 쓸 돌 곡괭이를 만든다. 좋은 곡괭이는 그것이 있어야만 캘 수 있는 블록에 쓴다.

@@ -7,6 +7,7 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -48,6 +49,17 @@ public final class ShaftRegistry {
     private static final double JOIN_DISTANCE_SQ = 6.0;
     private static final int MAX_POINTS = 512;
     private static final int MAX_SHAFTS_PER_OWNER = 4;
+    // 굴의 끝에서 더 팔 수 없는 일이 이만큼의 간격을 두고 이 횟수만큼 되풀이되면 막다른 굴로 본다.
+    // 한 번은 공중에 떠 있었거나 지나가는 몬스터 때문일 수 있다.
+    public static final long BLOCKED_RECHECK_TICKS = 100L;
+    private static final int DEAD_END_STRIKES = 2;
+    private static final int MAX_BLOCKED_ENDS = 32;
+
+    private record EndKey(UUID world, BlockPoint end) {
+    }
+
+    private record Blocked(int strikes, long lastTick) {
+    }
 
     private static final class Builder {
         final UUID world;
@@ -59,6 +71,7 @@ public final class ShaftRegistry {
     }
 
     private final Map<String, Deque<Builder>> byOwner = new HashMap<>();
+    private final Map<EndKey, Blocked> blockedEnds = new LinkedHashMap<>();
 
     /**
      * 굴을 한 칸 더 판 뒤에 새 발 위치를 기록한다. 마지막 칸과 이어지지 않으면 새 굴로 기록한다.
@@ -90,7 +103,7 @@ public final class ShaftRegistry {
     public @Nullable Shaft deeper(UUID world, BlockPoint from, double accessRange, int minDepth) {
         Shaft best = null;
         for (Shaft shaft : all(world)) {
-            if (shaft.end().y() > from.y() - minDepth) continue;
+            if (shaft.end().y() > from.y() - minDepth || isDeadEnd(shaft)) continue;
             if (shaft.points().get(shaft.nearestIndex(from)).distance(from) > accessRange) continue;
             if (best == null || shaft.end().y() < best.end().y()) best = shaft;
         }
@@ -146,6 +159,43 @@ public final class ShaftRegistry {
             for (Builder builder : shafts) {
                 if (builder.world.equals(world) && !builder.points.isEmpty() && builder.points.getLast().distance(pos) <= range) return true;
             }
+        }
+        return false;
+    }
+
+    /**
+     * pos 가까이에서 끝나는 굴의 끝에서 더 팔 수 없었다고 적어 둔다. 간격을 두고 되풀이되면 그 굴은 막다른 굴이 된다.
+     * 막다른 굴은 "이미 파 둔 굴"로 따라 내려가지 않는다. 적어 두지 않으면 다른 데로 옮겨 갔다가도 그 끝으로 되돌아온다.
+     * 굴을 더 파서 끝이 달라지면 다시 쓸 수 있는 굴이 된다.
+     */
+    public void noteBlockedEnd(UUID world, BlockPoint pos, double range, long now) {
+        for (Shaft shaft : all(world)) {
+            if (shaft.end().distance(pos) > range) continue;
+            EndKey key = new EndKey(world, shaft.end());
+            Blocked before = blockedEnds.get(key);
+            if (before == null) blockedEnds.put(key, new Blocked(1, now));
+            else if (now - before.lastTick() >= BLOCKED_RECHECK_TICKS) blockedEnds.put(key, new Blocked(before.strikes() + 1, now));
+        }
+        while (blockedEnds.size() > MAX_BLOCKED_ENDS) blockedEnds.remove(blockedEnds.keySet().iterator().next());
+    }
+
+    public boolean isDeadEnd(Shaft shaft) {
+        Blocked blocked = blockedEnds.get(new EndKey(shaft.world(), shaft.end()));
+        return blocked != null && blocked.strikes() >= DEAD_END_STRIKES;
+    }
+
+    // pos 가까이에서 끝나는 막다른 굴. 없으면 null.
+    public @Nullable Shaft deadEndNear(UUID world, BlockPoint pos, double range) {
+        for (Shaft shaft : all(world)) {
+            if (shaft.end().distance(pos) <= range && isDeadEnd(shaft)) return shaft;
+        }
+        return null;
+    }
+
+    // pos 가 막다른 굴에서 발을 디디는 칸인지. 그 굴을 따라 걷는 것은 새로 파는 것이 아니다.
+    public boolean isDeadEndStep(UUID world, BlockPoint pos) {
+        for (Shaft shaft : all(world)) {
+            if (isDeadEnd(shaft) && shaft.points().contains(pos)) return true;
         }
         return false;
     }

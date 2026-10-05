@@ -364,6 +364,8 @@ public final class TerrainPlans {
         for (BlockPoint block : blocks) {
             if (terrain.classify(block.x(), block.y(), block.z()) != BlockClass.OPEN) actions.add(new BreakBlockAction(block));
         }
+        // 캘 것 없이 막다른 굴을 따라 걷기만 하는 것은 파는 것이 아니다. 다른 방향을 시도하게 한다.
+        if (actions.isEmpty() && ai.getTeam().getShafts().isDeadEndStep(world.getUID(), destination)) return List.of();
         actions.add(new MoveToAction(PathGoal.arrive(destination, 0.5), false));
         if (record) {
             // 굴의 첫 칸이면 지금 서 있는 자리(입구)부터 기록한다.

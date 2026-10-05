@@ -70,4 +70,71 @@ class ShaftRegistryTest {
         registry.discard(up);
         assertNull(registry.higher(WORLD, new BlockPoint(28, 42, 1), 8.0, 4));
     }
+
+    // 회귀: 계단 굴이 물이 찬 동굴 옆(y -10)에서 끝났고 거기서는 어느 쪽으로도 더 팔 수 없었다. 다른 데로 옮겨 가도
+    // "이미 파 둔 굴"이라며 그 끝으로 되돌아오기를 되풀이해서, 다이아몬드를 찾는 일이 10분 넘게 제자리였다.
+    @Test
+    void doesNotGoBackDownAShaftThatEndsWhereNothingCanBeDug() {
+        digStair("miner", 0, 70, 30);
+        BlockPoint end = new BlockPoint(30, 40, 0);
+        BlockPoint top = new BlockPoint(3, 70, 2);
+        assertNotNull(registry.deeper(WORLD, top, 24.0, 4));
+
+        // 한 번 막힌 것으로는 막다른 굴로 치지 않는다 (공중에 떠 있었거나 지나가는 몬스터 때문일 수 있다).
+        registry.noteBlockedEnd(WORLD, end, 2.0, 1000L);
+        assertNull(registry.deadEndNear(WORLD, end, 2.0));
+        // 곧바로 다시 확인한 것은 같은 일로 친다.
+        registry.noteBlockedEnd(WORLD, end, 2.0, 1001L);
+        registry.noteBlockedEnd(WORLD, end, 2.0, 1050L);
+        assertNull(registry.deadEndNear(WORLD, end, 2.0));
+        assertNotNull(registry.deeper(WORLD, top, 24.0, 4));
+
+        // 간격을 두고 다시 봐도 팔 수 없으면 막다른 굴이다. 따라 내려갈 굴로 고르지 않는다.
+        registry.noteBlockedEnd(WORLD, end, 2.0, 1000L + ShaftRegistry.BLOCKED_RECHECK_TICKS);
+        ShaftRegistry.Shaft dead = registry.deadEndNear(WORLD, end, 2.0);
+        assertNotNull(dead);
+        assertEquals(end, dead.end());
+        assertNull(registry.deeper(WORLD, top, 24.0, 4));
+        // 그 굴의 칸은 여전히 굴의 칸이다 (발판을 캐면 안 되고, 올라갈 때는 쓴다).
+        assertTrue(registry.isStep(WORLD, new BlockPoint(10, 60, 0)));
+        assertTrue(registry.isDeadEndStep(WORLD, new BlockPoint(10, 60, 0)));
+        assertFalse(registry.isDeadEndStep(WORLD, new BlockPoint(10, 60, 1)));
+        assertNotNull(registry.higher(WORLD, new BlockPoint(29, 41, 0), 4.0, 4));
+        // 끝에서 먼 자리에서 팔 수 없었던 것은 이 굴의 일이 아니다.
+        assertNull(registry.deadEndNear(WORLD, new BlockPoint(10, 60, 0), 2.0));
+    }
+
+    // 막다른 굴에서 몇 단 되돌아가 옆으로 낸 굴은 새 굴이고, 막다른 굴이 아니다.
+    @Test
+    void aBranchDugFromADeadEndShaftIsUsable() {
+        digStair("miner", 0, 70, 30);
+        BlockPoint end = new BlockPoint(30, 40, 0);
+        registry.noteBlockedEnd(WORLD, end, 2.0, 1000L);
+        registry.noteBlockedEnd(WORLD, end, 2.0, 2000L);
+        assertNull(registry.deeper(WORLD, new BlockPoint(3, 70, 2), 24.0, 4));
+
+        // (24,46,0) 에서 남쪽으로 내려가는 새 계단
+        for (int i = 0; i <= 12; i++) registry.record("miner", WORLD, new BlockPoint(24, 46 - i, i));
+        ShaftRegistry.Shaft branch = registry.deeper(WORLD, new BlockPoint(24, 46, 0), 8.0, 4);
+        assertNotNull(branch);
+        assertEquals(new BlockPoint(24, 34, 12), branch.end());
+        assertFalse(registry.isDeadEnd(branch));
+        assertFalse(registry.isDeadEndStep(WORLD, new BlockPoint(24, 40, 6)));
+    }
+
+    // 막다른 굴이라도 끝에서 한 칸 더 파게 되면(물이 빠졌거나 몬스터가 떠난 뒤) 다시 쓸 수 있는 굴이다.
+    @Test
+    void aDeadEndShaftIsUsableAgainOnceItIsDugFurther() {
+        digStair("miner", 0, 70, 30);
+        BlockPoint end = new BlockPoint(30, 40, 0);
+        registry.noteBlockedEnd(WORLD, end, 2.0, 1000L);
+        registry.noteBlockedEnd(WORLD, end, 2.0, 2000L);
+        assertNull(registry.deeper(WORLD, new BlockPoint(3, 70, 2), 24.0, 4));
+
+        registry.record("miner", WORLD, new BlockPoint(31, 39, 0));
+        ShaftRegistry.Shaft shaft = registry.deeper(WORLD, new BlockPoint(3, 70, 2), 24.0, 4);
+        assertNotNull(shaft);
+        assertEquals(new BlockPoint(31, 39, 0), shaft.end());
+        assertFalse(registry.isDeadEndStep(WORLD, new BlockPoint(10, 60, 0)));
+    }
 }

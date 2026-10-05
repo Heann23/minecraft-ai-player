@@ -14,6 +14,7 @@ import me.herry.minecraftAI.ai.memory.MemoryType;
 import me.herry.minecraftAI.ai.navigation.PathGoal;
 import me.herry.minecraftAI.ai.perception.TreeSpotter;
 import me.herry.minecraftAI.ai.team.Phrases;
+import me.herry.minecraftAI.ai.team.ShaftRegistry;
 import me.herry.minecraftAI.ai.util.BlockPoint;
 import me.herry.minecraftAI.ai.util.Positions;
 import org.bukkit.Material;
@@ -171,7 +172,10 @@ public final class GatherPlans {
         boolean inCave = TerrainPlans.isDeepUnderground(world, feet);
         // 동굴 탐험이 방금 실패했다면 더 걸어갈 곳이 없는 것이므로 파는 쪽으로 넘어간다.
         boolean caveDeadEnd = ai.getMemory().countRecentFailures("ExploreArea", ai.getTicks(), CAVE_RETRY_WINDOW) > 0;
-        boolean atTunnelFace = ai.getTeam().getShafts().endsNear(ai.getWorldId(), feet, TUNNEL_FACE_RANGE);
+        ShaftRegistry shafts = ai.getTeam().getShafts();
+        boolean atFaceEnd = shafts.endsNear(ai.getWorldId(), feet, TUNNEL_FACE_RANGE);
+        // 막다른 굴을 되돌아 나온 자리에서도 동굴을 돌아다니지 않고 판다. 거기서 옆으로 새 굴을 낸다.
+        boolean atTunnelFace = atFaceEnd || shafts.isDeadEndStep(ai.getWorldId(), feet);
         if (inCave && !caveDeadEnd && !atTunnelFace) return List.of(ExploreAreaAction.cave(8.0, 20.0));
 
         // 굴에 물이 흘러들어 와서 물속에 서 있으면 먼저 물길을 막는다.
@@ -195,6 +199,12 @@ public final class GatherPlans {
         // 물 때문에 팔 수 없는 자리라면, 가까운 물의 원천을 막는다.
         List<Action> plug = plugWater(ai);
         if (!plug.isEmpty()) return plug;
+        // 굴의 끝에서 더 팔 수도, 물길을 막을 수도 없으면 그 굴은 막다른 굴이다. 잠깐 뒤에 한 번 더 확인하고,
+        // 그래도 팔 수 없으면 몇 단 되돌아가서 다른 쪽으로 새로 판다.
+        if (atFaceEnd && ai.getBody().isGrounded()) {
+            List<Action> retreat = ShaftPlans.leaveDeadEnd(ai);
+            if (!retreat.isEmpty()) return retreat;
+        }
         // 원천이 근처에 없거나 용암 때문이라면 그 자리를 피해서 옮긴다.
         return List.of(inCave ? ExploreAreaAction.cave(8.0, 20.0) : new ExploreAreaAction(14.0, 26.0));
     }
