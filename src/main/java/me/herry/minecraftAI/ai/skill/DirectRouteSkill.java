@@ -29,7 +29,8 @@ public final class DirectRouteSkill extends RoutedSkill {
     @Override
     protected boolean handles(Goal goal) {
         return switch (goal) {
-            case ReachGoal reach -> reach.place() == ReachGoal.Place.HOME;
+            case ReachGoal reach -> reach.place() == ReachGoal.Place.HOME || reach.place() == ReachGoal.Place.NETHER
+                    || reach.place() == ReachGoal.Place.OVERWORLD;
             case BuildGoal ignored -> true;
             case DefeatGoal defeat -> defeat.target().equals(DefeatGoal.HOSTILE) || defeat.target().equals(DefeatGoal.ALLY_THREAT);
             case InteractGoal ignored -> true;
@@ -44,7 +45,13 @@ public final class DirectRouteSkill extends RoutedSkill {
     @Override
     public @Nullable GoalType route(Goal goal, Situation s) {
         return switch (goal) {
-            case ReachGoal reach -> reach.place() == ReachGoal.Place.HOME && s.homeKnown ? GoalType.RETURN_HOME : null;
+            case ReachGoal reach -> switch (reach.place()) {
+                case HOME -> s.homeKnown ? GoalType.RETURN_HOME : null;
+                // 차원은 아는 포탈로 넘는다.
+                case NETHER -> !s.inNether && s.knowsPortal ? GoalType.ENTER_NETHER : null;
+                case OVERWORLD -> s.inNether && s.knowsPortal ? GoalType.LEAVE_NETHER : null;
+                default -> null;
+            };
             case BuildGoal build -> switch (build.structure()) {
                 case SHELTER -> s.canBuildHere || s.shelterInProgress ? GoalType.BUILD_SHELTER : null;
                 case NETHER_PORTAL -> s.flintAndSteel ? GoalType.BUILD_PORTAL : null;

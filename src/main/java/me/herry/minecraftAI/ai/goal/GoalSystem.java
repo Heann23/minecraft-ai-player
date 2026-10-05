@@ -127,6 +127,10 @@ public final class GoalSystem {
         // 흑요석 10개와 부싯돌과 부시가 있으면 집 근처에 포탈 틀을 짓고 불을 붙인다. 지상에서 하는 일이라 땅속에서 밤을 나는 동안에는 미룬다.
         register(GoalType.BUILD_PORTAL, situation -> situation.nextMilestone == Milestone.NETHER_PORTAL && situation.flintAndSteel
                 && !staysBelow(situation) ? 305.0 : 0.0);
+        // 네더에서 할 일을 스스로 할 수 있게 되면 포탈로 들어간다. 아직 그런 일이 없어서, 지금은 사람이 시킬 때만 들어간다.
+        register(GoalType.ENTER_NETHER, situation -> !situation.inNether && situation.knowsPortal && situation.netherWorkReady() ? 300.0 : 0.0);
+        // 네더에 있는데 거기서 할 수 있는 일이 없으면 다른 일보다 먼저 돌아온다. 급한 일(위험, 싸움)만 그보다 앞선다.
+        register(GoalType.LEAVE_NETHER, situation -> situation.inNether && situation.knowsPortal && !situation.netherWorkReady() ? 330.0 : 0.0);
         register(GoalType.EXPLORE, situation -> 50.0);
     }
 
