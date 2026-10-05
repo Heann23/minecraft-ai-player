@@ -2,6 +2,9 @@ package me.herry.minecraftAI.ai.action;
 
 import me.herry.minecraftAI.ai.AIPlayer;
 import me.herry.minecraftAI.ai.inventory.InventorySystem;
+import me.herry.minecraftAI.ai.primitive.PrimitiveAction;
+import me.herry.minecraftAI.ai.primitive.PrimitiveTarget;
+import me.herry.minecraftAI.ai.primitive.PrimitiveType;
 import me.herry.minecraftAI.ai.team.Phrases;
 import me.herry.minecraftAI.ai.util.Positions;
 import org.bukkit.Location;
@@ -14,7 +17,7 @@ import org.bukkit.util.Vector;
 /**
  * 배고픈 동료에게 다가가서 가진 음식의 절반을 던져 준다.
  */
-public final class GiveFoodAction extends AbstractAction {
+public final class GiveFoodAction extends AbstractAction implements PrimitiveAction {
     private static final int TIMEOUT = 900;
     private static final double GIVE_RANGE = 3.0;
     private static final int STORAGE_SIZE = 36;
@@ -101,5 +104,15 @@ public final class GiveFoodAction extends AbstractAction {
         }
         giver.swingMainHand();
         return toGive - remaining;
+    }
+
+    @Override
+    public PrimitiveType getPrimitiveType() {
+        return PrimitiveType.INTERACT_ENTITY;
+    }
+
+    @Override
+    public PrimitiveTarget getTarget() {
+        return new PrimitiveTarget.Entity("PLAYER", receiver.getPlayer().getUniqueId().toString());
     }
 }

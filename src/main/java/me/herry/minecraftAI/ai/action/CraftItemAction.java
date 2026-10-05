@@ -3,6 +3,9 @@ package me.herry.minecraftAI.ai.action;
 import me.herry.minecraftAI.ai.AIPlayer;
 import me.herry.minecraftAI.ai.crafting.CraftingSystem;
 import me.herry.minecraftAI.ai.memory.MemoryType;
+import me.herry.minecraftAI.ai.primitive.PrimitiveAction;
+import me.herry.minecraftAI.ai.primitive.PrimitiveTarget;
+import me.herry.minecraftAI.ai.primitive.PrimitiveType;
 import me.herry.minecraftAI.ai.util.BlockPoint;
 import org.bukkit.Material;
 import org.bukkit.Sound;
@@ -14,7 +17,7 @@ import java.util.List;
 /**
  * 아이템을 제작한다. 중간 재료가 없으면 그것부터 순서대로 만든다 (예: 원목 -> 판자 -> 막대기 -> 곡괭이).
  */
-public final class CraftItemAction extends AbstractAction {
+public final class CraftItemAction extends AbstractAction implements PrimitiveAction {
     private static final int TIMEOUT = 200;
     // 제작 한 단계 사이의 간격. 한 틱에 전부 만들어 버리면 사람처럼 보이지 않는다.
     private static final int STEP_INTERVAL = 10;
@@ -78,5 +81,15 @@ public final class CraftItemAction extends AbstractAction {
             ai.getInventory().wearBestArmor();
             succeed();
         }
+    }
+
+    @Override
+    public PrimitiveType getPrimitiveType() {
+        return PrimitiveType.CRAFT_ITEM;
+    }
+
+    @Override
+    public PrimitiveTarget getTarget() {
+        return new PrimitiveTarget.Item(target.name(), amount);
     }
 }

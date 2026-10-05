@@ -89,11 +89,19 @@ public final class CraftPlans {
 
     // 굴을 팔 때 막 쓸 돌 곡괭이를 만든다. 좋은 곡괭이는 그것이 있어야만 캘 수 있는 블록에 쓴다.
     static List<Action> craftWorkTool(AIPlayer ai) {
-        CraftingSystem.CraftPlan plan = ai.getCrafting().plan(Material.STONE_PICKAXE, 1, ai.getInventory().snapshot());
+        return craftItem(ai, Material.STONE_PICKAXE, 1);
+    }
+
+    /**
+     * 가진 재료로 그 아이템을 만든다. 작업대가 필요하면 가까운 것 앞으로 가거나 가진 것을 놓는다.
+     * 재료가 모자라거나 작업대를 구할 방법이 없으면 빈 목록.
+     */
+    public static List<Action> craftItem(AIPlayer ai, Material item, int amount) {
+        CraftingSystem.CraftPlan plan = ai.getCrafting().plan(item, amount, ai.getInventory().snapshot());
         if (!plan.isFeasible()) return List.of();
         List<Action> actions = new ArrayList<>();
         if (plan.needsTable() && !ensureTable(ai, actions)) return List.of();
-        actions.add(new CraftItemAction(Material.STONE_PICKAXE, 1));
+        actions.add(new CraftItemAction(item, amount));
         return actions;
     }
 
