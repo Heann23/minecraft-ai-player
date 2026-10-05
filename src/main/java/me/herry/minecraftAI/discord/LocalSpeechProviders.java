@@ -35,7 +35,10 @@ public final class LocalSpeechProviders implements SpeechRecognitionWorker.Recog
         JsonObject body = new JsonObject(); body.addProperty("text", text);
         if (!settings.voice().isEmpty()) body.addProperty("voice", settings.voice());
         var response = http.post(settings.voiceEndpoint(), "application/json; charset=utf-8", body.toString().getBytes(StandardCharsets.UTF_8), settings.voiceTimeout(), 12_000_000);
-        if (!Set.of("audio/wav", "audio/x-wav", "audio/wave").contains(response.mediaType())) throw new IOException("local synthesis response type");
+        // Piper 1.8's Flask endpoint returns raw bytes with its default text/html media type.
+        // Accept that transport quirk only through the same strict PCM RIFF decoder, never as text.
+        if (!Set.of("audio/wav", "audio/x-wav", "audio/wave", "application/octet-stream", "text/html").contains(response.mediaType()))
+            throw new IOException("local synthesis response type");
         return WaveAudio.discordPcm(response.body());
     }
     private static void field(ByteArrayOutputStream out, String boundary, String name, String value) {

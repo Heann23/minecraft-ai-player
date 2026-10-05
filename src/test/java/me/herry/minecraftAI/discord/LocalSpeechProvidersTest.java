@@ -95,6 +95,16 @@ class LocalSpeechProvidersTest {
             assertThrows(IOException.class, () -> fixture.providers.synthesize("안녕하세요."));
         }
     }
+    @Test void piperRawFlaskBytesRequireValidPcmWaveRegardlessOfHtmlLabel() throws Exception {
+        try (var fixture = new Fixture("")) {
+            for (String media : new String[]{"text/html; charset=utf-8", "application/octet-stream"}) {
+                fixture.type.set(media); fixture.output.set(WaveAudio.mono16k(new byte[]{0x34, 0x12}));
+                assertEquals(12, fixture.providers.synthesize("안녕하세요.").length);
+                fixture.output.set("<html>private error</html>".getBytes(StandardCharsets.UTF_8));
+                assertThrows(IOException.class, () -> fixture.providers.synthesize("안녕하세요."));
+            }
+        }
+    }
     @Test void settingsRejectRemoteEndpointsWrongTypesAndUnboundedTimeouts() {
         var defaults = SpeechProviderSettings.read(key -> null); assertTrue(defaults.voice().isEmpty());
         assertEquals("/inference", defaults.recognitionEndpoint().getPath()); assertEquals("/synthesize", defaults.voiceEndpoint().getPath());
