@@ -41,4 +41,3 @@ final class GroundedPersonalDialogue implements ResponsePipeline.Model {
         return answer;
     }
 }
-

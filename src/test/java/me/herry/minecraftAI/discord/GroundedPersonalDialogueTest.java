@@ -76,4 +76,3 @@ class GroundedPersonalDialogueTest {
         assertThrows(IllegalArgumentException.class, () -> model.respond(new ResponsePipeline.Request(original.turn(), original.context(), original.memory(), true)));
     }
 }
-
