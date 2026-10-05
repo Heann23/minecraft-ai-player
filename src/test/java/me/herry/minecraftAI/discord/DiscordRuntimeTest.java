@@ -37,6 +37,17 @@ class DiscordRuntimeTest {
             assertEquals(DiscordRuntime.State.FAILED, runtime.started().get(3, TimeUnit.SECONDS)); assertEquals(List.of("discord-start-failed"), codes);
         }
     }
+    @Test void knownStartupFailuresExposeOnlyFixedDiagnosticCodes() throws Exception {
+        for (var reason : DiscordStartupFailure.Reason.values()) {
+            List<String> codes = new CopyOnWriteArrayList<>();
+            try (var runtime = new DiscordRuntime(() -> settings(true), key -> "secret-token",
+                    (settings, token) -> { throw new DiscordStartupFailure(reason); }, codes::add)) {
+                assertEquals(DiscordRuntime.State.FAILED, runtime.started().get(3, TimeUnit.SECONDS));
+                assertEquals(List.of(reason.code), codes);
+                assertFalse(codes.getFirst().contains("secret-token"));
+            }
+        }
+    }
     @Test void closeDuringConfigurationCancelsStartupBeforeOpeningConnection() throws Exception {
         CountDownLatch entered = new CountDownLatch(1), release = new CountDownLatch(1);
         var calls = new AtomicInteger();

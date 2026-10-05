@@ -6,7 +6,6 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
@@ -39,7 +38,7 @@ public final class DiscordVoiceConnection extends ListenerAdapter implements Dis
     private final JdaAudioAdapter audio;
     private final AtomicBoolean stopped = new AtomicBoolean();
     private final AtomicBoolean closed = new AtomicBoolean();
-    private final CountDownLatch ready = new CountDownLatch(1);
+    private final DiscordGatewayReadiness ready = new DiscordGatewayReadiness();
     private volatile JDA jda;
     private volatile boolean connectWanted;
     private final java.util.concurrent.atomic.AtomicLong connectAttempt = new java.util.concurrent.atomic.AtomicLong();
@@ -53,8 +52,8 @@ public final class DiscordVoiceConnection extends ListenerAdapter implements Dis
                     .setMemberCachePolicy(MemberCachePolicy.VOICE).enableCache(CacheFlag.VOICE_STATE)
                     .setAudioModuleConfig(new AudioModuleConfig().withDaveSessionFactory(new JDaveSessionFactory()))
                     .addEventListeners(connection).build();
-            if (!connection.ready.await(30, TimeUnit.SECONDS) || connection.jda.getStatus() != JDA.Status.CONNECTED)
-                throw new java.io.IOException("Discord gateway startup timeout or failure");
+            if (!connection.ready.await(30, TimeUnit.SECONDS))
+                throw new DiscordStartupFailure(DiscordStartupFailure.Reason.GATEWAY_NOT_READY);
             connection.configure();
             return connection;
         } catch (Exception | LinkageError failed) { connection.close(); throw failed; }
@@ -74,14 +73,14 @@ public final class DiscordVoiceConnection extends ListenerAdapter implements Dis
             if (store != null) store.close(); if (createdSpeech != null) createdSpeech.close(); dialogue.close(); throw failed;
         }
     }
-    private void configure() {
+    private void configure() throws DiscordStartupFailure {
         if (stopped.get()) return;
         var guild = jda.getGuildById(configuration.discord().guildId());
-        if (guild == null) throw new IllegalStateException("Configured Discord guild unavailable");
+        if (guild == null) throw new DiscordStartupFailure(DiscordStartupFailure.Reason.GUILD_UNAVAILABLE);
         VoiceChannel channel = guild.getVoiceChannelById(configuration.discord().voiceChannelId());
-        if (channel == null) throw new IllegalStateException("Configured normal voice channel unavailable");
+        if (channel == null) throw new DiscordStartupFailure(DiscordStartupFailure.Reason.VOICE_CHANNEL_UNAVAILABLE);
         if (!guild.getSelfMember().hasPermission(channel, Permission.VIEW_CHANNEL, Permission.VOICE_CONNECT, Permission.VOICE_SPEAK))
-            throw new IllegalStateException("Configured voice channel permissions missing");
+            throw new DiscordStartupFailure(DiscordStartupFailure.Reason.VOICE_PERMISSIONS_MISSING);
         var manager = guild.getAudioManager(); manager.setSelfDeafened(false); manager.setSelfMuted(false); manager.setConnectTimeout(15_000);
         manager.setReceivingHandler(audio); manager.setSendingHandler(audio);
         manager.setConnectionListener(new ConnectionListener() {
@@ -141,8 +140,8 @@ public final class DiscordVoiceConnection extends ListenerAdapter implements Dis
         }
         audio.participants(ids, names).whenComplete((ignored, failure) -> { if (failure != null) diagnostic.accept("discord-participants-rejected"); });
     }
-    @Override public void onReady(ReadyEvent event) { ready.countDown(); }
-    @Override public void onShutdown(ShutdownEvent event) { ready.countDown(); audio.connected(false); }
+    @Override public void onReady(ReadyEvent event) { ready.ready(); }
+    @Override public void onShutdown(ShutdownEvent event) { ready.shutdown(); audio.connected(false); }
     @Override public void onSessionDisconnect(SessionDisconnectEvent event) { audio.connected(false); }
     @Override public void onSessionResume(SessionResumeEvent event) { resume(); }
     @Override public void onSessionRecreate(SessionRecreateEvent event) { resume(); }

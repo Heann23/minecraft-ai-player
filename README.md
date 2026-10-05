@@ -98,7 +98,8 @@ AI 가 무엇을 하고 있는지 볼 때:
 
 별도 `plugins/MinecraftAI/discord.yml`로 설정합니다. 기본값은 꺼져 있으며,
 Discord 연결이나 로컬 제공자가 실패해도 게임 AI는 계속 실행합니다.
-이 기능은 개발 브랜치의 초안이며 실제 봇·한국어 모델·음질·지연 시험은 아직 남아 있습니다.
+이 기능은 개발 브랜치의 초안입니다. 로컬 한국어 제공자는 합성 음성으로 시험했으며,
+실제 Discord 마이크·원격 청취·음질·게임 동시 실행 시험은 아직 남아 있습니다.
 
 1. 서버 실행 환경에 `MINECRAFTAI_DISCORD_TOKEN`을 설정합니다. 토큰은 설정 파일이나 저장소에 넣지 않습니다.
 2. `discord.yml`의 `guild-id`, `voice-channel-id`를 따옴표로 감싼 ID로 지정합니다.
@@ -106,6 +107,18 @@ Discord 연결이나 로컬 제공자가 실패해도 게임 AI는 계속 실행
    [Piper HTTP 서버](https://github.com/OHF-Voice/piper1-gpl/blob/main/docs/API_HTTP.md)를 준비합니다.
    `providers.llm.model`에 설치한 한국어 대화 모델을 지정합니다. 모델을 자동 다운로드하지 않습니다.
 4. `enabled: true`로 설정하고 서버를 재시작합니다. Java 실행 옵션에 `--enable-native-access=ALL-UNNAMED`를 추가합니다.
+
+Windows에서는 시작 메뉴에서 **환경 변수**를 검색하고 **시스템 환경 변수 편집 → 환경 변수 → 사용자 변수 → 새로 만들기**로
+`MINECRAFTAI_DISCORD_TOKEN`을 추가합니다. 변수 값에는 봇 토큰만 입력하고 따옴표는 붙이지 않습니다.
+확인을 눌러 저장한 뒤 서버를 실행하는 터미널·런처를 다시 열어야 새 변수가 전달됩니다.
+다른 이름으로 이미 설정했다면 `discord.yml`의 `token-env`를 그 변수 이름으로 바꿔도 됩니다.
+Windows 서비스로 실행할 경우 서비스 실행 계정의 환경에 설정해야 합니다.
+
+시작이 실패하면 콘솔의 `Discord:` 진단을 확인하세요. `discord-token-missing`은 서버 실행 환경에 변수 값이 없다는 뜻이고,
+`discord-gateway-not-ready`는 로그인 후 준비 완료를 기다리지 못했다는 뜻입니다.
+`discord-guild-unavailable`, `discord-voice-channel-unavailable`, `discord-voice-permissions-missing`은
+각각 봇이 들어간 서버, 일반 음성 채널 ID, 채널 보기·접속·발언 권한을 확인해야 한다는 뜻입니다.
+진단에는 토큰이나 대화 내용을 포함하지 않습니다.
 
 봇에는 지정한 일반 음성 채널의 보기·접속·발언·메시지 보내기 권한과 `applications.commands`가 필요합니다.
 수신 안내와 관리 명령을 등록한 뒤 해당 채널에 접속하며, Stage 채널과 다른 서버·채널로 이동하지 않습니다.

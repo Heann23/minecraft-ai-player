@@ -49,7 +49,10 @@ public final class DiscordRuntime implements AutoCloseable {
             }
             if (created == null) started.complete(State.RUNNING);
         } catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); if (!isClosed()) { report("discord-start-interrupted"); publish(State.FAILED); } }
-        catch (Exception | LinkageError failed) { if (!isClosed()) { report("discord-start-failed"); publish(State.FAILED); } }
+        catch (Exception | LinkageError failed) { if (!isClosed()) {
+            report(failed instanceof DiscordStartupFailure known ? known.diagnostic() : "discord-start-failed");
+            publish(State.FAILED);
+        } }
         finally { if (created != null) dispose(created); }
     }
     private boolean isClosed() { synchronized (gate) { return closed; } }
