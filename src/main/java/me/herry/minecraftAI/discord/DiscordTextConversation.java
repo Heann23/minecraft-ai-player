@@ -76,14 +76,15 @@ public final class DiscordTextConversation implements AutoCloseable {
         try {
             if (!turns.isCurrent(token)) { result.cancel(false); return; }
             var subject = new DiscordMemory.Subject(settings.guildId(), settings.characterId(), user);
-            boolean erase = ConfirmedTextForget.requested(input);
+            var deletion = ConfirmedTextForget.read(input);
+            boolean erase = deletion != null;
             var change = erase ? null : ConfirmedTextPreference.read(input);
             if (erase || change != null) {
                 beforePreference.begin(user, () -> turns.isCurrent(token)).get(3, TimeUnit.SECONDS);
                 CompletableFuture<DiscordMemory.Snapshot> saved;
                 synchronized (this) {
                     if (!turns.isCurrent(token)) { result.cancel(false); return; }
-                    if (erase) saved = store.forget(subject);
+                    if (erase) saved = deletion == ConfirmedTextForget.Target.ALL ? store.forget(subject) : store.forget(deletion.key(subject));
                     else {
                         var key = new DiscordMemory.Key(subject, change.kind(), "", change.label());
                         saved = store.remember(key, change.value(), DiscordMemory.Evidence.EXPLICIT, "text-" + token.conversation() + "-" + token.turn(), 0);
@@ -92,7 +93,9 @@ public final class DiscordTextConversation implements AutoCloseable {
                 saved.get(3, TimeUnit.SECONDS);
             }
             if (erase) {
-                String answer = "본인의 저장된 기억과 이전 대화 문맥을 모두 지웠어요. 기본 존댓말로 다시 이야기할게요.";
+                boolean casual = deletion != ConfirmedTextForget.Target.ALL && deletion != ConfirmedTextForget.Target.SPEECH
+                        && DiscordPersonalSettings.casual(subject, store.visible(subject, Set.of(user)).get(3, TimeUnit.SECONDS), clock.getAsLong());
+                String answer = deletion.reply(casual);
                 if (!turns.generated(token, answer)) { result.cancel(false); return; }
                 result.complete(new Reply(token, answer));
                 return;
