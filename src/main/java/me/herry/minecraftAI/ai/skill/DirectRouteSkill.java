@@ -35,7 +35,7 @@ public final class DirectRouteSkill extends RoutedSkill {
             case InteractGoal ignored -> true;
             case ExploreGoal ignored -> true;
             case AcquireGoal acquire -> acquire.item().equals("IRON_INGOT") || acquire.item().equals("FLINT")
-                    || acquire.item().equals("WATER_BUCKET");
+                    || acquire.item().equals("WATER_BUCKET") || acquire.item().equals("OBSIDIAN");
             case CraftGoal craft -> craft.item().equals(CraftGoal.CRAFTING_TABLE) || craft.item().equals("TORCH");
             default -> false;
         };
@@ -62,6 +62,8 @@ public final class DirectRouteSkill extends RoutedSkill {
             // 물은 빈 양동이가 있어야 뜬다. 물을 찾으러 다니는 것까지 그 목표의 계획이 한다.
             case AcquireGoal acquire -> acquire.item().equals("FLINT") ? GoalType.GATHER_FLINT
                     : acquire.item().equals("WATER_BUCKET") ? (s.emptyBucket ? GoalType.FILL_BUCKET : null)
+                    // 흑요석은 물을 부어 만든다. 부어 놓고 캐는 중에는 물 양동이가 비어 있다.
+                    : acquire.item().equals("OBSIDIAN") ? (s.waterBucket || s.obsidianWork ? GoalType.GATHER_OBSIDIAN : null)
                     : acquire.item().equals("IRON_INGOT") && s.rawIron > 0 ? GoalType.SMELT_IRON : null;
             case CraftGoal craft -> switch (craft.item()) {
                 // 작업대는 만들어서 놓는 데까지 한다. 놓여 있어야 쓸 수 있다.

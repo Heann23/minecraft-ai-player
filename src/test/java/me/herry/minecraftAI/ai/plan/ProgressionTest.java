@@ -239,12 +239,12 @@ class ProgressionTest {
 
     // 스스로 해낼 수 있는 범위가 어디까지인지 정직하게 표시되어 있어야 한다.
     @Test
-    void automationFrontierIsTheWaterBucket() {
+    void automationFrontierIsObsidian() {
         assertTrue(Milestone.DIAMOND_PICKAXE.isAutomated());
         assertTrue(Milestone.SHELTER.isAutomated());
         assertTrue(Milestone.FLINT_AND_STEEL.isAutomated());
-        assertTrue(Milestone.WATER_BUCKET.isAutomated());
-        assertFalse(Milestone.OBSIDIAN.isAutomated());
+        assertTrue(Milestone.WATER_BUCKET.isAutomated());        assertTrue(Milestone.OBSIDIAN.isAutomated());
+        assertFalse(Milestone.NETHER_PORTAL.isAutomated());
         assertFalse(Milestone.ENDER_DRAGON.isAutomated());
     }
 }

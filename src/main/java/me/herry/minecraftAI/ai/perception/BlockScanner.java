@@ -153,6 +153,10 @@ public final class BlockScanner {
         found++;
         long ttl = isResource(type) || type == MemoryType.DANGER_PLACE || type == MemoryType.WATER_SOURCE ? RESOURCE_TTL : -1L;
         memory.remember(type, world.getUID(), new BlockPoint(x, y, z), now, ttl);
+        // 용암 호수의 표면은 흑요석을 만들 자리로도 적어 둔다.
+        if (material == Material.LAVA && isOpenSource(x, y, z)) {
+            memory.rememberPermanent(MemoryType.LAVA_LAKE, world.getUID(), new BlockPoint(x, y, z), now);
+        }
     }
 
     /**

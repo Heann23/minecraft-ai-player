@@ -23,6 +23,7 @@ import me.herry.minecraftAI.ai.plan.CraftPlans;
 import me.herry.minecraftAI.ai.plan.FurnacePlans;
 import me.herry.minecraftAI.ai.plan.GatherPlans;
 import me.herry.minecraftAI.ai.plan.HomePlans;
+import me.herry.minecraftAI.ai.plan.ObsidianPlans;
 import me.herry.minecraftAI.ai.plan.Progression;
 import me.herry.minecraftAI.ai.plan.RefugePlans;
 import me.herry.minecraftAI.ai.plan.ResourceLocator;
@@ -265,6 +266,10 @@ final class SituationBuilder {
         situation.emptyBucket = inventory.has(Material.BUCKET);
         situation.knowsWater = situation.emptyBucket
                 && ResourceLocator.locate(ai, MemoryType.WATER_SOURCE, GatherPlans.ORE_WALK_RANGE) != null;
+        situation.waterBucket = inventory.has(Material.WATER_BUCKET);
+        situation.canMineObsidian = inventory.bestTier(Tag.ITEMS_PICKAXES).isAtLeast(ToolTier.DIAMOND);
+        situation.obsidianWork = situation.canMineObsidian && ObsidianPlans.isWorking(ai);
+        situation.knowsLava = situation.waterBucket && situation.canMineObsidian && ObsidianPlans.knowsLake(ai);
         // 좋은 곡괭이만 있고 막 쓸 돌 곡괭이가 없으면, 가진 재료로 만들 수 있을 때 하나 만든다.
         situation.workPickaxeWanted = situation.canMineDiamond && !inventory.hasWorkPickaxe()
                 && ai.getCrafting().plan(Material.STONE_PICKAXE, 1, inventory.snapshot()).isFeasible();

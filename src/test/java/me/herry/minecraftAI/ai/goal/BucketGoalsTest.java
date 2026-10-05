@@ -83,7 +83,7 @@ class BucketGoalsTest {
     @Test
     void automationReachesTheWaterBucket() {
         assertTrue(Milestone.WATER_BUCKET.isAutomated());
-        assertFalse(Milestone.OBSIDIAN.isAutomated());
+        assertFalse(Milestone.NETHER_PORTAL.isAutomated());
     }
 
     @Test

@@ -224,6 +224,8 @@ public final class InventorySystem {
         // 양털은 침대를 만들 재료라서 벽이나 발판으로 써 버리지 않는다.
         if (Tag.LOGS.isTagged(material) || Tag.PLANKS.isTagged(material) || Tag.WOOL.isTagged(material)
                 || material == Material.CRAFTING_TABLE || material == Material.FURNACE) return false;
+        // 흑요석은 포탈을 지을 재료다. 다리나 발판으로 써 버리면 다시 캐는 데 하나에 10초씩 걸린다.
+        if (material == Material.OBSIDIAN) return false;
         ItemCategory category = ItemCategory.of(material);
         return category == ItemCategory.STONE || category == ItemCategory.BLOCK;
     }

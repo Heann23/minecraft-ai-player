@@ -55,6 +55,9 @@ public final class GoalReasons {
                     : target + "에 부싯돌이 필요한데 자갈이 없어서 찾고 있어요";
             case FILL_BUCKET -> s.knowsWater ? "흑요석을 만들려면 물이 필요해서 양동이에 물을 뜨러 가요"
                     : "흑요석을 만들려면 물이 필요한데 아는 물이 없어서 찾고 있어요";
+            case GATHER_OBSIDIAN -> s.obsidianWork ? "용암 호수에 물을 부어 굳힌 흑요석을 캐고 있어요. 네더 포탈에 10개가 필요해요"
+                    : s.knowsLava ? "네더 포탈에 쓸 흑요석을 만들려고 용암 호수로 가고 있어요"
+                    : "네더 포탈에 쓸 흑요석을 만들 용암 호수를 깊은 땅속에서 찾고 있어요";
             case SMELT_IRON -> "철 원석이 " + s.rawIron + "개 모여서 주괴로 구울 차례예요";
             case COOK_FOOD -> "날고기 " + s.rawFood + "개를 구워서 더 든든한 음식으로 만들려고요";
             case TEND_FURNACE -> tendReason(s);
