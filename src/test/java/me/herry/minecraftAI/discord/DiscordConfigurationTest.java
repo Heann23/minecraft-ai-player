@@ -52,4 +52,10 @@ class DiscordConfigurationTest {
         for (Object invalid : new Object[]{"true", 1})
             assertThrows(IllegalArgumentException.class, () -> DiscordConfiguration.read(Map.of("conversation.greet-on-join", invalid)::get));
     }
+    @Test void gameMappingIsOptionalExplicitAndUsesOnlyValidAiNames() {
+        assertEquals("", DiscordConfiguration.read(Map.<String, Object>of()::get).targetAi());
+        assertEquals("Bot", DiscordConfiguration.read(Map.of("game.target-ai", "Bot")::get).targetAi());
+        for (Object invalid : new Object[]{123, true, "해리", "@everyone", "a", "with spaces", "a".repeat(17)})
+            assertThrows(IllegalArgumentException.class, () -> DiscordConfiguration.read(Map.of("game.target-ai", invalid)::get));
+    }
 }

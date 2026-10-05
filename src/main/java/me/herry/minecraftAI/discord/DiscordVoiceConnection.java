@@ -36,6 +36,7 @@ public final class DiscordVoiceConnection extends ListenerAdapter implements Dis
     private final OllamaDialogue dialogue;
     private final DiscordSession session;
     private final JdaAudioAdapter audio;
+    private final DiscordGameState game;
     private final AtomicBoolean stopped = new AtomicBoolean();
     private final AtomicBoolean closed = new AtomicBoolean();
     private final DiscordGatewayReadiness ready = new DiscordGatewayReadiness();
@@ -46,7 +47,11 @@ public final class DiscordVoiceConnection extends ListenerAdapter implements Dis
     /** Must be called by the lifecycle worker, never on the server thread. */
     public static DiscordVoiceConnection open(Path directory, DiscordConfiguration configuration, String token,
                                                Consumer<String> diagnostic) throws Exception {
-        DiscordVoiceConnection connection = new DiscordVoiceConnection(directory, configuration, diagnostic);
+        return open(directory, configuration, token, diagnostic, null);
+    }
+    public static DiscordVoiceConnection open(Path directory, DiscordConfiguration configuration, String token,
+                                               Consumer<String> diagnostic, DiscordGameState game) throws Exception {
+        DiscordVoiceConnection connection = new DiscordVoiceConnection(directory, configuration, diagnostic, game);
         try {
             connection.jda = JDABuilder.createLight(token, GatewayIntent.GUILD_VOICE_STATES)
                     .setMemberCachePolicy(MemberCachePolicy.VOICE).enableCache(CacheFlag.VOICE_STATE)
@@ -58,8 +63,9 @@ public final class DiscordVoiceConnection extends ListenerAdapter implements Dis
             return connection;
         } catch (Exception | LinkageError failed) { connection.close(); throw failed; }
     }
-    private DiscordVoiceConnection(Path directory, DiscordConfiguration configuration, Consumer<String> diagnostic) throws Exception {
+    private DiscordVoiceConnection(Path directory, DiscordConfiguration configuration, Consumer<String> diagnostic, DiscordGameState game) throws Exception {
         this.configuration = configuration; this.diagnostic = diagnostic; connectWanted = configuration.discord().autoConnect();
+        this.game = game;
         dialogue = new OllamaDialogue(configuration.dialogue(), System::currentTimeMillis);
         LocalSpeechProviders createdSpeech = null; DiscordMemoryStore store = null;
         try {
@@ -95,6 +101,7 @@ public final class DiscordVoiceConnection extends ListenerAdapter implements Dis
                 else if (status.name().startsWith("ERROR_") || status.name().startsWith("DISCONNECTED_")) diagnostic.accept("discord-voice-disconnected");
             }
         });
+        if (game != null) game.configure(configuration.targetAi());
         guild.upsertCommand(DiscordVoiceCommands.definition()).queue(registered -> {
             if (connectWanted) connectWithNotice().whenComplete((ignored, failed) -> { if (failed != null) diagnostic.accept("discord-connect-failed"); });
         }, failed -> diagnostic.accept("discord-command-registration-failed"));
@@ -196,6 +203,7 @@ public final class DiscordVoiceConnection extends ListenerAdapter implements Dis
     private java.util.concurrent.CompletableFuture<String> command(SlashCommandInteractionEvent event) {
         String user = event.getUser().getId(), source = event.getId();
         return switch (event.getSubcommandName()) {
+            case "game" -> java.util.concurrent.CompletableFuture.completedFuture(game == null ? "게임 상태 연결을 사용할 수 없어요." : game.describe());
             case "status" -> {
                 var status = session.status();
                 yield java.util.concurrent.CompletableFuture.completedFuture("음성 연결: " + (event.getGuild().getAudioManager().isConnected() ? "연결됨" : "연결 안 됨")
@@ -226,7 +234,7 @@ public final class DiscordVoiceConnection extends ListenerAdapter implements Dis
             default -> java.util.concurrent.CompletableFuture.completedFuture("지원하지 않는 명령이에요.");
         };
     }
-    @Override public void stop() { stopped.set(true); audio.close(); }
+    @Override public void stop() { stopped.set(true); if (game != null) game.configure(""); audio.close(); }
     @Override public void close() {
         if (!closed.compareAndSet(false, true)) return;
         stop();

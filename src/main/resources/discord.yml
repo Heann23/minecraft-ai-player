@@ -9,6 +9,12 @@ voice-channel-id: ''
 character-id: herry
 auto-connect: true
 
+game:
+  # 선택 기능: Discord에서 상태를 읽을 게임 AI 이름. /ai status에 표시된 이름을 정확히 지정한다.
+  # 빈 값이면 게임 상태를 공유하지 않는다. character-id/Discord 이름으로 대상을 추측하지 않는다.
+  # /herry game은 최근 상태만 확인하며 게임 행동을 시키지 않는다.
+  target-ai: ''
+
 audio:
   # RMS 에너지를 사용한 초기 잡음 구분. 음성 인식 신뢰도가 아니며 실제 마이크로 조정한다.
   minimum-rms: 0.01

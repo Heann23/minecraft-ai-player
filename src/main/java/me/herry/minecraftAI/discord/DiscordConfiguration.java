@@ -12,11 +12,12 @@ import org.bukkit.configuration.file.YamlConfiguration;
 
 /** File I/O and pure YAML parsing only; the runtime loads this outside the server thread. */
 public record DiscordConfiguration(DiscordSettings discord, OllamaSettings dialogue, SpeechProviderSettings speech,
-                                   double minimumRms, long endSilenceMillis, boolean greetOnJoin) {
+                                   double minimumRms, long endSilenceMillis, boolean greetOnJoin, String targetAi) {
     public DiscordConfiguration {
         java.util.Objects.requireNonNull(discord); java.util.Objects.requireNonNull(dialogue); java.util.Objects.requireNonNull(speech);
         if (!Double.isFinite(minimumRms) || minimumRms <= 0 || minimumRms > 1) throw new IllegalArgumentException("audio.minimum-rms");
         if (endSilenceMillis < 100 || endSilenceMillis > 2500) throw new IllegalArgumentException("audio.end-silence-millis");
+        DiscordGameState.target(targetAi);
     }
     public VoiceIngress.Policy capturePolicy() {
         return new VoiceIngress.Policy(8, 3, 2, 5, 1500, endSilenceMillis, endSilenceMillis + 500);
@@ -27,7 +28,7 @@ public record DiscordConfiguration(DiscordSettings discord, OllamaSettings dialo
         return new DiscordConfiguration(DiscordSettings.read(values), OllamaSettings.read(values), SpeechProviderSettings.read(values),
                 value == null ? 0.01 : ((Number) value).doubleValue(),
                 DiscordSettings.number(values, "audio.end-silence-millis", 1000, 100, 2500),
-                DiscordSettings.bool(values, "conversation.greet-on-join", true));
+                DiscordSettings.bool(values, "conversation.greet-on-join", true), DiscordSettings.string(values, "game.target-ai", ""));
     }
     public static DiscordConfiguration load(Path directory, Supplier<InputStream> defaults) throws IOException {
         Files.createDirectories(directory); Path file = directory.resolve("discord.yml");

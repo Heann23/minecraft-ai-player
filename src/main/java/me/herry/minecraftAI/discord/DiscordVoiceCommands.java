@@ -9,7 +9,7 @@ import net.dv8tion.jda.api.interactions.commands.build.SubcommandData;
 
 /** Personal actions always target the invoking Discord user; voice controls require fresh guild permission. */
 public final class DiscordVoiceCommands {
-    private static final Set<String> PERSONAL = Set.of("status", "forget", "name", "speech", "chat");
+    private static final Set<String> PERSONAL = Set.of("status", "forget", "name", "speech", "chat", "game");
     private static final Set<String> ADMIN = Set.of("leave", "resume", "quiet", "listen", "backup", "backups", "restore");
     private DiscordVoiceCommands() {}
     public static boolean allowed(String configuredGuild, String actualGuild, String action, boolean manageGuild) {
@@ -19,6 +19,7 @@ public final class DiscordVoiceCommands {
     public static SlashCommandData definition() {
         return Commands.slash("herry", "해리 음성 대화와 내 기억을 관리해요").addSubcommands(
                 new SubcommandData("status", "음성 대화 상태를 확인해요"),
+                new SubcommandData("game", "설정한 게임 AI의 현재 상태만 확인해요"),
                 new SubcommandData("chat", "해리와 나에게만 보이는 텍스트 대화를 해요")
                         .addOptions(new OptionData(OptionType.STRING, "message", "해리에게 할 말", true).setMinLength(1).setMaxLength(1000)),
                 new SubcommandData("forget", "해리가 기억한 내 정보를 지워요"),
