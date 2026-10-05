@@ -271,6 +271,11 @@ public final class DiscordSession implements AutoCloseable {
         });
     }
     public PcmPlayback.Frame nextFrame() { return playback.nextFrame(); }
+    /** Drops only temporary private text state; the persistent store and shared voice context are untouched. */
+    public CompletableFuture<Void> resetText(String user) {
+        new DiscordMemory.Subject(settings.guildId(), settings.characterId(), user);
+        return post(() -> { textConversation.forget(user); return done(); });
+    }
     public CompletableFuture<Boolean> cancelText(String user) {
         new DiscordMemory.Subject(settings.guildId(), settings.characterId(), user);
         CompletableFuture<Boolean> result = new CompletableFuture<>();

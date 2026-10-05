@@ -220,6 +220,8 @@ public final class DiscordVoiceConnection extends ListenerAdapter implements Dis
     private java.util.concurrent.CompletableFuture<String> command(SlashCommandInteractionEvent event) {
         String user = event.getUser().getId(), source = event.getId();
         return switch (event.getSubcommandName()) {
+            case "reset" -> session.resetText(user).thenApply(ignored ->
+                    "내 임시 텍스트 문맥을 비웠어요. 저장된 호칭·말투·장난 설정은 유지하고 새 대화를 시작해요.");
             case "cancel" -> session.cancelText(user).thenApply(active -> active
                     ? "내 텍스트 답변 중단을 요청했어요. 이전 대화와 기억은 유지해요."
                     : "현재 중단할 내 텍스트 답변이 없어요.");
