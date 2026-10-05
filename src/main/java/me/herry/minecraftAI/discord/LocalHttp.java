@@ -27,6 +27,15 @@ public final class LocalHttp implements AutoCloseable {
         public Response { body = body.clone(); }
         @Override public byte[] body() { return body.clone(); }
     }
+    public static final class StatusException extends IOException {
+        private final int status;
+        private final Response response;
+        private StatusException(int status, Response response) {
+            super("local provider HTTP status " + status); this.status = status; this.response = response;
+        }
+        public int status() { return status; }
+        public Response response() { return response; }
+    }
     private final HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2))
             .followRedirects(HttpClient.Redirect.NEVER).version(HttpClient.Version.HTTP_1_1)
             .proxy(new ProxySelector() {
@@ -46,6 +55,13 @@ public final class LocalHttp implements AutoCloseable {
         return uri;
     }
     public Response post(URI endpoint, String mediaType, byte[] body, Duration timeout, int maxBytes) throws IOException, InterruptedException {
+        java.util.Objects.requireNonNull(mediaType);
+        return exchange(endpoint, mediaType, body, timeout, maxBytes);
+    }
+    public Response get(URI endpoint, Duration timeout, int maxBytes) throws IOException, InterruptedException {
+        return exchange(endpoint, null, new byte[0], timeout, maxBytes);
+    }
+    private Response exchange(URI endpoint, String mediaType, byte[] body, Duration timeout, int maxBytes) throws IOException, InterruptedException {
         endpoint(endpoint.toString());
         if (timeout == null || timeout.compareTo(Duration.ofMillis(100)) < 0 || timeout.compareTo(Duration.ofSeconds(120)) > 0 || maxBytes < 1 || maxBytes > 12_000_000
                 || body == null || body.length > 2_000_000) throw new IllegalArgumentException("local provider request bounds");
@@ -54,13 +70,14 @@ public final class LocalHttp implements AutoCloseable {
         CompletableFuture<HttpResponse<byte[]>> task = null;
         try {
             if (closed.get()) throw new IOException("local provider closed");
-            HttpRequest request = HttpRequest.newBuilder(endpoint).timeout(timeout).header("Content-Type", mediaType)
-                    .POST(HttpRequest.BodyPublishers.ofByteArray(body)).build();
+            var builder = HttpRequest.newBuilder(endpoint).timeout(timeout);
+            HttpRequest request = mediaType == null ? builder.GET().build()
+                    : builder.header("Content-Type", mediaType).POST(HttpRequest.BodyPublishers.ofByteArray(body)).build();
             task = client.sendAsync(request, info -> new BoundedBody(maxBytes)); pending.add(task);
             if (closed.get()) task.cancel(true);
             HttpResponse<byte[]> response = task.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
-            if (response.statusCode() != 200) throw new IOException("local provider HTTP status " + response.statusCode());
             String type = response.headers().firstValue("Content-Type").orElse("").split(";", 2)[0].strip().toLowerCase(java.util.Locale.ROOT);
+            if (response.statusCode() != 200) throw new StatusException(response.statusCode(), new Response(type, response.body()));
             return new Response(type, response.body());
         } catch (java.util.concurrent.TimeoutException e) { throw new java.net.http.HttpTimeoutException("local provider deadline"); }
         catch (java.util.concurrent.ExecutionException | java.util.concurrent.CancellationException e) { throw new IOException("local provider request failed"); }

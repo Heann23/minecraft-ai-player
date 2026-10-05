@@ -38,6 +38,21 @@ class LocalHttpTest {
             assertArrayEquals(new byte[]{'{','}'}, response.body());
         } finally { server.stop(0); }
     }
+    @Test void getUsesNoRequestBodyAndBoundedHttpErrorDoesNotLeakInExceptionText() throws Exception {
+        var server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        byte[] errorBody = "PRIVATE_RESPONSE".getBytes(StandardCharsets.UTF_8);
+        server.createContext("/version", exchange -> {
+            assertEquals("GET", exchange.getRequestMethod()); assertEquals(0, exchange.getRequestBody().readAllBytes().length);
+            exchange.getResponseHeaders().set("Content-Type", "application/json"); exchange.sendResponseHeaders(400, errorBody.length);
+            try { exchange.getResponseBody().write(errorBody); } finally { exchange.close(); }
+        }); server.start();
+        try (var http = new LocalHttp()) {
+            var error = assertThrows(LocalHttp.StatusException.class, () -> http.get(endpoint(server, "/version"), DEADLINE, 100));
+            assertEquals(400, error.status()); assertFalse(error.toString().contains("PRIVATE_RESPONSE")); assertNull(error.getCause());
+            byte[] copy = error.response().body(); copy[0] = 0; assertArrayEquals(errorBody, error.response().body());
+            assertThrows(IOException.class, () -> http.get(endpoint(server, "/version"), DEADLINE, 5));
+        } finally { server.stop(0); }
+    }
     @Test void redirectIsRejectedWithoutSendingBodyToDestination() throws Exception {
         var calls = new AtomicInteger(); var server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/redirect", exchange -> { exchange.getResponseHeaders().set("Location", endpoint(server, "/target").toString()); exchange.sendResponseHeaders(307, -1); exchange.close(); });

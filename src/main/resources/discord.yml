@@ -42,6 +42,8 @@ backup:
 # 설치한 한국어 대화 모델 이름을 지정하며 자동 다운로드하지 않는다.
 providers:
   llm:
+    # Ollama 0.35.1 이상: 문맥의 자동 잘라내기/교체를 금지하고 초과 시 오래된 대화만 제한적으로 줄인다.
+    # 재시도 전체가 timeout-seconds 안에서 끝나며 질문·말투/장난 설정·유효한 게임 자료는 유지한다.
     endpoint: 'http://127.0.0.1:11434/api/chat'
     model: ''
     timeout-seconds: 15

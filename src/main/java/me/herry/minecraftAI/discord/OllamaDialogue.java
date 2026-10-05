@@ -17,6 +17,7 @@ public final class OllamaDialogue implements ResponsePipeline.Model, AutoCloseab
             한국어로 보통 1~3문장만 말한다. 상대가 진지하거나 장난이 불편하다고 하면 사과하고 멈춘다.
             humourStyle이 NO_JOKES이면 장난·농담·놀림·돌 이름 비유 없이 담백하게 답한다. 허용 설정이어도 불편함을 표현하면 즉시 멈춘다.
             currentUtterance가 지금 답할 말이다. history의 이전 질문에 다시 답하지 않는다.
+            historyOmitted나 memoryOmitted가 true이면 일부 과거 자료가 생략됐다. 생략된 내용을 추측하지 말고 필요하면 물어본다.
             continuingConversation이 true이면 이전 답변에서 이어서 말한다. 다시 인사하거나 자기소개하지 않는다.
             상대가 해리의 정체나 이름을 직접 물을 때만 자기소개한다. 매번 돌 이름 짓기를 제안하지 않는다.
             기본 존댓말이며 코드가 지정한 speechStyle을 따른다. 직접 허락 없이 반말로 바꾸지 않는다.
@@ -51,12 +52,25 @@ public final class OllamaDialogue implements ResponsePipeline.Model, AutoCloseab
     }
     private String respondOnce(ResponsePipeline.Request request) throws IOException, InterruptedException {
         if (request.permissionQuestion()) throw new IllegalArgumentException("permission questions are code-owned");
-        verifyLocalModel();
-        if (!request.current().getAsBoolean()) throw new IOException("dialogue turn retired");
-        JsonObject payload = payload(request);
-        byte[] encoded = payload.toString().getBytes(StandardCharsets.UTF_8);
-        if (encoded.length > 256_000) throw new IllegalArgumentException("dialogue payload bounds");
-        var response = http.post(settings.endpoint(), "application/json; charset=utf-8", encoded, settings.timeout(), 65_536);
+        long deadline = System.nanoTime() + settings.timeout().toNanos();
+        verifyProviderVersion(deadline); verifyLocalModel(deadline);
+        for (int level = 0; level < 3; level++) {
+            if (!request.current().getAsBoolean()) throw new IOException("dialogue turn retired");
+            byte[] encoded = payload(request, level).toString().getBytes(StandardCharsets.UTF_8);
+            if (encoded.length > 256_000) throw new IllegalArgumentException("dialogue payload bounds");
+            LocalHttp.Response response;
+            try { response = http.post(settings.endpoint(), "application/json; charset=utf-8", encoded, remaining(deadline, settings.timeout()), 65_536); }
+            catch (LocalHttp.StatusException failure) {
+                if (!contextExceeded(failure)) throw failure;
+                if (!request.current().getAsBoolean()) throw new IOException("dialogue turn retired");
+                if (level == 2) return "대화 자료가 길어 한 번에 처리하지 못했어요. 질문을 짧게 다시 말씀해 주세요.";
+                continue;
+            }
+            return readAnswer(response, request);
+        }
+        throw invalid();
+    }
+    private String readAnswer(LocalHttp.Response response, ResponsePipeline.Request request) throws IOException {
         if (!response.mediaType().equals("application/json")) throw invalid();
         try {
                 var object = ProviderJson.read(response.body()); var done = object.get("done"); var message = object.get("message");
@@ -108,9 +122,35 @@ public final class OllamaDialogue implements ResponsePipeline.Model, AutoCloseab
                 .collect(java.util.stream.Collectors.joining()).strip();
     }
     /** A loopback Ollama server can proxy cloud models. Inspect metadata before sending any dialogue. */
-    private void verifyLocalModel() throws IOException, InterruptedException {
+    private void verifyProviderVersion(long deadline) throws IOException, InterruptedException {
+        var response = http.get(settings.endpoint().resolve("version"), remaining(deadline, java.time.Duration.ofSeconds(3)), 4096);
+        if (!response.mediaType().equals("application/json")) throw invalid();
+        String version = ProviderJson.string(ProviderJson.read(response.body()), "version");
+        var match = java.util.regex.Pattern.compile("^(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})$").matcher(version);
+        if (!match.matches()) throw new IOException("local dialogue provider version unsupported");
+        int major = Integer.parseInt(match.group(1)), minor = Integer.parseInt(match.group(2)), patch = Integer.parseInt(match.group(3));
+        if (major == 0 && (minor < 35 || (minor == 35 && patch < 1))) throw new IOException("local dialogue provider requires 0.35.1 or newer");
+    }
+    private static java.time.Duration remaining(long deadline, java.time.Duration maximum) throws java.net.http.HttpTimeoutException {
+        long nanos = deadline - System.nanoTime();
+        if (nanos < java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(100)) throw new java.net.http.HttpTimeoutException("local dialogue deadline");
+        return java.time.Duration.ofNanos(Math.min(nanos, maximum.toNanos()));
+    }
+    /** Only a recognized context overflow permits a retry; arbitrary errors are never echoed or retried. */
+    private static boolean contextExceeded(LocalHttp.StatusException failure) {
+        if (failure.status() != 400 || !failure.response().mediaType().equals("application/json")) return false;
+        try {
+            String message = ProviderJson.string(ProviderJson.read(failure.response().body()), "error");
+            if (message.equals("the input length exceeds the context length")) return true;
+            if (message.length() > 1024) return false;
+            var nested = ProviderJson.read(message.getBytes(StandardCharsets.UTF_8)).getAsJsonObject("error");
+            return nested != null && ProviderJson.string(nested, "message").matches(
+                    "request \\([0-9]{1,8} tokens\\) exceeds the available context size \\([0-9]{1,8} tokens\\), try increasing it");
+        } catch (IOException | RuntimeException invalid) { return false; }
+    }
+    private void verifyLocalModel(long deadline) throws IOException, InterruptedException {
         JsonObject query = new JsonObject(); query.addProperty("model", settings.model()); query.addProperty("verbose", false);
-        var timeout = settings.timeout().compareTo(java.time.Duration.ofSeconds(3)) > 0 ? java.time.Duration.ofSeconds(3) : settings.timeout();
+        var timeout = remaining(deadline, java.time.Duration.ofSeconds(3));
         var response = http.post(settings.endpoint().resolve("show"), "application/json; charset=utf-8",
                 query.toString().getBytes(StandardCharsets.UTF_8), timeout, 65_536);
         if (!response.mediaType().equals("application/json")) throw invalid();
@@ -127,20 +167,25 @@ public final class OllamaDialogue implements ResponsePipeline.Model, AutoCloseab
         }
         if (!completion) throw invalid();
     }
-    private JsonObject payload(ResponsePipeline.Request request) {
+    private JsonObject payload(ResponsePipeline.Request request, int level) {
         JsonObject body = new JsonObject(); body.addProperty("model", settings.model()); body.addProperty("stream", false);
         body.addProperty("think", false); body.addProperty("keep_alive", "5m");
+        body.addProperty("truncate", false); body.addProperty("shift", false);
         JsonObject options = new JsonObject(); options.addProperty("num_ctx", settings.contextTokens()); options.addProperty("num_predict", settings.outputTokens());
         options.addProperty("num_thread", 2); body.add("options", options);
         JsonObject data = new JsonObject(); data.addProperty("respondTo", request.turn().userId());
         data.addProperty("currentUtterance", DialogueContext.currentInput(request));
         data.addProperty("continuingConversation", continuation(request));
         JsonArray facts = new JsonArray(); boolean allowed = false, refused = false, avoidJokes = false;
+        int selectedMemory = 0;
         for (var fact : request.memory()) {
             if (!fact.key().subject().userId().equals(request.turn().userId()) || fact.expired(clock.getAsLong())) continue;
             JsonObject value = new JsonObject(); value.addProperty("kind", fact.key().kind().name()); value.addProperty("value", fact.value());
             value.addProperty("evidence", fact.evidence().name()); value.addProperty("otherUser", fact.key().otherUserId());
-            value.addProperty("recordedAt", fact.recordedAt()); facts.add(value);
+            value.addProperty("recordedAt", fact.recordedAt());
+            boolean preference = fact.key().kind() == DiscordMemory.Kind.NAME || fact.key().kind() == DiscordMemory.Kind.SPEECH_AGREEMENT
+                    || fact.key().kind() == DiscordMemory.Kind.AVOID_JOKE;
+            if (level == 0 || preference || (level == 1 && selectedMemory < 8)) { facts.add(value); selectedMemory++; }
             if (fact.key().kind() == DiscordMemory.Kind.SPEECH_AGREEMENT && fact.evidence() == DiscordMemory.Evidence.EXPLICIT) {
                 allowed |= fact.value().equals("ALLOWED"); refused |= fact.value().equals("REFUSED");
             }
@@ -149,8 +194,12 @@ public final class OllamaDialogue implements ResponsePipeline.Model, AutoCloseab
         }
         data.addProperty("speechStyle", allowed && !refused ? "허락받은 자연스러운 반말" : "자연스러운 존댓말"); data.add("memory", facts);
         data.addProperty("humourStyle", avoidJokes ? "NO_JOKES" : "GENTLE");
+        data.addProperty("memoryOmitted", selectedMemory < request.memory().size());
         JsonArray history = new JsonArray();
-        for (var line : request.context()) {
+        var context = request.context();
+        int first = level == 0 ? 0 : level == 1 ? Math.max(0, context.size() - 4) : context.size();
+        data.addProperty("historyOmitted", first > 0);
+        for (var line : context.subList(first, context.size())) {
             JsonObject value = new JsonObject(); value.addProperty("speaker", line.speaker()); value.addProperty("target", line.target());
             value.addProperty("text", line.text()); value.addProperty("assistant", line.assistant()); value.addProperty("time", line.timeMillis()); history.add(value);
         }

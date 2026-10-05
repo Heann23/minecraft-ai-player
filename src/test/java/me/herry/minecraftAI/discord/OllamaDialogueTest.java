@@ -25,6 +25,10 @@ class OllamaDialogueTest {
     }
     private static final class Fixture implements AutoCloseable {
         final HttpServer server; final AtomicReference<JsonObject> input = new AtomicReference<>();
+        final java.util.List<JsonObject> inputs = new java.util.concurrent.CopyOnWriteArrayList<>();
+        final AtomicReference<String> version = new AtomicReference<>("0.35.1");
+        final AtomicReference<java.util.function.IntUnaryOperator> statusForCall = new AtomicReference<>(call -> 200);
+        final AtomicReference<byte[]> error = new AtomicReference<>("{\"error\":\"the input length exceeds the context length\"}".getBytes(StandardCharsets.UTF_8));
         final AtomicReference<byte[]> output = new AtomicReference<>("{\"done\":true,\"message\":{\"role\":\"assistant\",\"content\":\"반가워요.\"}}".getBytes(StandardCharsets.UTF_8));
         final AtomicReference<String> type = new AtomicReference<>("application/json");
         final AtomicReference<String> metadata = new AtomicReference<>("{\"model_info\":{\"general.architecture\":\"test-local\"},\"capabilities\":[\"completion\"]}");
@@ -36,6 +40,12 @@ class OllamaDialogueTest {
         }
         Fixture(java.util.function.Supplier<DiscordGameState.View> game) throws Exception {
             server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+            server.createContext("/api/version", exchange -> {
+                assertEquals("GET", exchange.getRequestMethod());
+                byte[] result = ("{\"version\":\"" + version.get() + "\"}").getBytes(StandardCharsets.UTF_8);
+                exchange.getResponseHeaders().set("Content-Type", "application/json"); exchange.sendResponseHeaders(200, result.length);
+                try { exchange.getResponseBody().write(result); } finally { exchange.close(); }
+            });
             server.createContext("/api/show", exchange -> {
                 inspection.set(JsonParser.parseString(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8)).getAsJsonObject());
                 inspecting.get().run();
@@ -44,8 +54,9 @@ class OllamaDialogueTest {
             });
             server.createContext("/api/chat", exchange -> {
                 input.set(JsonParser.parseString(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8)).getAsJsonObject());
-                byte[] result = output.get(); exchange.getResponseHeaders().set("Content-Type", type.get());
-                exchange.sendResponseHeaders(200, result.length); try { exchange.getResponseBody().write(result); } finally { exchange.close(); }
+                inputs.add(input.get()); int status = statusForCall.get().applyAsInt(inputs.size());
+                byte[] result = status == 200 ? output.get() : error.get(); exchange.getResponseHeaders().set("Content-Type", type.get());
+                exchange.sendResponseHeaders(status, result.length); try { exchange.getResponseBody().write(result); } finally { exchange.close(); }
             }); server.start();
             model = new OllamaDialogue(new OllamaSettings(URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/api/chat"), "test-local", Duration.ofSeconds(2), 1024, 64), () -> 2000, game);
         }
@@ -57,6 +68,7 @@ class OllamaDialogueTest {
         try (var fixture = new Fixture()) {
             assertEquals("반가워요.", fixture.model.respond(request(List.of())));
             var body = fixture.input.get(); assertFalse(body.get("stream").getAsBoolean()); assertFalse(body.get("think").getAsBoolean());
+            assertFalse(body.get("truncate").getAsBoolean()); assertFalse(body.get("shift").getAsBoolean());
             assertFalse(body.has("tools")); assertEquals(64, body.getAsJsonObject("options").get("num_predict").getAsInt());
             assertEquals(1024, body.getAsJsonObject("options").get("num_ctx").getAsInt());
             assertTrue(body.getAsJsonArray("messages").get(0).getAsJsonObject().get("content").getAsString().contains("Herry"));
@@ -285,6 +297,76 @@ class OllamaDialogueTest {
                     "{\"model_info\":{\"architecture\":\"x\"},\"capabilities\":[7]}"}) {
                 fixture.metadata.set(metadata); assertThrows(java.io.IOException.class, () -> fixture.model.respond(request(List.of()))); assertNull(fixture.input.get());
             }
+        }
+    }
+    @Test void unsupportedProviderVersionIsRejectedBeforePrivateFactsOrModelInspection() throws Exception {
+        try (var fixture = new Fixture()) {
+            for (String version : List.of("0.35.0", "0.34.9", "0.9.0", "0.35.1-cloud", "untrusted-version")) {
+                fixture.version.set(version);
+                var error = assertThrows(java.io.IOException.class, () -> fixture.model.respond(request(List.of(agreement("A", "ALLOWED", 0)))));
+                assertNull(fixture.inspection.get()); assertNull(fixture.input.get()); assertFalse(error.getMessage().contains(version));
+            }
+        }
+    }
+    @Test void onlyContextOverflowRetriesWithLessHistoryAndMemoryWhileKeepingCurrentQuestionAndPreferences() throws Exception {
+        try (var fixture = new Fixture()) {
+            fixture.statusForCall.set(call -> call < 3 ? 400 : 200);
+            var facts = new java.util.ArrayList<DiscordMemory.Fact>();
+            facts.add(name("A", 0)); facts.add(agreement("A", "ALLOWED", 0));
+            facts.add(new DiscordMemory.Fact(new DiscordMemory.Key(new DiscordMemory.Subject("guild", "herry", "A"),
+                    DiscordMemory.Kind.AVOID_JOKE, "", "all"), "AVOID", DiscordMemory.Evidence.EXPLICIT, "confirmed", 1000, 0, 1));
+            for (int i = 0; i < 20; i++) facts.add(new DiscordMemory.Fact(new DiscordMemory.Key(new DiscordMemory.Subject("guild", "herry", "A"),
+                    DiscordMemory.Kind.ITEM_STORY, "", "item" + i), "확인된 짧은 사연", DiscordMemory.Evidence.EXPLICIT, "confirmed", 1000, 0, 1));
+            var history = new java.util.ArrayList<ConversationTurns.Line>();
+            for (int i = 0; i < 11; i++) history.add(new ConversationTurns.Line(i % 2 == 0 ? "A" : "Herry",
+                    i % 2 == 0 ? "Herry" : "A", "이미 전달된 대화 " + i, i % 2 != 0, 1000));
+            history.add(new ConversationTurns.Line("A", "Herry", "지금 질문에만 답해 주세요", false, 1500));
+            assertEquals("반가워요.", fixture.model.respond(new ResponsePipeline.Request(request(List.of()).turn(), history, facts)));
+            assertEquals(3, fixture.inputs.size()); String profile = fixture.inputs.getFirst().getAsJsonArray("messages").get(0).toString();
+            int[] sizes = {12, 4, 0}, memorySizes = {23, 8, 3};
+            for (int i = 0; i < 3; i++) {
+                var body = fixture.inputs.get(i); var data = JsonParser.parseString(body.getAsJsonArray("messages").get(1)
+                        .getAsJsonObject().get("content").getAsString()).getAsJsonObject();
+                assertEquals(profile, body.getAsJsonArray("messages").get(0).toString());
+                assertEquals("지금 질문에만 답해 주세요", data.get("currentUtterance").getAsString());
+                assertEquals("NO_JOKES", data.get("humourStyle").getAsString()); assertEquals("허락받은 자연스러운 반말", data.get("speechStyle").getAsString());
+                assertEquals(sizes[i], data.getAsJsonArray("history").size()); assertEquals(memorySizes[i], data.getAsJsonArray("memory").size());
+                assertTrue(data.get("continuingConversation").getAsBoolean()); assertFalse(body.get("truncate").getAsBoolean()); assertFalse(body.get("shift").getAsBoolean());
+            }
+        }
+    }
+    @Test void actualNestedContextErrorHasThreeAttemptLimitAndReturnsOnlyCodeOwnedNotice() throws Exception {
+        try (var fixture = new Fixture()) {
+            var nested = new JsonObject(); var error = new JsonObject(); error.addProperty("code", 400);
+            error.addProperty("message", "request (14009 tokens) exceeds the available context size (2048 tokens), try increasing it"); nested.add("error", error);
+            var outer = new JsonObject(); outer.addProperty("error", nested.toString()); fixture.error.set(outer.toString().getBytes(StandardCharsets.UTF_8));
+            fixture.statusForCall.set(call -> 400);
+            String reply = fixture.model.respond(request(List.of()));
+            assertEquals(3, fixture.inputs.size()); assertTrue(reply.contains("한 번에 처리하지 못했어요"));
+            assertFalse(reply.contains("14009")); assertFalse(reply.contains("2048")); assertFalse(reply.contains("request"));
+        }
+    }
+    @Test void arbitraryHttpFailureIsNeitherRetriedNorExposedAndRetiredTurnCannotRetry() throws Exception {
+        for (int status : List.of(400, 503)) try (var fixture = new Fixture()) {
+            fixture.statusForCall.set(call -> status); fixture.error.set("{\"error\":\"PRIVATE_UNTRUSTED_BODY\"}".getBytes(StandardCharsets.UTF_8));
+            var error = assertThrows(java.io.IOException.class, () -> fixture.model.respond(request(List.of())));
+            assertEquals(1, fixture.inputs.size()); assertFalse(error.toString().contains("PRIVATE_UNTRUSTED_BODY"));
+        }
+        try (var fixture = new Fixture()) {
+            var current = new java.util.concurrent.atomic.AtomicBoolean(true); fixture.statusForCall.set(call -> { current.set(false); return 400; });
+            var normal = request(List.of());
+            assertThrows(java.io.IOException.class, () -> fixture.model.respond(new ResponsePipeline.Request(normal.turn(), normal.context(), normal.memory(), false, current::get)));
+            assertEquals(1, fixture.inputs.size());
+        }
+    }
+    @Test void contextRetriesShareOneDeadlineInsteadOfStartingNewTimeoutEachTime() throws Exception {
+        try (var fixture = new Fixture()) {
+            fixture.statusForCall.set(call -> {
+                try { Thread.sleep(900); } catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); }
+                return 400;
+            });
+            assertThrows(java.net.http.HttpTimeoutException.class, () -> fixture.model.respond(request(List.of())));
+            assertTrue(fixture.inputs.size() <= 3);
         }
     }
 }
