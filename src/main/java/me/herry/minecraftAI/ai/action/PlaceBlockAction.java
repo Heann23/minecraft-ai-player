@@ -3,6 +3,8 @@ package me.herry.minecraftAI.ai.action;
 import me.herry.minecraftAI.ai.AIPlayer;
 import me.herry.minecraftAI.ai.memory.MemorySystem;
 import me.herry.minecraftAI.ai.memory.MemoryType;
+import me.herry.minecraftAI.ai.perception.PerceptionSystem;
+import me.herry.minecraftAI.ai.perception.Visibility;
 import me.herry.minecraftAI.ai.team.ShaftRegistry;
 import me.herry.minecraftAI.ai.util.BlockPoint;
 import me.herry.minecraftAI.ai.util.Positions;
@@ -115,8 +117,9 @@ public final class PlaceBlockAction extends AbstractAction {
     private void remember(AIPlayer ai) {
         if (rememberAs == null) return;
         ai.getMemory().rememberPermanent(rememberAs, world.getUID(), spot, ai.getTicks());
-        // 직접 놓은 작업대는 다 쓴 뒤에 다시 챙겨 간다.
+        // 직접 놓은 작업대와 화로는 다 쓴 뒤에 다시 챙겨 간다.
         if (rememberAs == MemoryType.WORKBENCH) ai.getMemory().rememberPermanent(MemoryType.OWN_WORKBENCH, world.getUID(), spot, ai.getTicks());
+        if (rememberAs == MemoryType.FURNACE) ai.getMemory().rememberPermanent(MemoryType.OWN_FURNACE, world.getUID(), spot, ai.getTicks());
         ai.getTeam().sharePlaced(ai, rememberAs, spot);
         // 아직 거점이 없으면 처음 작업대를 놓은 자리를 임시 거점으로 삼는다. 집을 지으면 그 자리로 옮겨진다.
         if (rememberAs == MemoryType.WORKBENCH) ai.getWorldModel().ensureHome(world.getUID(), spot);
@@ -128,7 +131,7 @@ public final class PlaceBlockAction extends AbstractAction {
     }
 
     /**
-     * 발밑과 머리 칸을 제외하고, 가장 가까운 설치 가능한 자리를 찾는다.
+     * 발밑과 머리 칸을 제외하고, 눈에 보이는 가장 가까운 설치 가능한 자리를 찾는다.
      * 지나다니는 길(파 놓은 굴의 발판, 방금 걸어온 칸)에는 놓지 않는다. 좁은 계단 굴에서 윗단에 화로를 놓으면 스스로 갇힌다.
      */
     private static @Nullable BlockPoint findSpot(AIPlayer ai, BlockData data) {
@@ -143,6 +146,8 @@ public final class PlaceBlockAction extends AbstractAction {
         int px = location.getBlockX();
         int py = location.getBlockY();
         int pz = location.getBlockZ();
+        Location eye = player.getEyeLocation();
+        Visibility.Opacity opacity = PerceptionSystem.opacityOf(world);
 
         BlockPoint best = null;
         int bestDistance = Integer.MAX_VALUE;
@@ -159,6 +164,9 @@ public final class PlaceBlockAction extends AbstractAction {
                     BlockPoint cell = new BlockPoint(x, y, z);
                     if (shafts.isStep(world.getUID(), cell) || walked.contains(cell)) continue;
                     if (!isFree(world.getBlockAt(x, y, z), data)) continue;
+                    // 벽이나 모퉁이 너머의 빈칸에는 놓지 않는다. 실제 플레이어는 보이는 자리에만 놓을 수 있고,
+                    // 그런 자리에 놓은 작업대나 화로는 손이 닿지 않아서 쓰지도 못한다.
+                    if (!Visibility.canSeePoint(opacity, eye.getX(), eye.getY(), eye.getZ(), x + 0.5, y + 0.5, z + 0.5)) continue;
                     best = cell;
                     bestDistance = distance;
                 }

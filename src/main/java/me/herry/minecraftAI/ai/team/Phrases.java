@@ -30,6 +30,7 @@ public final class Phrases {
             case MINE_DIAMOND -> "다이아몬드다! 캐러 갈게요.";
             case SMELT_IRON -> "화로에서 철을 제련할게요.";
             case PACK_UP_TABLE -> "작업대는 챙겨 갈게요.";
+            case PACK_UP_FURNACE -> "화로는 챙겨 갈게요.";
             case CLEAN_INVENTORY -> "가방이 꽉 찼어요. 필요 없는 건 버릴게요.";
             case LOOT_CHEST -> "전리품 상자가 있어요! 열어 볼게요.";
             case STOCK_FOOD -> "먹을 것을 모아 둘게요.";
@@ -45,6 +46,8 @@ public final class Phrases {
             case FETCH_ITEMS -> "필요한 재료가 집 상자에 있어요. 꺼내 올게요.";
             // 무엇을 만드는지, 음식을 어떻게 구하는지는 계획을 세울 때 구체적으로 말한다.
             case IDLE, PICKUP_ITEMS, EXPLORE, CRAFT_TOOL, CRAFT_WORK_TOOL, FIND_FOOD, SHARE_FOOD, COOK_FOOD -> null;
+            // 화로에 넣어 둔 것을 꺼내러 가는 것은 굽기 시작할 때 이미 말한 일의 마무리다.
+            case TEND_FURNACE -> null;
         };
     }
 
@@ -81,6 +84,8 @@ public final class Phrases {
             case SMELT_IRON -> "철을 제련하는";
             case COOK_FOOD -> "고기를 굽는";
             case PACK_UP_TABLE -> "작업대를 챙기는";
+            case TEND_FURNACE -> "화로에 넣어 둔 것을 챙기는";
+            case PACK_UP_FURNACE -> "화로를 챙기는";
             case EXPLORE -> "주변을 탐험하는";
         };
     }

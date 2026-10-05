@@ -15,6 +15,8 @@ public enum MemoryType {
     // 이 AI 가 직접 놓은 작업대. 다 쓰고 나면 다시 캐서 들고 다닌다. 남이 놓은 작업대는 가져가지 않는다.
     OWN_WORKBENCH(true),
     FURNACE(true),
+    // 이 AI 가 직접 놓은 화로. 더 구울 것이 없으면 다시 캐서 들고 다닌다. 집 안에 들인 화로와 남이 놓은 화로는 가져가지 않는다.
+    OWN_FURNACE(true),
     BED(true),
     DANGER_PLACE(true),
     // 아직 아무도 열지 않은 구조물의 전리품 상자

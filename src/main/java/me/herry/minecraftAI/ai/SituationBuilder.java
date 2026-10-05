@@ -20,6 +20,7 @@ import me.herry.minecraftAI.ai.perception.Threat;
 import me.herry.minecraftAI.ai.perception.ThreatType;
 import me.herry.minecraftAI.ai.plan.BuildPlans;
 import me.herry.minecraftAI.ai.plan.CraftPlans;
+import me.herry.minecraftAI.ai.plan.FurnacePlans;
 import me.herry.minecraftAI.ai.plan.GatherPlans;
 import me.herry.minecraftAI.ai.plan.HomePlans;
 import me.herry.minecraftAI.ai.plan.Progression;
@@ -126,6 +127,7 @@ final class SituationBuilder {
         situation.readyFood = situation.foodCount - situation.rawFood;
         situation.canCook = situation.rawFood > 0 && CraftPlans.canCook(ai);
         situation.ownTableNearby = CraftPlans.ownTableNearby(ai) != null;
+        FurnacePlans.assess(ai, situation);
 
         fillProgress(ai, inventory, situation);
         // 거점과 상자에 대한 판단은 "지금 무엇이 부족한지"를 알아야 하므로 진행 상황 다음에 채운다.

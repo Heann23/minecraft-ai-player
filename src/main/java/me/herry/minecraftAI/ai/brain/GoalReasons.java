@@ -50,6 +50,8 @@ public final class GoalReasons {
             case MINE_DIAMOND -> "캘 수 있는 다이아몬드 광석을 발견해서요";
             case SMELT_IRON -> "철 원석이 " + s.rawIron + "개 모여서 주괴로 구울 차례예요";
             case COOK_FOOD -> "날고기 " + s.rawFood + "개를 구워서 더 든든한 음식으로 만들려고요";
+            case TEND_FURNACE -> tendReason(s);
+            case PACK_UP_FURNACE -> "더 구울 것이 없어서 화로를 챙겨 가려고요";
             case STOCK_FOOD -> s.preyNearby ? "음식이 " + s.foodCount + "개뿐인데 사냥감이 보여서 미리 모아 두려고요"
                     : "땅속에는 사냥감이 없어서, 내려가기 전에 음식을 챙기려고요 (지금 " + s.foodCount + "개)";
             case BUILD_SHELTER -> s.shelterInProgress ? "짓던 집을 마저 지으려고요 (남은 블록 " + s.buildBlocksNeeded + "개)"
@@ -65,6 +67,12 @@ public final class GoalReasons {
         if (s.drowning) return "숨이 얼마 안 남아서 물 밖으로 나가야 해요";
         if (s.combat == CombatSystem.Decision.FLEE) return "지금 장비와 체력으로는 감당하기 어려운 몬스터가 가까이 있어요";
         return "위험해서 피해야 해요";
+    }
+
+    private static String tendReason(Situation s) {
+        if (s.furnaceDone) return "화로에 넣어 둔 것이 다 구워져서 꺼내려고요";
+        if (s.furnaceTicksLeft <= GoalSystem.FURNACE_WAIT_TICKS) return "화로에 넣어 둔 것이 곧 다 구워져서 곁에서 기다리고 있어요";
+        return "화로에 넣어 둔 것을 두고 너무 멀리 와서, 다 구워지기 전에 화로 쪽으로 돌아가려고요";
     }
 
     private static String ironReason(Situation s, String target) {

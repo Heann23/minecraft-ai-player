@@ -1,6 +1,7 @@
 package me.herry.minecraftAI.ai.action;
 
 import me.herry.minecraftAI.ai.AIPlayer;
+import me.herry.minecraftAI.ai.crafting.FurnaceJob;
 import me.herry.minecraftAI.ai.memory.MemorySystem;
 import me.herry.minecraftAI.ai.memory.MemoryType;
 import me.herry.minecraftAI.ai.util.BlockPoint;
@@ -219,6 +220,12 @@ public final class BreakBlockAction extends AbstractAction {
             fail("unbreakable block");
             return;
         }
+        // 넣어 둔 것이 있는 화로는 캐지 않는다. 캐면 굽던 것이 바닥에 쏟아진다.
+        FurnaceJob furnaceJob = ai.getFurnaceJob();
+        if (furnaceJob != null && furnaceJob.isAt(world.getUID(), next)) {
+            fail("furnace in use");
+            return;
+        }
         Base home = ai.getWorldModel().homeIn(world.getUID());
         if (!homeAllowed && home != null && home.isInsideBuilding(world.getUID(), next)) {
             fail("part of home");
@@ -297,5 +304,6 @@ public final class BreakBlockAction extends AbstractAction {
         memory.forget(MemoryType.WORKBENCH, world.getUID(), target);
         memory.forget(MemoryType.OWN_WORKBENCH, world.getUID(), target);
         memory.forget(MemoryType.FURNACE, world.getUID(), target);
+        memory.forget(MemoryType.OWN_FURNACE, world.getUID(), target);
     }
 }

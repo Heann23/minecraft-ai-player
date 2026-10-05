@@ -1,10 +1,13 @@
 package me.herry.minecraftAI.ai.plan;
 
 import me.herry.minecraftAI.ai.util.BlockPoint;
+import org.bukkit.block.BlockFace;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
 import java.util.Set;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -91,5 +94,57 @@ class DigRulesTest {
     void staysDownWhileMiningDeepUnderground() {
         assertFalse(DigRules.shouldDigOut(true, false, false));
         assertFalse(DigRules.shouldDigOut(true, true, true));
+    }
+
+    // 회귀: 다이아몬드를 찾아 y -45 까지 파 내려간 자리에서 더 내려갈 수 없었다 (목표는 y -53, 여유 6).
+    // 목표 높이 근처가 아니라는 이유로 옆으로도 파지 않아서, 갈 길 없는 탐험만 되풀이하다가 그 자리에서 멈췄다.
+    @Test
+    void tunnelsSidewaysWhenItCannotGoDeeperUnderground() {
+        assertTrue(DigRules.shouldTunnelSideways(-45, -53, 6, true));
+    }
+
+    @Test
+    void tunnelsAtTheOreLevel() {
+        assertTrue(DigRules.shouldTunnelSideways(-47, -53, 6, true));
+        assertTrue(DigRules.shouldTunnelSideways(-53, -53, 6, true));
+        // 얕은 곳에서도 목표 높이 근처면 판다 (철은 y 24 근처).
+        assertTrue(DigRules.shouldTunnelSideways(30, 24, 8, false));
+    }
+
+    // 회귀: 화로가 동쪽으로 2칸, 남쪽으로 2칸에 있고 동쪽은 지나온 계단 밑이라 팔 수 없었다.
+    // 옆으로 비킬 때 북쪽(방금 판 굴)부터 골라서, 판 굴을 왔다 갔다 하기만 하고 화로에 닿지 못했다.
+    @Test
+    void sidestepsTowardTheTargetFirst() {
+        assertEquals(List.of(BlockFace.EAST, BlockFace.SOUTH, BlockFace.NORTH), DigRules.sidesToward(BlockFace.EAST, 2, 2));
+        assertEquals(List.of(BlockFace.EAST, BlockFace.NORTH, BlockFace.SOUTH), DigRules.sidesToward(BlockFace.EAST, 2, -1));
+        assertEquals(List.of(BlockFace.SOUTH, BlockFace.WEST, BlockFace.EAST), DigRules.sidesToward(BlockFace.SOUTH, -1, 3));
+        assertEquals(List.of(BlockFace.NORTH, BlockFace.EAST, BlockFace.WEST), DigRules.sidesToward(BlockFace.NORTH, 1, -3));
+        // 옆으로는 남은 거리가 없으면 어느 쪽이든 같다. 세 방향을 모두 시도하기만 하면 된다.
+        assertEquals(3, DigRules.sidesToward(BlockFace.WEST, -4, 0).size());
+    }
+
+    // 회귀: 철을 찾아 y 24 에서 굴을 파다가 굴이 집(y 72) 아래에 이르자, "집에서 떨어진 뒤에 판다"며 지상의 문밖으로
+    // 걸어 나가려 했다. 갈 길이 없어서 같은 실패를 되풀이하다가 그 자리에서 멈췄다.
+    @Test
+    void aDeepTunnelUnderTheHouseIsNotAtTheHouse() {
+        assertFalse(DigRules.isAtBuilding(4, 24 - 72, -2, 4));
+        assertFalse(DigRules.isAtBuilding(0, -5, 0, 4));
+    }
+
+    @Test
+    void standingInOrNextToTheHouseIsAtTheHouse() {
+        assertTrue(DigRules.isAtBuilding(0, 0, 0, 4));
+        assertTrue(DigRules.isAtBuilding(4, 1, -4, 4));
+        // 집 바로 밑의 얕은 자리도 집에 붙어 있는 것으로 본다.
+        assertTrue(DigRules.isAtBuilding(1, -3, 1, 4));
+        assertFalse(DigRules.isAtBuilding(5, 0, 0, 4));
+        assertFalse(DigRules.isAtBuilding(0, 0, -5, 4));
+    }
+
+    // 지상에서는 옆으로 파지 않고 자리를 옮겨서 다시 내려간다.
+    @Test
+    void doesNotTrenchAcrossTheSurface() {
+        assertFalse(DigRules.shouldTunnelSideways(64, 24, 8, false));
+        assertFalse(DigRules.shouldTunnelSideways(64, -53, 6, false));
     }
 }

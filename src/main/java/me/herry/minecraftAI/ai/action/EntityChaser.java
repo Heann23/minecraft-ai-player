@@ -22,12 +22,24 @@ final class EntityChaser {
     private static final double DIRECT_RANGE = 2.5;
     private static final int MAX_DIRECT_TICKS = 40;
     private static final double CLOSE_RADIUS = 1.0;
+    private static final double SPRINT_GAP = 1.0;
+    private static final int MIN_SPRINT_FOOD = 6;
 
+    // 싸울 상대를 쫓는 것처럼 급한 추격인지
+    private final boolean urgent;
     private BlockPoint lastTarget;
     private int sinceRepath;
     private int failures;
     private int directTicks;
     private boolean closeApproach;
+
+    EntityChaser() {
+        this(false);
+    }
+
+    EntityChaser(boolean urgent) {
+        this.urgent = urgent;
+    }
 
     /**
      * 호출하는 쪽에서 대상이 유효하고 같은 월드에 있는지 먼저 확인해야 한다.
@@ -57,6 +69,8 @@ final class EntityChaser {
                 AIBody body = ai.getBody();
                 body.lookAt(location.getX(), location.getY() + target.getHeight() * 0.5, location.getZ());
                 body.inputMove(1.0F, 0.0F);
+                // 상대가 물러나고 있으면 걸어서는 거리가 줄지 않는다. 한 걸음 넘게 남았으면 달려서 붙는다.
+                body.inputSprint(distance > stopDistance + SPRINT_GAP && ai.getPlayer().getFoodLevel() > MIN_SPRINT_FOOD);
                 body.inputJump(ai.getPlayer().isInWater() || (body.isGrounded() && body.isBlockedHorizontally()));
                 return Result.CHASING;
             }
@@ -74,6 +88,8 @@ final class EntityChaser {
         if (!busy || (following && targetMoved && sinceRepath >= REPATH_INTERVAL)) {
             double radius = closeApproach ? CLOSE_RADIUS : Math.max(1.5, stopDistance - 0.5);
             navigation.navigateTo(PathGoal.arrive(targetBlock, radius));
+            // 움직이는 상대는 경로의 끝이 계속 달아난다. 끝에서 속도를 줄이지 않고 바로 앞까지 달린다.
+            navigation.setChasing(urgent);
             lastTarget = targetBlock;
             sinceRepath = 0;
         }
