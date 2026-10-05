@@ -76,7 +76,8 @@ public final class DiscordVoiceConnection extends ListenerAdapter implements Dis
             var grounded = new GroundedGameDialogue(dialogue,
                     game == null ? () -> new DiscordGameState.View(DiscordGameState.Code.NOT_CONFIGURED, null) : game::view,
                     configuration.discord(), System::currentTimeMillis);
-            session = new DiscordSession(configuration.discord(), store, createdSpeech, grounded, createdSpeech, diagnostic,
+            var personal = new GroundedPersonalDialogue(grounded, configuration.discord(), System::currentTimeMillis);
+            session = new DiscordSession(configuration.discord(), store, createdSpeech, personal, createdSpeech, diagnostic,
                     System::currentTimeMillis, () -> TimeUnit.NANOSECONDS.toMillis(System.nanoTime()), true, configuration.capturePolicy(), configuration.greetOnJoin());
             speech = createdSpeech; audio = new JdaAudioAdapter(session, configuration.minimumRms(), diagnostic);
         } catch (Exception | LinkageError failed) {
