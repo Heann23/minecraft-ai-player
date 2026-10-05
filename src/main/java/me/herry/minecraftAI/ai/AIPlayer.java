@@ -83,8 +83,8 @@ public final class AIPlayer {
         this.services = services;
         this.skin = skin;
         this.perception = new PerceptionSystem(body, services.config(), services.budget());
-        this.navigation = new NavigationSystem(body, services.config(), this::debug, services.budget(), profiler);
         this.inventory = new InventorySystem(body);
+        this.navigation = new NavigationSystem(body, services.config(), this::debug, services.budget(), profiler, inventory);
         this.brain = new AIBrain(this, services.planner());
     }
 

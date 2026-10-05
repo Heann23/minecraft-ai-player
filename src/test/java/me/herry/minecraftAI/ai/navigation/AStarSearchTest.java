@@ -203,4 +203,60 @@ class AStarSearchTest {
 
         assertEquals(AStarSearch.State.FOUND, run(search));
     }
+
+    // 폐광의 통로처럼 거미줄로 막힌 길밖에 없으면 거미줄을 지나간다 (베어 내거나 천천히 걸어서).
+    // 사용자가 본 문제: 거미줄을 "위험한 칸"으로만 봐서 길이 없다고 판단했다.
+    @Test
+    void goesThroughCobwebWhenItIsTheOnlyWay() {
+        GridTerrain terrain = new GridTerrain();
+        // z = 0 인 한 줄만 뚫린 통로를 만들고, x = 5 를 발 높이와 머리 높이 모두 거미줄로 막는다.
+        for (int x = -1; x <= 11; x++) {
+            terrain.column(x, 1, Y, Y + 2, BlockClass.SOLID);
+            terrain.column(x, -1, Y, Y + 2, BlockClass.SOLID);
+            terrain.set(x, Y + 2, 0, BlockClass.SOLID);
+        }
+        terrain.column(-1, 0, Y, Y + 1, BlockClass.SOLID);
+        terrain.column(11, 0, Y, Y + 1, BlockClass.SOLID);
+        terrain.column(5, 0, Y, Y + 1, BlockClass.WEB);
+
+        AStarSearch search = search(terrain, new BlockPoint(0, Y, 0), PathGoal.arrive(new BlockPoint(10, Y, 0), 0.5));
+
+        assertEquals(AStarSearch.State.FOUND, run(search));
+        assertTrue(passesThrough(search.getPath(), 5, 0));
+    }
+
+    @Test
+    void walksAroundCobwebWhenTheDetourIsShort() {
+        GridTerrain terrain = new GridTerrain();
+        terrain.column(5, 0, Y, Y + 1, BlockClass.WEB);
+
+        AStarSearch search = search(terrain, new BlockPoint(0, Y, 0), PathGoal.arrive(new BlockPoint(10, Y, 0), 0.5));
+
+        assertEquals(AStarSearch.State.FOUND, run(search));
+        assertFalse(passesThrough(search.getPath(), 5, 0), "one step aside is cheaper than a cobweb");
+    }
+
+    // 거미줄 한가운데에 들어가 있어도 나갈 길을 찾는다. 예전에는 사방이 위험한 칸이라 갈 곳이 없다고 판단했다.
+    @Test
+    void findsAWayOutFromInsideCobwebs() {
+        GridTerrain terrain = new GridTerrain();
+        for (int x = -2; x <= 2; x++) {
+            for (int z = -2; z <= 2; z++) terrain.column(x, z, Y, Y + 1, BlockClass.WEB);
+        }
+
+        AStarSearch search = search(terrain, new BlockPoint(0, Y, 0), PathGoal.arrive(new BlockPoint(8, Y, 0), 0.5));
+
+        assertEquals(AStarSearch.State.FOUND, run(search));
+        assertEquals(new BlockPoint(8, Y, 0), search.getPath().get(search.getPath().size() - 1));
+    }
+
+    // 거미줄은 딛고 설 바닥이 되지 못한다.
+    @Test
+    void cannotStandOnCobweb() {
+        GridTerrain terrain = new GridTerrain();
+        terrain.set(3, Y - 1, 0, BlockClass.WEB);
+
+        assertFalse(AStarSearch.isStandable(terrain, 3, Y, 0));
+        assertTrue(AStarSearch.isStandable(terrain, 2, Y, 0));
+    }
 }
