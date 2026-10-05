@@ -173,6 +173,7 @@ public final class AIPlayer {
 
     public void onAttacked(Entity attacker) {
         memory.recordAttack(getWorldId(), getPosition(), attacker.getUniqueId(), ticks);
+        if (attacker instanceof Enemy) combatMemory.onHit(ticks);
         brain.onAttacked();
         // 몬스터에게 맞았으면 근처의 동료에게 도움을 청한다 (동료가 있을 때만).
         if (state == AIState.RUNNING && attacker instanceof LivingEntity living && attacker instanceof Enemy) {

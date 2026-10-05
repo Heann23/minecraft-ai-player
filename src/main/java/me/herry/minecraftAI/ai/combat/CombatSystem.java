@@ -83,6 +83,21 @@ public final class CombatSystem {
     }
 
     /**
+     * 교전 범위 안의 몬스터가 보이지 않는 것까지 모두 덤비면 감당할 수 없는지.
+     * 동굴에서는 보이는 한두 마리를 잡으러 나서는 순간 그 주변의 몬스터가 모두 이쪽을 보고 몰려온다.
+     * 땅속에서 이 판단이 서면 싸우러 나서지 않고, 몬스터가 아직 멀리 있을 때 물러나 숨는다.
+     *
+     * @param nearby 보이는지와 상관없이 주변에서 감지된 몬스터 전부
+     */
+    public boolean isOutnumbered(double health, double maxHealth, double weaponPower, List<Hostile> nearby) {
+        double threat = 0.0;
+        for (Hostile hostile : nearby) {
+            if (hostile.type().isHostileMob() && hostile.distance() <= engageRange) threat += hostile.type().danger();
+        }
+        return threat > strength(health, maxHealth, weaponPower);
+    }
+
+    /**
      * 방패 없이도 크리퍼를 상대할 수 있는지. 한 대 치고, 부풀면 뒷걸음으로 물러났다가, 부풀기를 멈추면 다시 친다.
      *
      * @param weaponPower            갑옷과 허기를 반영하지 않은 무기 자체의 공격력

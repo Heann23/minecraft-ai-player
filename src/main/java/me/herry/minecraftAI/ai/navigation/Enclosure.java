@@ -55,7 +55,8 @@ public final class Enclosure {
     }
 
     /**
-     * 그 블록들을 캐면 새로 이어지는 바깥의 빈칸들. 이미 내 공간인 칸이나 함께 캐는 칸은 바깥이 아니다.
+     * 그 블록들을 캐면 새로 이어지는 바깥의 빈칸들. 이미 내 공간인 칸은 바깥이 아니다.
+     * 캐려고 꼽은 칸이라도 이미 비어 있고 내 공간이 아니면 바깥이다 (계단 한 단의 머리 칸이 옆 동굴의 일부인 경우 등).
      */
     public static List<BlockPoint> openings(TerrainView terrain, Set<BlockPoint> inside, Collection<BlockPoint> toBreak) {
         List<BlockPoint> outside = new ArrayList<>();
@@ -63,7 +64,7 @@ public final class Enclosure {
             if (terrain.classify(block.x(), block.y(), block.z()) != BlockClass.SOLID) continue;
             for (int[] side : NEIGHBORS) {
                 BlockPoint next = block.offset(side[0], side[1], side[2]);
-                if (inside.contains(next) || toBreak.contains(next)) continue;
+                if (inside.contains(next) || outside.contains(next)) continue;
                 if (terrain.classify(next.x(), next.y(), next.z()) != BlockClass.SOLID) outside.add(next);
             }
         }
