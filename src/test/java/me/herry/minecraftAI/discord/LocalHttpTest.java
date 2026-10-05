@@ -55,14 +55,17 @@ class LocalHttpTest {
     @Test void deadlineCoversBodyEvenAfterHeadersArrive() throws Exception {
         var entered = new CountDownLatch(1); var release = new CountDownLatch(1);
         var server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/ready", exchange -> { exchange.sendResponseHeaders(200, -1); exchange.close(); });
         server.createContext("/slow", exchange -> {
             exchange.sendResponseHeaders(200, 0); exchange.getResponseBody().write(1); exchange.getResponseBody().flush(); entered.countDown();
-            try { release.await(3, TimeUnit.SECONDS); } catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); }
+            try { release.await(10, TimeUnit.SECONDS); } catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); }
             finally { exchange.close(); }
         }); server.start();
         try (var http = new LocalHttp(); var worker = Executors.newSingleThreadExecutor()) {
-            var result = worker.submit(() -> http.post(endpoint(server, "/slow"), "application/json", INPUT, Duration.ofMillis(300), 100));
-            await(entered); var error = assertThrows(java.util.concurrent.ExecutionException.class, () -> result.get(2, TimeUnit.SECONDS));
+            // Establish the client's connection before measuring a stalled response body.
+            http.post(endpoint(server, "/ready"), "application/json", INPUT, DEADLINE, 100);
+            var result = worker.submit(() -> http.post(endpoint(server, "/slow"), "application/json", INPUT, Duration.ofSeconds(1), 100));
+            await(entered); var error = assertThrows(java.util.concurrent.ExecutionException.class, () -> result.get(3, TimeUnit.SECONDS));
             assertInstanceOf(java.net.http.HttpTimeoutException.class, error.getCause());
         } finally { release.countDown(); server.stop(0); }
     }
