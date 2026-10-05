@@ -8,11 +8,14 @@ import java.util.function.LongSupplier;
 /** Private, bounded text context per user. Reuses dialogue and confirmed memory; no speech or game access. */
 public final class DiscordTextConversation implements AutoCloseable {
     public record Reply(ConversationTurns.Token turn, String text) {}
+    private record Work(ConversationTurns turns, ConversationTurns.Token token,
+                        CompletableFuture<Reply> result, FutureTask<Void> task) {}
     private final DiscordSettings settings;
     private final DiscordMemoryStore store;
     private final ResponsePipeline.Model model;
     private final LongSupplier clock;
     private final LinkedHashMap<String, ConversationTurns> contexts = new LinkedHashMap<>();
+    private final LinkedHashMap<String, Work> work = new LinkedHashMap<>();
     private final Set<CompletableFuture<Reply>> pending = ConcurrentHashMap.newKeySet();
     private final ThreadPoolExecutor worker = new ThreadPoolExecutor(1, 1, 0, TimeUnit.MILLISECONDS,
             new ArrayBlockingQueue<>(4), task -> { var thread = new Thread(task, "MinecraftAI-discord-text"); thread.setDaemon(true); return thread; });
@@ -28,15 +31,24 @@ public final class DiscordTextConversation implements AutoCloseable {
             throw new IllegalArgumentException("text conversation input");
         var turns = contexts.get(user);
         if (turns == null) {
-            if (contexts.size() == 32) { var oldest = contexts.firstEntry(); contexts.remove(oldest.getKey()); oldest.getValue().close(); }
+            if (contexts.size() == 32) { var oldest = contexts.firstEntry(); forget(oldest.getKey()); }
             turns = new ConversationTurns(clock, settings.followupMillis(), settings.contextLines()); turns.join(user); contexts.put(user, turns);
         }
         var accepted = turns.accept(user, interaction, text.strip(), ConversationTurns.Address.CHARACTER, false);
         if (accepted.token() == null) return CompletableFuture.failedFuture(new IllegalStateException("duplicate text input"));
-        var result = new CompletableFuture<Reply>(); pending.add(result); result.whenComplete((reply, error) -> pending.remove(result));
+        cancelWork(user);
+        var result = new CompletableFuture<Reply>(); pending.add(result);
         var conversation = turns;
-        try { worker.execute(() -> generate(user, conversation, accepted.token(), result)); }
-        catch (RejectedExecutionException full) { turns.finish(accepted.token()); result.completeExceptionally(new IllegalStateException("text conversation busy")); }
+        var task = new FutureTask<Void>(() -> { generate(user, conversation, accepted.token(), result); return null; });
+        work.put(user, new Work(turns, accepted.token(), result, task));
+        result.whenComplete((reply, error) -> {
+            pending.remove(result);
+            if (result.isCancelled()) cancel(user, conversation, accepted.token(), result);
+        });
+        try { worker.execute(task); }
+        catch (RejectedExecutionException full) {
+            work.remove(user); turns.finish(accepted.token()); result.completeExceptionally(new IllegalStateException("text conversation busy"));
+        }
         return result;
     }
     private void generate(String user, ConversationTurns turns, ConversationTurns.Token token, CompletableFuture<Reply> result) {
@@ -51,6 +63,18 @@ public final class DiscordTextConversation implements AutoCloseable {
             result.complete(new Reply(token, answer));
         } catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); turns.finish(token); result.cancel(false); }
         catch (Exception failure) { turns.finish(token); result.completeExceptionally(new IllegalStateException("text conversation unavailable")); }
+        finally { synchronized (this) { var active = work.get(user); if (active != null && active.result() == result) work.remove(user); } }
+    }
+    private synchronized void cancel(String user, ConversationTurns turns, ConversationTurns.Token token, CompletableFuture<Reply> result) {
+        turns.finish(token);
+        var active = work.get(user);
+        if (active != null && active.result() == result) cancelWork(user);
+    }
+    private void cancelWork(String user) {
+        var active = work.remove(user);
+        if (active == null) return;
+        active.turns().finish(active.token()); active.task().cancel(true); active.result().cancel(false);
+        worker.purge();
     }
     public synchronized boolean current(Reply reply) {
         var turns = contexts.get(reply.turn().userId()); return !closed && turns != null && turns.isCurrent(reply.turn());
@@ -63,7 +87,10 @@ public final class DiscordTextConversation implements AutoCloseable {
     public synchronized void discard(Reply reply) {
         var turns = contexts.get(reply.turn().userId()); if (turns != null) turns.finish(reply.turn());
     }
-    public synchronized void forget(String user) { var turns = contexts.remove(user); if (turns != null) turns.close(); }
-    public synchronized void reset() { contexts.values().forEach(ConversationTurns::close); contexts.clear(); }
+    public synchronized void forget(String user) { var turns = contexts.remove(user); if (turns != null) turns.close(); cancelWork(user); }
+    public synchronized void reset() {
+        contexts.values().forEach(ConversationTurns::close); contexts.clear();
+        for (String user : java.util.List.copyOf(work.keySet())) cancelWork(user);
+    }
     @Override public synchronized void close() { if (closed) return; closed = true; reset(); worker.shutdownNow(); pending.forEach(reply -> reply.cancel(false)); }
 }

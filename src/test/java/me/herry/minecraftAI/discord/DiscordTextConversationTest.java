@@ -74,4 +74,91 @@ class DiscordTextConversationTest {
             assertEquals("text conversation busy", failure.getCause().getMessage());
         } finally { release.countDown(); }
     }
+    @Test void newQuestionInterruptsOldInferenceAndOnlyDeliveredAnswerEntersContext() throws Exception {
+        var entered = new CountDownLatch(1); var interrupted = new CountDownLatch(1);
+        var input = new AtomicReference<ResponsePipeline.Request>();
+        try (var store = store(); var text = new DiscordTextConversation(settings(), store, request -> {
+            input.set(request);
+            if (DialogueContext.currentInput(request).equals("첫 질문")) {
+                entered.countDown();
+                try { new CountDownLatch(1).await(); }
+                catch (InterruptedException cancelled) { interrupted.countDown(); throw cancelled; }
+            }
+            return "새 답변";
+        }, () -> 1000)) {
+            var old = text.reply("A", "첫 질문", "one"); assertTrue(entered.await(3, TimeUnit.SECONDS));
+            var fresh = text.reply("A", "새 질문", "two").get(3, TimeUnit.SECONDS);
+            assertTrue(interrupted.await(3, TimeUnit.SECONDS)); assertTrue(old.isCancelled());
+            assertTrue(text.current(fresh)); assertEquals("새 질문", DialogueContext.currentInput(input.get()));
+            assertFalse(input.get().context().stream().anyMatch(ConversationTurns.Line::assistant)); text.submitted(fresh);
+            text.reply("A", "후속 질문", "three").get(3, TimeUnit.SECONDS);
+            assertEquals(1, input.get().context().stream().filter(ConversationTurns.Line::assistant).count());
+        }
+    }
+    @Test void cancellingQueuedQuestionReleasesCapacityBeforeBlockedInferenceFinishes() throws Exception {
+        var entered = new CountDownLatch(1); var release = new CountDownLatch(1);
+        try (var store = store(); var text = new DiscordTextConversation(settings(), store, request -> {
+            if (request.turn().userId().equals("A")) { entered.countDown(); release.await(); }
+            return "답변";
+        }, () -> 1000)) {
+            text.reply("A", "질문", "one"); assertTrue(entered.await(3, TimeUnit.SECONDS));
+            var queued = text.reply("B", "이전 질문", "one");
+            for (String user : java.util.List.of("C", "D", "E")) text.reply(user, "질문", "one");
+            assertTrue(queued.cancel(true));
+            var replacement = text.reply("B", "새 질문", "two"); assertFalse(replacement.isCompletedExceptionally());
+            release.countDown(); assertTrue(text.current(replacement.get(3, TimeUnit.SECONDS)));
+        } finally { release.countDown(); }
+    }
+    @Test void forgetResetAndEvictionInterruptActiveWork() throws Exception {
+        for (String operation : java.util.List.of("forget", "reset", "evict")) {
+            var entered = new CountDownLatch(1); var interrupted = new CountDownLatch(1);
+            try (var store = store(); var text = new DiscordTextConversation(settings(), store, request -> {
+                if (request.turn().userId().equals("A")) {
+                    entered.countDown();
+                    try { new CountDownLatch(1).await(); }
+                    catch (InterruptedException cancelled) { interrupted.countDown(); throw cancelled; }
+                }
+                return "답변";
+            }, () -> 1000)) {
+                var old = text.reply("A", "질문", "one"); assertTrue(entered.await(3, TimeUnit.SECONDS));
+                switch (operation) {
+                    case "forget" -> text.forget("A");
+                    case "reset" -> text.reset();
+                    case "evict" -> { for (int i = 0; i < 32; i++) text.reply("user" + i, "질문", "one"); }
+                }
+                assertTrue(old.isCancelled(), operation); assertTrue(interrupted.await(3, TimeUnit.SECONDS), operation);
+            }
+        }
+    }
+    @Test void callerCancellationRetiresTokenAndInterruptsInference() throws Exception {
+        var entered = new CountDownLatch(1); var interrupted = new CountDownLatch(1);
+        var input = new AtomicReference<ResponsePipeline.Request>();
+        try (var store = store(); var text = new DiscordTextConversation(settings(), store, request -> {
+            input.set(request); entered.countDown();
+            try { new CountDownLatch(1).await(); return "늦은 답변"; }
+            catch (InterruptedException cancelled) { interrupted.countDown(); throw cancelled; }
+        }, () -> 1000)) {
+            var result = text.reply("A", "질문", "one"); assertTrue(entered.await(3, TimeUnit.SECONDS));
+            assertTrue(result.cancel(true)); assertTrue(interrupted.await(3, TimeUnit.SECONDS));
+            assertFalse(input.get().current().getAsBoolean());
+        }
+    }
+    @Test void providerIgnoringInterruptionCannotOverlapOrPublishRetiredReply() throws Exception {
+        var entered = new CountDownLatch(1); var release = new CountDownLatch(1);
+        var secondEntered = new CountDownLatch(1);
+        try (var store = store(); var text = new DiscordTextConversation(settings(), store, request -> {
+            if (DialogueContext.currentInput(request).equals("첫 질문")) {
+                entered.countDown();
+                boolean done = false;
+                while (!done) try { release.await(); done = true; } catch (InterruptedException ignored) { /* Deliberately stubborn test provider. */ }
+                assertFalse(request.current().getAsBoolean()); return "폐기할 답변";
+            }
+            secondEntered.countDown(); return "새 답변";
+        }, () -> 1000)) {
+            var old = text.reply("A", "첫 질문", "one"); assertTrue(entered.await(3, TimeUnit.SECONDS));
+            var fresh = text.reply("A", "새 질문", "two"); assertTrue(old.isCancelled());
+            assertEquals(1, secondEntered.getCount()); assertFalse(fresh.isDone());
+            release.countDown(); assertEquals("새 답변", fresh.get(3, TimeUnit.SECONDS).text());
+        } finally { release.countDown(); }
+    }
 }

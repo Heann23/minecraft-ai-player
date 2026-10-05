@@ -179,7 +179,7 @@ public final class DiscordVoiceConnection extends ListenerAdapter implements Dis
         if (stopped.get() || event.getGuild() == null || !event.getGuild().getId().equals(configuration.discord().guildId())) {
             event.reply("이 서버에서는 해리 대화를 관리할 수 없어요.").setEphemeral(true).queue(ignored -> {}, failed -> diagnostic.accept("discord-command-reply-failed")); return;
         }
-        event.deferReply(true).queue(hook -> event.getGuild().retrieveMemberById(event.getUser().getId()).timeout(5, TimeUnit.SECONDS).queue(member -> {
+        event.deferReply(true).queue(hook -> event.getGuild().retrieveMemberById(event.getUser().getId()).useCache(false).timeout(5, TimeUnit.SECONDS).queue(member -> {
             if (stopped.get() || !DiscordVoiceCommands.allowed(configuration.discord().guildId(), event.getGuild().getId(), event.getSubcommandName(), member.hasPermission(Permission.MANAGE_SERVER))) {
                 hook.editOriginal("채널 제어에는 서버 관리 권한이 필요해요. 내 기억은 본인만 수정할 수 있어요.").queue(ignored -> {}, failed -> diagnostic.accept("discord-command-reply-failed")); return;
             }
@@ -191,7 +191,8 @@ public final class DiscordVoiceConnection extends ListenerAdapter implements Dis
                                 hook.editOriginal("대화를 처리하지 못했어요. 잠시 뒤 다시 시도해 주세요.").queue(ignored -> {}, failure -> diagnostic.accept("discord-command-reply-failed"));
                                 return;
                             }
-                            hook.editOriginal(reply.text()).setAllowedMentions(Set.of()).queue(sent -> session.textSubmitted(reply), failure -> {
+                            hook.editOriginal(reply.text()).setAllowedMentions(Set.of())
+                                    .setCheck(() -> !stopped.get() && session.textCurrent(reply)).queue(sent -> session.textSubmitted(reply), failure -> {
                                 session.textDiscard(reply); diagnostic.accept("discord-command-reply-failed");
                             });
                         });
