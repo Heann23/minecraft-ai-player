@@ -174,6 +174,12 @@ public final class ConversationTurns implements AutoCloseable {
     }
 
     public synchronized List<Line> context() { return List.copyOf(context); }
+    /** A private deletion request keeps its delivery token and deduplication, but no previous transcript. */
+    public synchronized boolean clearContextFor(Token token) {
+        if (!isCurrent(token)) return false;
+        context.clear(); permissionQuestion = null;
+        return true;
+    }
     /** Restore keeps membership and deduplication but retires every old answer and shared transcript. */
     public synchronized void resetContext() {
         invalidate(); engaged.clear(); permissionQuestion = null; context.clear();

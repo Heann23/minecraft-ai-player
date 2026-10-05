@@ -55,6 +55,7 @@ public final class DiscordTextConversation implements AutoCloseable {
         var accepted = turns.accept(user, interaction, text.strip(), ConversationTurns.Address.CHARACTER, false);
         if (accepted.token() == null) return CompletableFuture.failedFuture(new IllegalStateException("duplicate text input"));
         cancelWork(user);
+        if (ConfirmedTextForget.requested(text)) turns.clearContextFor(accepted.token());
         var result = new CompletableFuture<Reply>(); pending.add(result);
         var conversation = turns;
         var task = new FutureTask<Void>(() -> { generate(user, text, conversation, accepted.token(), result); return null; });
@@ -75,16 +76,26 @@ public final class DiscordTextConversation implements AutoCloseable {
         try {
             if (!turns.isCurrent(token)) { result.cancel(false); return; }
             var subject = new DiscordMemory.Subject(settings.guildId(), settings.characterId(), user);
-            var change = ConfirmedTextPreference.read(input);
-            if (change != null) {
+            boolean erase = ConfirmedTextForget.requested(input);
+            var change = erase ? null : ConfirmedTextPreference.read(input);
+            if (erase || change != null) {
                 beforePreference.begin(user, () -> turns.isCurrent(token)).get(3, TimeUnit.SECONDS);
                 CompletableFuture<DiscordMemory.Snapshot> saved;
                 synchronized (this) {
                     if (!turns.isCurrent(token)) { result.cancel(false); return; }
-                    var key = new DiscordMemory.Key(subject, change.kind(), "", change.label());
-                    saved = store.remember(key, change.value(), DiscordMemory.Evidence.EXPLICIT, "text-" + token.conversation() + "-" + token.turn(), 0);
+                    if (erase) saved = store.forget(subject);
+                    else {
+                        var key = new DiscordMemory.Key(subject, change.kind(), "", change.label());
+                        saved = store.remember(key, change.value(), DiscordMemory.Evidence.EXPLICIT, "text-" + token.conversation() + "-" + token.turn(), 0);
+                    }
                 }
                 saved.get(3, TimeUnit.SECONDS);
+            }
+            if (erase) {
+                String answer = "본인의 저장된 기억과 이전 대화 문맥을 모두 지웠어요. 기본 존댓말로 다시 이야기할게요.";
+                if (!turns.generated(token, answer)) { result.cancel(false); return; }
+                result.complete(new Reply(token, answer));
+                return;
             }
             var facts = store.visible(subject, Set.of(user)).get(3, TimeUnit.SECONDS);
             if (!turns.isCurrent(token)) { result.cancel(false); return; }
