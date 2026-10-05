@@ -64,6 +64,7 @@ public final class SpeechRecognitionWorker implements AutoCloseable {
         }
         worker.purge();
     }
+    public synchronized boolean busy() { return tasks.values().stream().anyMatch(task -> !task.isDone()); }
     private void recognize(VoiceIngress.Utterance utterance) {
         try {
             if (!valid(utterance)) return;

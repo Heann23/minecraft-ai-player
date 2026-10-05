@@ -33,7 +33,7 @@ public final class ConversationTurns implements AutoCloseable {
     private String generated = "";
     private String currentInput = "", currentUtterance = "";
     private int heardCharacters;
-    private boolean closed, quiet;
+    private boolean closed, quiet, greeting;
 
     public ConversationTurns(LongSupplier clock, long followupMillis, int contextLimit) {
         if (followupMillis < 1 || contextLimit < 1 || contextLimit > 128) throw new IllegalArgumentException("turn limits");
@@ -101,6 +101,7 @@ public final class ConversationTurns implements AutoCloseable {
 
     /** Called at speech onset, before STT finishes, to stop the current answer. */
     public synchronized boolean speechStarted(String userId) {
+        if (greeting && !closed && members.contains(userId)) { invalidate(); return true; }
         Long until = engaged.get(userId);
         if (closed || !members.contains(userId) || until == null || clock.getAsLong() >= until) return false;
         invalidate();
@@ -135,6 +136,18 @@ public final class ConversationTurns implements AutoCloseable {
     }
 
     public synchronized void cancelCurrent() { invalidate(); }
+    public synchronized boolean busy() { return current != null; }
+    /** A greeting never invents a user utterance or interrupts an existing response. */
+    public synchronized Token beginGreeting(String userId) {
+        if (closed || quiet || current != null || !members.contains(userId)) return null;
+        current = new Token(conversation, ++turn, generation, userId); greeting = true;
+        return current;
+    }
+    /** Only a fully submitted greeting opens a no-callword followup window. */
+    public synchronized void greeted(Token token) {
+        if (greeting && isCurrent(token) && !generated.isEmpty() && heardCharacters == generated.length())
+            engaged.put(token.userId, clock.getAsLong() + followupMillis);
+    }
 
     /** May only be registered after the entire permission question was actually heard. */
     public synchronized boolean askCasualPermission(Token token, long validMillis) {
@@ -188,6 +201,7 @@ public final class ConversationTurns implements AutoCloseable {
     private void invalidate() {
         if (current != null && heardCharacters > 0) add(new Line("Herry", current.userId, generated.substring(0, heardCharacters), true, clock.getAsLong()));
         current = null;
+        greeting = false;
         generated = "";
         currentInput = ""; currentUtterance = "";
         heardCharacters = 0;

@@ -36,12 +36,16 @@ public final class DiscordSession implements AutoCloseable {
     private final AtomicLong dropped = new AtomicLong();
     private final AtomicLong diagnosticFailures = new AtomicLong();
     private final AtomicLong processedInputs = new AtomicLong();
+    private final java.util.concurrent.atomic.AtomicInteger pendingRecognitions = new java.util.concurrent.atomic.AtomicInteger();
     private final Object eventGate = new Object();
     private final Set<CompletableFuture<Void>> pendingEvents = java.util.concurrent.ConcurrentHashMap.newKeySet();
     private Set<String> participants = Set.of();
     private Map<String, String> names = Map.of();
     private volatile int userCount;
     private boolean memoryMaintenance;
+    private final JoinGreetings greetings;
+    private final LongSupplier monotonicMillis, wallClock;
+    private long lastHumanSpeech;
 
     /** Takes ownership of the memory store and providers' tasks. The owner closes the session on shutdown. */
     public DiscordSession(DiscordSettings settings, DiscordMemoryStore store, SpeechRecognitionWorker.Recognizer recognizer,
@@ -52,17 +56,28 @@ public final class DiscordSession implements AutoCloseable {
     public DiscordSession(DiscordSettings settings, DiscordMemoryStore store, SpeechRecognitionWorker.Recognizer recognizer,
                           ResponsePipeline.Model model, ResponsePipeline.Voice voice, Consumer<String> diagnostic,
                           LongSupplier wallClock, LongSupplier monotonicMillis, boolean automaticTick, VoiceIngress.Policy capturePolicy) {
+        this(settings, store, recognizer, model, voice, diagnostic, wallClock, monotonicMillis, automaticTick, capturePolicy, false);
+    }
+    public DiscordSession(DiscordSettings settings, DiscordMemoryStore store, SpeechRecognitionWorker.Recognizer recognizer,
+                          ResponsePipeline.Model model, ResponsePipeline.Voice voice, Consumer<String> diagnostic,
+                          LongSupplier wallClock, LongSupplier monotonicMillis, boolean automaticTick, VoiceIngress.Policy capturePolicy, boolean greetOnJoin) {
         this.settings = java.util.Objects.requireNonNull(settings); this.store = java.util.Objects.requireNonNull(store);
         java.util.Objects.requireNonNull(recognizer); java.util.Objects.requireNonNull(model); java.util.Objects.requireNonNull(voice);
         java.util.Objects.requireNonNull(wallClock); java.util.Objects.requireNonNull(monotonicMillis); java.util.Objects.requireNonNull(diagnostic);
+        this.wallClock = wallClock; this.monotonicMillis = monotonicMillis; lastHumanSpeech = monotonicMillis.getAsLong();
+        greetings = new JoinGreetings(JoinGreetings.Policy.defaults(greetOnJoin));
         if (settings.guildId().isEmpty()) throw new IllegalArgumentException("Discord session requires configured guild");
         this.diagnostic = code -> { try { diagnostic.accept(code); } catch (RuntimeException failedSink) { diagnosticFailures.incrementAndGet(); } };
         turns = new ConversationTurns(wallClock, settings.followupMillis(), settings.contextLines());
         memory = new ConversationMemory(turns, store); ingress = new VoiceIngress(java.util.Objects.requireNonNull(capturePolicy), monotonicMillis);
         playback = new PcmPlayback(); responses = new ResponsePipeline(turns, model, voice, playback, this.diagnostic);
         events = new ThreadPoolExecutor(1, 1, 0, TimeUnit.MILLISECONDS, new ArrayBlockingQueue<>(128), r -> daemon(r, "MinecraftAI-discord-events"));
-        speech = new SpeechRecognitionWorker(ingress, recognizer, result -> post(() -> recognized(result))
-                .whenComplete((ignored, error) -> { if (error == null) processedInputs.incrementAndGet(); }), this.diagnostic, monotonicMillis, 15_000);
+        speech = new SpeechRecognitionWorker(ingress, recognizer, result -> {
+            pendingRecognitions.incrementAndGet();
+            post(() -> recognized(result)).whenComplete((ignored, error) -> {
+                pendingRecognitions.decrementAndGet(); if (error == null) processedInputs.incrementAndGet();
+            });
+        }, this.diagnostic, monotonicMillis, 15_000);
         timer = Executors.newSingleThreadScheduledExecutor(r -> daemon(r, "MinecraftAI-discord-voice-tick"));
         if (automaticTick) timer.scheduleWithFixedDelay(this::tick, 50, 50, TimeUnit.MILLISECONDS);
     }
@@ -80,6 +95,7 @@ public final class DiscordSession implements AutoCloseable {
                 turns.cancelCurrent(); responses.cancel();
                 ingress.participants(next); speech.refreshRoutes();
                 participants = next; userCount = next.size();
+                greetings.participants(next, monotonicMillis.getAsLong());
             }
             names = aliases;
             return done();
@@ -89,9 +105,33 @@ public final class DiscordSession implements AutoCloseable {
     /** Fast network entry point: copy one frame, enqueue, and return. No provider or disk work here. */
     public CompletableFuture<Void> audio(String userId, byte[] pcm, boolean speechDetected, boolean continuationExpected) {
         PcmAudio.requireFrame(pcm); byte[] owned = pcm.clone();
-        return post(() -> { if (!memoryMaintenance) captured(ingress.frame(userId, owned, speechDetected, continuationExpected)); return done(); });
+        return post(() -> {
+            if (!memoryMaintenance) {
+                if (speechDetected && participants.contains(userId)) lastHumanSpeech = monotonicMillis.getAsLong();
+                captured(ingress.frame(userId, owned, speechDetected, continuationExpected));
+            }
+            return done();
+        });
     }
-    public CompletableFuture<Void> tick() { return post(() -> { if (!memoryMaintenance) captured(ingress.tick()); return done(); }); }
+    public CompletableFuture<Void> tick() { return post(() -> {
+        if (!memoryMaintenance) { captured(ingress.tick()); greetIfReady(); }
+        return done();
+    }); }
+    private void greetIfReady() {
+        String user = greetings.claim(monotonicMillis.getAsLong(), lastHumanSpeech,
+                turns.busy() || ingress.capturing() || speech.busy() || pendingRecognitions.get() > 0);
+        if (user == null) return;
+        var token = turns.beginGreeting(user); if (token == null) return;
+        var subject = new DiscordMemory.Subject(settings.guildId(), settings.characterId(), user);
+        store.visible(subject, participants).whenComplete((facts, error) -> post(() -> {
+            if (turns.isCurrent(token)) {
+                if (error != null || !responses.greet(token, JoinGreetings.text(subject, facts, wallClock.getAsLong()))) {
+                    turns.finish(token); diagnostic.accept("discord-greeting-failed");
+                }
+            }
+            return done();
+        }));
+    }
 
     /** Always called on the event lane; the earlier STT worker check is insufficient. */
     private CompletableFuture<Void> recognized(SpeechRecognitionWorker.Result result) {
@@ -103,6 +143,7 @@ public final class DiscordSession implements AutoCloseable {
         var accepted = turns.accept(user, utterance, text, address.address(), stop);
         if (accepted.decision() == ConversationTurns.Decision.STOPPED) { responses.cancel(); return done(); }
         if (accepted.decision() != ConversationTurns.Decision.RESPOND) return done();
+        greetings.dismiss(user, monotonicMillis.getAsLong());
         var token = accepted.token(); var subject = new DiscordMemory.Subject(settings.guildId(), settings.characterId(), user);
         var saved = memory.capture(token, subject, text, result.recognition().reliableFinal(), utterance);
         Set<String> members = participants;
@@ -127,6 +168,7 @@ public final class DiscordSession implements AutoCloseable {
     public CompletableFuture<Void> quiet(boolean value) {
         return post(() -> {
             if (memoryMaintenance && !value) throw new IllegalStateException("memory restore in progress");
+            if (value) greetings.clearPending();
             turns.quiet(value); responses.cancel(); ingress.reset(); speech.refreshRoutes(); return done();
         });
     }
@@ -134,6 +176,7 @@ public final class DiscordSession implements AutoCloseable {
         var subject = new DiscordMemory.Subject(settings.guildId(), settings.characterId(), userId);
         return post(() -> {
             if (memoryMaintenance) throw new IllegalStateException("memory restore in progress");
+            greetings.clearPending();
             ingress.reset(); speech.refreshRoutes(); turns.cancelCurrent(); responses.cancel();
             return memory.forget(subject);
         });
@@ -152,6 +195,7 @@ public final class DiscordSession implements AutoCloseable {
         if (interactionId == null || !interactionId.matches("[A-Za-z0-9_-]{1,80}")) throw new IllegalArgumentException("confirmation source");
         return post(() -> {
             if (memoryMaintenance) throw new IllegalStateException("memory restore in progress");
+            greetings.clearPending();
             ingress.reset(); speech.refreshRoutes(); turns.forget(userId); responses.cancel();
             return store.remember(key, value, DiscordMemory.Evidence.EXPLICIT, "slash-" + interactionId, 0).thenApply(snapshot -> null);
         });
@@ -173,7 +217,7 @@ public final class DiscordSession implements AutoCloseable {
         MemoryFiles.requireBackupName(identifier);
         return post(() -> {
             if (memoryMaintenance) throw new IllegalStateException("memory restore in progress");
-            memoryMaintenance = true; turns.quiet(true); turns.resetContext(); responses.cancel(); ingress.reset(); speech.refreshRoutes();
+            memoryMaintenance = true; greetings.clearPending(); turns.quiet(true); turns.resetContext(); responses.cancel(); ingress.reset(); speech.refreshRoutes();
             CompletableFuture<Void> result = new CompletableFuture<>();
             store.restoreBackup(identifier).whenComplete((snapshot, error) -> post(() -> {
                 memoryMaintenance = false;

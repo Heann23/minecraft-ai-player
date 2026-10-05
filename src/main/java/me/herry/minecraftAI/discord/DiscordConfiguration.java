@@ -12,7 +12,7 @@ import org.bukkit.configuration.file.YamlConfiguration;
 
 /** File I/O and pure YAML parsing only; the runtime loads this outside the server thread. */
 public record DiscordConfiguration(DiscordSettings discord, OllamaSettings dialogue, SpeechProviderSettings speech,
-                                   double minimumRms, long endSilenceMillis) {
+                                   double minimumRms, long endSilenceMillis, boolean greetOnJoin) {
     public DiscordConfiguration {
         java.util.Objects.requireNonNull(discord); java.util.Objects.requireNonNull(dialogue); java.util.Objects.requireNonNull(speech);
         if (!Double.isFinite(minimumRms) || minimumRms <= 0 || minimumRms > 1) throw new IllegalArgumentException("audio.minimum-rms");
@@ -26,7 +26,8 @@ public record DiscordConfiguration(DiscordSettings discord, OllamaSettings dialo
         if (value != null && !(value instanceof Number)) throw new IllegalArgumentException("audio.minimum-rms must be numeric");
         return new DiscordConfiguration(DiscordSettings.read(values), OllamaSettings.read(values), SpeechProviderSettings.read(values),
                 value == null ? 0.01 : ((Number) value).doubleValue(),
-                DiscordSettings.number(values, "audio.end-silence-millis", 1000, 100, 2500));
+                DiscordSettings.number(values, "audio.end-silence-millis", 1000, 100, 2500),
+                DiscordSettings.bool(values, "conversation.greet-on-join", true));
     }
     public static DiscordConfiguration load(Path directory, Supplier<InputStream> defaults) throws IOException {
         Files.createDirectories(directory); Path file = directory.resolve("discord.yml");

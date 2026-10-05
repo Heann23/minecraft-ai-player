@@ -54,10 +54,18 @@ public final class ResponsePipeline implements AutoCloseable {
     }
 
     public synchronized boolean respond(Request request) {
+        return admit(request, null);
+    }
+    /** Literal code-owned greeting, using the same cancellable voice lane without model inference. */
+    synchronized boolean greet(ConversationTurns.Token token, String text) {
+        if (text == null || text.isBlank() || text.length() > 240) throw new IllegalArgumentException("greeting text");
+        return admit(new Request(token, List.of(), List.of()), text);
+    }
+    private boolean admit(Request request, String greeting) {
         if (closed || !turns.isCurrent(request.turn) || request.turn.equals(admitted)) return false;
         cancelPending();
         worker.purge();
-        try { pending = worker.submit(() -> run(request)); admitted = request.turn; return true; }
+        try { pending = worker.submit(() -> run(request, greeting)); admitted = request.turn; return true; }
         catch (java.util.concurrent.RejectedExecutionException e) { diagnostic.accept("response-capacity"); return false; }
     }
 
@@ -69,10 +77,10 @@ public final class ResponsePipeline implements AutoCloseable {
     /** Caller invalidates the current turn first, then stops inference and queued playback. */
     public synchronized void cancel() { cancelPending(); worker.purge(); }
 
-    private void run(Request request) {
+    private void run(Request request, String greeting) {
         try {
             if (!valid(request)) return;
-            String response = request.permissionQuestion ? "말 편하게 해도 될까요?" : model.respond(request);
+            String response = greeting != null ? greeting : request.permissionQuestion ? "말 편하게 해도 될까요?" : model.respond(request);
             if (!valid(request) || !turns.generated(request.turn, response)) return;
             int completedCharacters = 0;
             for (String sentence : SentenceChunks.split(response)) {
@@ -85,7 +93,13 @@ public final class ResponsePipeline implements AutoCloseable {
                 int prefix = completedCharacters;
                 java.util.concurrent.atomic.AtomicInteger heard = new java.util.concurrent.atomic.AtomicInteger();
                 playback.play(request.turn, sentence, pcm, () -> valid(request), characters -> {
-                    if (characters >= heard.get() && characters <= sentence.length() && turns.played(request.turn, prefix + characters)) heard.set(characters);
+                    synchronized (turns) {
+                        if (characters >= heard.get() && characters <= sentence.length() && turns.played(request.turn, prefix + characters)) {
+                            heard.set(characters);
+                            // Admission is atomic with the final frame, not a later worker wakeup.
+                            if (greeting != null && prefix + characters == response.length()) turns.greeted(request.turn);
+                        }
+                    }
                 });
                 if (!valid(request)) return;
                 if (heard.get() != sentence.length()) { turns.finish(request.turn); return; }

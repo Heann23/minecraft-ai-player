@@ -31,7 +31,7 @@ public record DiscordSettings(boolean enabled, String tokenEnvironment, String g
         if (!(value instanceof String text)) throw new IllegalArgumentException(key + " must be a quoted string");
         return text;
     }
-    private static boolean bool(Function<String, Object> values, String key, boolean fallback) {
+    static boolean bool(Function<String, Object> values, String key, boolean fallback) {
         Object value = values.apply(key);
         if (value == null) return fallback;
         if (!(value instanceof Boolean flag)) throw new IllegalArgumentException(key + " must be boolean");

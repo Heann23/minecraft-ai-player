@@ -15,6 +15,7 @@ class DiscordConfigurationTest {
     @Test void createsDefaultFileOnceAndPreservesQuotedIdsFromExistingFile() throws Exception {
         var created = DiscordConfiguration.load(directory, () -> new ByteArrayInputStream("enabled: false\n".getBytes(StandardCharsets.UTF_8)));
         assertFalse(created.discord().enabled()); assertEquals(0.01, created.minimumRms());
+        assertTrue(created.greetOnJoin());
         assertEquals(1000, created.capturePolicy().normalPauseMillis());
         assertEquals(1500, created.capturePolicy().continuationPauseMillis());
         Files.writeString(directory.resolve("discord.yml"), "enabled: true\nguild-id: '12345678901234567'\nvoice-channel-id: '12345678901234568'\n");
@@ -45,5 +46,10 @@ class DiscordConfigurationTest {
         var configured = DiscordConfiguration.read(Map.of("audio.end-silence-millis", 800)::get);
         assertEquals(800, configured.capturePolicy().normalPauseMillis());
         assertEquals(1300, configured.capturePolicy().continuationPauseMillis());
+    }
+    @Test void joinGreetingSwitchMustBeBoolean() {
+        assertFalse(DiscordConfiguration.read(Map.of("conversation.greet-on-join", false)::get).greetOnJoin());
+        for (Object invalid : new Object[]{"true", 1})
+            assertThrows(IllegalArgumentException.class, () -> DiscordConfiguration.read(Map.of("conversation.greet-on-join", invalid)::get));
     }
 }

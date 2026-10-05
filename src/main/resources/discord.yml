@@ -17,6 +17,8 @@ audio:
   end-silence-millis: 1000
 
 conversation:
+  # 새 참가자에게 대화·음성 인식이 멈춘 뒤 짧게 인사한다. 잦은 재입장은 반복하지 않는다.
+  greet-on-join: true
   followup-seconds: 60
   context-lines: 32
 

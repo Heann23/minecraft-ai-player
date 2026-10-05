@@ -114,6 +114,7 @@ public final class VoiceIngress implements AutoCloseable {
                 && members.contains(route.userId) && latest.getOrDefault(route.userId, -1L) == route.utterance;
     }
     public synchronized void reset() { generation++; speakers.clear(); latest.clear(); }
+    public synchronized boolean capturing() { return speakers.values().stream().anyMatch(capture -> capture.audio != null); }
     @Override public synchronized void close() { closed = true; generation++; speakers.clear(); latest.clear(); members = Set.of(); }
     private long pause(Capture capture) { return capture.continuation ? policy.continuationPauseMillis : policy.normalPauseMillis; }
     private void finish(Capture capture, long now, boolean limited, List<Utterance> completed) {
