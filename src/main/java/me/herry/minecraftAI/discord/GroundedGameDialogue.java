@@ -54,13 +54,7 @@ public final class GroundedGameDialogue implements ResponsePipeline.Model {
     }
     private boolean casual(ResponsePipeline.Request request) {
         var subject = new DiscordMemory.Subject(settings.guildId(), settings.characterId(), request.turn().userId());
-        boolean allowed = false, refused = false;
-        for (var fact : request.memory()) {
-            if (!fact.key().subject().equals(subject) || fact.key().kind() != DiscordMemory.Kind.SPEECH_AGREEMENT
-                    || fact.evidence() != DiscordMemory.Evidence.EXPLICIT || fact.expired(clock.getAsLong())) continue;
-            allowed |= fact.value().equals("ALLOWED"); refused |= fact.value().equals("REFUSED");
-        }
-        return allowed && !refused;
+        return DiscordPersonalSettings.casual(subject, request.memory(), clock.getAsLong());
     }
     private static String answer(Question question, DiscordGameState.View view, boolean casual) {
         if (question.kind == Kind.HISTORY) return casual

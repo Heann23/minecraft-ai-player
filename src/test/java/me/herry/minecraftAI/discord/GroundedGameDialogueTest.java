@@ -73,7 +73,7 @@ class GroundedGameDialogueTest {
         var model = grounded(state("STOPPED", "")); String guild = settings().guildId();
         assertTrue(model.respond(request("지금 뭐해요?", List.of(style("A", guild, "ALLOWED", 0)))).contains("상태야."));
         for (var facts : List.of(List.of(style("B", guild, "ALLOWED", 0)), List.of(style("A", "another-guild", "ALLOWED", 0)),
-                List.of(style("A", guild, "ALLOWED", 1500)), List.of(style("A", guild, "ALLOWED", 0), style("A", guild, "REFUSED", 0))))
+                List.of(style("A", guild, "ALLOWED", 1500)), List.of(new DiscordMemory.Fact(new DiscordMemory.Key(new DiscordMemory.Subject(guild, "herry", "A"), DiscordMemory.Kind.SPEECH_AGREEMENT, "", "unrelated"), "ALLOWED", DiscordMemory.Evidence.EXPLICIT, "source", 1000, 0, 1)), List.of(style("A", guild, "ALLOWED", 0), style("A", guild, "REFUSED", 0))))
             assertTrue(model.respond(request("지금 뭐해요?", facts)).contains("상태예요."));
     }
     @Test void canceledAndCodeOwnedPermissionTurnsCannotReadStateOrInferAndRetirementAfterReadIsChecked() throws Exception {
