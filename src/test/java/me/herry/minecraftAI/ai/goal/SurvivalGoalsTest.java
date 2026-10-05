@@ -158,6 +158,8 @@ class SurvivalGoalsTest {
         Situation situation = new Situation();
         situation.nextMilestone = Milestone.IRON_PICKAXE;
         situation.need = Situation.Need.IRON;
+        // 내려갈 때 챙길 나무는 이미 있다 (없으면 나무부터 구한다).
+        situation.plankEquivalent = GoalSystem.TRIP_WOOD;
         situation.ironNeeded = 3;
         situation.hasPickaxe = true;
         situation.canMineIron = true;
@@ -272,6 +274,8 @@ class SurvivalGoalsTest {
         // 철이 모자란 방패는 땅속에서 철을 캐면 된다. 재료가 다 있으면 그 자리에서 만든다.
         situation.nextMilestone = Milestone.SHIELD;
         situation.need = Situation.Need.IRON;
+        // 내려갈 때 챙길 나무는 이미 있다 (없으면 나무부터 구한다).
+        situation.plankEquivalent = GoalSystem.TRIP_WOOD;
         assertFalse(GoalSystem.leavesForMorning(situation));
         situation.need = Situation.Need.NONE;
         assertFalse(GoalSystem.leavesForMorning(situation));

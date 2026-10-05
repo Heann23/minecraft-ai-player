@@ -47,6 +47,8 @@ public final class GoalSystem {
     public static final int FOOD_STOCK = 8;
     // 땅속으로 내려가기 전에 음식을 이만큼은 챙긴다.
     public static final int TRIP_FOOD = 6;
+    // 땅속으로 내려가기 전에 나무를 이만큼은 챙긴다 (판자로 환산, 원목 4개). 곡괭이 자루와 화로 연료에 든다.
+    public static final int TRIP_WOOD = 16;
     // 음식이 없을 때 허기가 이 값 이하로 떨어지면 하던 일을 멈추고 먹을 것을 찾으러 간다.
     public static final int FORAGE_BELOW = 10;
     public static final double HOME_LEASH = 24.0;
@@ -245,9 +247,23 @@ public final class GoalSystem {
         if (situation.furnaceBusy && situation.furnaceCooksFood) return 0.0;
         // 광물을 찾아 땅속으로 내려갈 차례인데 음식이 모자라면, 내려가기 전에 지상에서 사냥감을 찾는다.
         // 땅속에는 사냥감이 없어서, 빈손으로 내려가면 굶주린 채로 올라와서 구해야 한다.
-        boolean aboutToDescend = wantsIron(situation) && !situation.knowsIron || wantsDiamond(situation) && !situation.knowsDiamond;
-        boolean shouldSearch = aboutToDescend && !situation.underground && !situation.foodSearchExhausted;
+        boolean shouldSearch = aboutToDescend(situation) && !situation.foodSearchExhausted;
         return shouldSearch && situation.foodCount < TRIP_FOOD ? 160.0 : 0.0;
+    }
+
+    // 지상에 있고, 다음 할 일이 광물을 찾아 땅속으로 내려가는 것인지.
+    public static boolean aboutToDescend(Situation situation) {
+        boolean searching = wantsIron(situation) && !situation.knowsIron || wantsDiamond(situation) && !situation.knowsDiamond;
+        return searching && !situation.underground;
+    }
+
+    /**
+     * 내려가기 전에 나무를 더 챙겨야 하는지. 땅속에는 나무가 없는데 곡괭이 자루(막대)와 화로 연료에 나무가 든다.
+     * 모자란 채로 내려가면 돌 곡괭이가 부서졌을 때 새로 만들지 못하고, 나무를 구하러 밤의 지상까지 올라오게 된다
+     * (고정 시드에서 판자를 연료로 다 쓰고 내려갔다가 그렇게 됐다).
+     */
+    public static boolean packsWoodForTrip(Situation situation) {
+        return aboutToDescend(situation) && situation.plankEquivalent < TRIP_WOOD;
     }
 
     // 캔 철이 다음 장비를 만들 만큼 모였으면 화로에서 제련한다.
@@ -402,6 +418,7 @@ public final class GoalSystem {
         if (situation.need == Situation.Need.WOOD) return true;
         // 제련할 철은 모였는데 화로에 넣을 연료가 없으면 나무를 구한다.
         if (situation.need == Situation.Need.IRON && hasEnoughOre(situation) && !situation.hasFuel) return true;
+        if (packsWoodForTrip(situation)) return true;
         boolean gathering = situation.currentGoal == GoalType.COLLECT_WOOD || situation.currentGoal == GoalType.FIND_WOOD;
         return gathering && situation.plankEquivalent < WOOD_TARGET;
     }
