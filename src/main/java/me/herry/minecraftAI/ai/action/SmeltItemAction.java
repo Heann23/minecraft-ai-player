@@ -5,6 +5,9 @@ import me.herry.minecraftAI.ai.crafting.FuelMath;
 import me.herry.minecraftAI.ai.crafting.FurnaceJob;
 import me.herry.minecraftAI.ai.inventory.InventorySystem;
 import me.herry.minecraftAI.ai.memory.MemoryType;
+import me.herry.minecraftAI.ai.primitive.PrimitiveAction;
+import me.herry.minecraftAI.ai.primitive.PrimitiveTarget;
+import me.herry.minecraftAI.ai.primitive.PrimitiveType;
 import me.herry.minecraftAI.ai.util.BlockPoint;
 import me.herry.minecraftAI.ai.world.Base;
 import org.bukkit.Material;
@@ -20,7 +23,7 @@ import org.jetbrains.annotations.Nullable;
  * 그동안 다른 일을 하다가 다 구워지면 돌아와서 꺼낸다 (CollectFurnaceAction). 싸우러 가느라 중단돼도 넣은 것은 그대로 구워진다.
  * 굽는 시간은 실제 화로와 같다 (아이템 하나에 10초).
  */
-public final class SmeltItemAction extends AbstractAction {
+public final class SmeltItemAction extends AbstractAction implements PrimitiveAction {
     private static final int REACH = 4;
     private static final int TIMEOUT = 40;
     private static final int STORAGE_SIZE = 36;
@@ -131,5 +134,15 @@ public final class SmeltItemAction extends AbstractAction {
     private static double itemsPerFuel(ItemStack fuel) {
         boolean wood = Tag.PLANKS.isTagged(fuel.getType()) || Tag.LOGS.isTagged(fuel.getType());
         return wood ? FuelMath.ITEMS_PER_WOOD : FuelMath.ITEMS_PER_COAL;
+    }
+
+    @Override
+    public PrimitiveType getPrimitiveType() {
+        return PrimitiveType.INTERACT_BLOCK;
+    }
+
+    @Override
+    public PrimitiveTarget getTarget() {
+        return new PrimitiveTarget.Item(input.name(), count);
     }
 }

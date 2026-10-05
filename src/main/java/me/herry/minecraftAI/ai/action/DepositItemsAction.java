@@ -3,6 +3,9 @@ package me.herry.minecraftAI.ai.action;
 import me.herry.minecraftAI.ai.AIPlayer;
 import me.herry.minecraftAI.ai.inventory.StorageItems;
 import me.herry.minecraftAI.ai.inventory.StoragePolicy;
+import me.herry.minecraftAI.ai.primitive.PrimitiveAction;
+import me.herry.minecraftAI.ai.primitive.PrimitiveTarget;
+import me.herry.minecraftAI.ai.primitive.PrimitiveType;
 import me.herry.minecraftAI.ai.team.Phrases;
 import me.herry.minecraftAI.ai.util.BlockPoint;
 import org.bukkit.entity.Player;
@@ -15,7 +18,7 @@ import java.util.Map;
 /**
  * 당장 쓰지 않는 것을 집 상자에 넣는다. 무엇을 넣을지는 StoragePolicy 가 정한다.
  */
-public final class DepositItemsAction extends ChestAction {
+public final class DepositItemsAction extends ChestAction implements PrimitiveAction {
     private final StoragePolicy.Context context;
 
     public DepositItemsAction(BlockPoint chest, StoragePolicy.Context context) {
@@ -53,5 +56,15 @@ public final class DepositItemsAction extends ChestAction {
         ai.debug("Stored " + moved + " stack(s) in the chest at " + chest);
         if (moved > 0) ai.getTeam().say(ai, Phrases.stored(moved), false);
         succeed();
+    }
+
+    @Override
+    public PrimitiveType getPrimitiveType() {
+        return PrimitiveType.INTERACT_BLOCK;
+    }
+
+    @Override
+    public PrimitiveTarget getTarget() {
+        return new PrimitiveTarget.Block(chest);
     }
 }

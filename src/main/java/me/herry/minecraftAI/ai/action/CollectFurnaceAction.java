@@ -2,6 +2,9 @@ package me.herry.minecraftAI.ai.action;
 
 import me.herry.minecraftAI.ai.AIPlayer;
 import me.herry.minecraftAI.ai.crafting.FurnaceJob;
+import me.herry.minecraftAI.ai.primitive.PrimitiveAction;
+import me.herry.minecraftAI.ai.primitive.PrimitiveTarget;
+import me.herry.minecraftAI.ai.primitive.PrimitiveType;
 import me.herry.minecraftAI.ai.util.BlockPoint;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.FurnaceInventory;
@@ -10,7 +13,7 @@ import org.bukkit.inventory.ItemStack;
 /**
  * 넣어 두었던 화로에서 결과물과 남은 재료, 남은 연료를 모두 꺼낸다.
  */
-public final class CollectFurnaceAction extends AbstractAction {
+public final class CollectFurnaceAction extends AbstractAction implements PrimitiveAction {
     private static final double REACH = 4.5;
     private static final int TIMEOUT = 40;
 
@@ -53,5 +56,15 @@ public final class CollectFurnaceAction extends AbstractAction {
     private void forgetJob(AIPlayer ai) {
         FurnaceJob job = ai.getFurnaceJob();
         if (job != null && job.isAt(ai.getWorldId(), furnacePos)) ai.setFurnaceJob(null);
+    }
+
+    @Override
+    public PrimitiveType getPrimitiveType() {
+        return PrimitiveType.INTERACT_BLOCK;
+    }
+
+    @Override
+    public PrimitiveTarget getTarget() {
+        return new PrimitiveTarget.Block(furnacePos);
     }
 }

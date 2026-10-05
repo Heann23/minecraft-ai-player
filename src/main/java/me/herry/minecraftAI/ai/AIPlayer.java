@@ -11,9 +11,11 @@ import me.herry.minecraftAI.ai.crafting.FurnaceJob;
 import me.herry.minecraftAI.ai.goal.GoalType;
 import me.herry.minecraftAI.ai.goal.Milestone;
 import me.herry.minecraftAI.ai.goal.Situation;
+import me.herry.minecraftAI.ai.goal.model.Goal;
 import me.herry.minecraftAI.ai.inventory.InventorySystem;
 import me.herry.minecraftAI.ai.memory.MemorySystem;
 import me.herry.minecraftAI.ai.navigation.NavigationSystem;
+import me.herry.minecraftAI.ai.observation.Observation;
 import me.herry.minecraftAI.ai.perception.Perception;
 import me.herry.minecraftAI.ai.perception.PerceptionSystem;
 import me.herry.minecraftAI.ai.perf.TickProfiler;
@@ -403,6 +405,25 @@ public final class AIPlayer {
     // 현재 계획의 행동 목록. 실행 중인 행동은 대괄호로 표시된다.
     public String describePlan() {
         return brain.describePlan();
+    }
+
+    public boolean isEscaping() {
+        return brain.isEscaping();
+    }
+
+    // 지금 목표를 "무엇을 얼마나"로 적은 것
+    public Goal getGoalSpec() {
+        return brain.getGoalSpec();
+    }
+
+    // 지금 계획을 세운 스킬의 이름. 계획이 없으면 빈 문자열.
+    public String getCurrentSkill() {
+        return brain.getCurrentSkill();
+    }
+
+    // 마지막으로 판단할 때의 관측. 아직 한 번도 판단하지 않았으면 null.
+    public @Nullable Observation getObservation() {
+        return brain.getObservation();
     }
 
     // 지금 하고 있는 일과 그 이유. 아직 한 번도 판단하지 않았으면 null.

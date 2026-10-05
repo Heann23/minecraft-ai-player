@@ -4,6 +4,9 @@ import me.herry.minecraftAI.ai.AIPlayer;
 import me.herry.minecraftAI.ai.build.BlockRole;
 import me.herry.minecraftAI.ai.build.BuildMaterials;
 import me.herry.minecraftAI.ai.memory.MemoryType;
+import me.herry.minecraftAI.ai.primitive.PrimitiveAction;
+import me.herry.minecraftAI.ai.primitive.PrimitiveTarget;
+import me.herry.minecraftAI.ai.primitive.PrimitiveType;
 import me.herry.minecraftAI.ai.util.BlockPoint;
 import me.herry.minecraftAI.ai.util.Positions;
 import me.herry.minecraftAI.ai.world.Base;
@@ -26,7 +29,7 @@ import java.util.Map;
  * 설계도의 한 칸을 짓는다: 정해진 자리에, 그 역할에 맞는 블록을 가방에서 골라 놓는다.
  * 벽과 지붕은 가진 돌이나 흙으로, 문/침대처럼 두 칸짜리는 두 칸을 함께 놓는다.
  */
-public final class BuildBlockAction extends AbstractAction {
+public final class BuildBlockAction extends AbstractAction implements PrimitiveAction {
     private static final int TIMEOUT = 60;
     private static final double MAX_REACH = 4.9;
     private static final float FACING_TOLERANCE = 25.0F;
@@ -154,5 +157,15 @@ public final class BuildBlockAction extends AbstractAction {
             default -> {
             }
         }
+    }
+
+    @Override
+    public PrimitiveType getPrimitiveType() {
+        return PrimitiveType.PLACE_BLOCK;
+    }
+
+    @Override
+    public PrimitiveTarget getTarget() {
+        return new PrimitiveTarget.Block(target);
     }
 }

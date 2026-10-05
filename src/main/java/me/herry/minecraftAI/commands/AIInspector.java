@@ -7,6 +7,7 @@ import me.herry.minecraftAI.ai.brain.DecisionTrace;
 import me.herry.minecraftAI.ai.brain.Directive;
 import me.herry.minecraftAI.ai.build.BuildJob;
 import me.herry.minecraftAI.ai.memory.MemoryType;
+import me.herry.minecraftAI.ai.observation.Observation;
 import me.herry.minecraftAI.ai.perf.TickProfiler;
 import me.herry.minecraftAI.ai.perf.WorkBudget;
 import me.herry.minecraftAI.ai.world.Base;
@@ -67,7 +68,19 @@ final class AIInspector {
     }
 
     static List<String> plan(AIPlayer ai) {
-        return List.of("목표: " + ai.getCurrentGoal(), "계획: " + ai.describePlan(), "현재 행동: " + ai.getCurrentActionName());
+        String skill = ai.getCurrentSkill();
+        return List.of("목표: " + ai.getCurrentGoal(), "목표 명세: " + ai.getGoalSpec().describe(),
+                "스킬: " + (skill.isEmpty() ? "(없음)" : skill), "계획: " + ai.describePlan(), "현재 행동: " + ai.getCurrentActionName());
+    }
+
+    // 마지막으로 판단할 때 남긴 관측 스냅샷. 학습 쪽으로 넘어갈 값이 실제와 맞는지 눈으로 확인할 때 쓴다.
+    static List<String> observe(AIPlayer ai) {
+        Observation observation = ai.getObservation();
+        if (observation == null) return List.of("(아직 판단하지 않음)");
+        return List.of("버전 " + observation.schemaVersion() + ", 틱 " + observation.tick(),
+                "몸: " + observation.player(), "가방: " + observation.inventory(), "환경: " + observation.environment(),
+                "진행: " + observation.progress(), "기억: " + observation.memory(), "하던 일: " + observation.task(),
+                "목표 명세 " + ai.getGoalSpec().describe() + " 완료 조건: " + (ai.getGoalSpec().isAchieved(observation) ? "채워짐" : "아직"));
     }
 
     // 거점, 포탈, 상자 내용물, 종류별 기억 개수

@@ -2,6 +2,9 @@ package me.herry.minecraftAI.ai.action;
 
 import me.herry.minecraftAI.ai.AIPlayer;
 import me.herry.minecraftAI.ai.memory.MemoryType;
+import me.herry.minecraftAI.ai.primitive.PrimitiveAction;
+import me.herry.minecraftAI.ai.primitive.PrimitiveTarget;
+import me.herry.minecraftAI.ai.primitive.PrimitiveType;
 import me.herry.minecraftAI.ai.team.Phrases;
 import me.herry.minecraftAI.ai.util.BlockPoint;
 import me.herry.minecraftAI.ai.util.Positions;
@@ -16,7 +19,7 @@ import org.bukkit.entity.Player;
  * 밤이 아니거나 몬스터가 가까이 있으면 잘 수 없고, 자면 리스폰 지점이 이 침대로 정해진다.
  * 다른 사람이 깨어 있어서 밤이 넘어가지 않으면 침대에 누워만 있지 않고 일어난다.
  */
-public final class SleepAction extends AbstractAction {
+public final class SleepAction extends AbstractAction implements PrimitiveAction {
     // 잠들고 5초가 지나면 밤이 넘어간다. 그보다 넉넉히 기다려 보고 안 넘어가면 일어난다.
     private static final int MAX_SLEEP_TICKS = 300;
     private static final int TIMEOUT = MAX_SLEEP_TICKS + 100;
@@ -84,5 +87,15 @@ public final class SleepAction extends AbstractAction {
         ai.setSleepRetryAfter(ai.getTicks() + RETRY_TICKS);
         Player player = ai.getPlayer();
         if (sleeping && player.isSleeping()) player.wakeup(false);
+    }
+
+    @Override
+    public PrimitiveType getPrimitiveType() {
+        return PrimitiveType.INTERACT_BLOCK;
+    }
+
+    @Override
+    public PrimitiveTarget getTarget() {
+        return new PrimitiveTarget.Block(bed);
     }
 }

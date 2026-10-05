@@ -1,11 +1,14 @@
 package me.herry.minecraftAI.ai.action;
 
 import me.herry.minecraftAI.ai.AIPlayer;
+import me.herry.minecraftAI.ai.primitive.PrimitiveAction;
+import me.herry.minecraftAI.ai.primitive.PrimitiveTarget;
+import me.herry.minecraftAI.ai.primitive.PrimitiveType;
 
 /**
  * 정해진 시간 동안 제자리에서 기다린다.
  */
-public final class WaitAction extends AbstractAction {
+public final class WaitAction extends AbstractAction implements PrimitiveAction {
     private final int ticks;
 
     public WaitAction(int ticks) {
@@ -29,5 +32,15 @@ public final class WaitAction extends AbstractAction {
     @Override
     protected void onEnd(AIPlayer ai) {
         ai.getBody().inputJump(false);
+    }
+
+    @Override
+    public PrimitiveType getPrimitiveType() {
+        return PrimitiveType.WAIT;
+    }
+
+    @Override
+    public PrimitiveTarget getTarget() {
+        return new PrimitiveTarget.Ticks(ticks);
     }
 }

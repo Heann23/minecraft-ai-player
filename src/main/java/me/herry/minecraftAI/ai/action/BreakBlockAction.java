@@ -4,6 +4,9 @@ import me.herry.minecraftAI.ai.AIPlayer;
 import me.herry.minecraftAI.ai.crafting.FurnaceJob;
 import me.herry.minecraftAI.ai.memory.MemorySystem;
 import me.herry.minecraftAI.ai.memory.MemoryType;
+import me.herry.minecraftAI.ai.primitive.PrimitiveAction;
+import me.herry.minecraftAI.ai.primitive.PrimitiveTarget;
+import me.herry.minecraftAI.ai.primitive.PrimitiveType;
 import me.herry.minecraftAI.ai.util.BlockPoint;
 import me.herry.minecraftAI.ai.util.Positions;
 import me.herry.minecraftAI.ai.world.Base;
@@ -22,7 +25,7 @@ import org.jetbrains.annotations.Nullable;
  * 블록 하나를 캔다. 블록을 바로 없애지 않고, 실제 플레이어처럼 바라보고 팔을 휘두르며
  * 들고 있는 도구에 맞는 시간만큼 걸려서 부순다.
  */
-public final class BreakBlockAction extends AbstractAction {
+public final class BreakBlockAction extends AbstractAction implements PrimitiveAction {
     private static final int TIMEOUT = 600;
     // 서바이벌 모드에서 블록에 손이 닿는 거리(4.5칸)에 약간의 여유를 둔 값
     private static final double MAX_REACH = 4.9;
@@ -305,5 +308,15 @@ public final class BreakBlockAction extends AbstractAction {
         memory.forget(MemoryType.OWN_WORKBENCH, world.getUID(), target);
         memory.forget(MemoryType.FURNACE, world.getUID(), target);
         memory.forget(MemoryType.OWN_FURNACE, world.getUID(), target);
+    }
+
+    @Override
+    public PrimitiveType getPrimitiveType() {
+        return PrimitiveType.BREAK_BLOCK;
+    }
+
+    @Override
+    public PrimitiveTarget getTarget() {
+        return new PrimitiveTarget.Block(target);
     }
 }

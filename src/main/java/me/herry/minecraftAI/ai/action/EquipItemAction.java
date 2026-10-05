@@ -1,13 +1,16 @@
 package me.herry.minecraftAI.ai.action;
 
 import me.herry.minecraftAI.ai.AIPlayer;
+import me.herry.minecraftAI.ai.primitive.PrimitiveAction;
+import me.herry.minecraftAI.ai.primitive.PrimitiveTarget;
+import me.herry.minecraftAI.ai.primitive.PrimitiveType;
 import org.bukkit.Material;
 import org.jetbrains.annotations.Nullable;
 
 /**
  * 인벤토리의 아이템을 손에 든다. Material 을 지정하지 않으면 가장 강한 무기를 든다.
  */
-public final class EquipItemAction extends AbstractAction {
+public final class EquipItemAction extends AbstractAction implements PrimitiveAction {
     private final @Nullable Material material;
 
     private EquipItemAction(@Nullable Material material) {
@@ -39,5 +42,15 @@ public final class EquipItemAction extends AbstractAction {
 
     @Override
     protected void onTick(AIPlayer ai) {
+    }
+
+    @Override
+    public PrimitiveType getPrimitiveType() {
+        return PrimitiveType.EQUIP_ITEM;
+    }
+
+    @Override
+    public PrimitiveTarget getTarget() {
+        return material == null ? PrimitiveTarget.NONE : new PrimitiveTarget.Item(material.name(), 1);
     }
 }

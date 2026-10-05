@@ -5,6 +5,9 @@ import me.herry.minecraftAI.ai.AIPlayer;
 import me.herry.minecraftAI.ai.memory.MemoryType;
 import me.herry.minecraftAI.ai.navigation.NavigationSystem;
 import me.herry.minecraftAI.ai.navigation.PathGoal;
+import me.herry.minecraftAI.ai.primitive.PrimitiveAction;
+import me.herry.minecraftAI.ai.primitive.PrimitiveTarget;
+import me.herry.minecraftAI.ai.primitive.PrimitiveType;
 import me.herry.minecraftAI.ai.util.BlockPoint;
 import me.herry.minecraftAI.ai.util.Positions;
 import org.bukkit.FluidCollisionMode;
@@ -20,7 +23,7 @@ import org.bukkit.util.Vector;
 /**
  * 주변에 떨어진 아이템으로 걸어가서 줍는다. 아이템은 가까이 가면 자동으로 주워진다.
  */
-public final class PickupItemAction extends AbstractAction {
+public final class PickupItemAction extends AbstractAction implements PrimitiveAction {
     private static final int TIMEOUT = 400;
     private static final int PER_ITEM_TICKS = 100;
     private static final long UNREACHABLE_TTL = 1200L;
@@ -213,5 +216,15 @@ public final class PickupItemAction extends AbstractAction {
         if (!close) body.inputLook(Positions.yawTo(dx, dz), 0.0F);
         body.inputMove(close ? 0.0F : 1.0F, 0.0F);
         body.inputJump(player.isInWater());
+    }
+
+    @Override
+    public PrimitiveType getPrimitiveType() {
+        return PrimitiveType.PICKUP_ITEM;
+    }
+
+    @Override
+    public PrimitiveTarget getTarget() {
+        return new PrimitiveTarget.Area(radius);
     }
 }

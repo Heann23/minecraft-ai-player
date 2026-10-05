@@ -5,6 +5,9 @@ import me.herry.minecraftAI.ai.memory.MemorySystem;
 import me.herry.minecraftAI.ai.memory.MemoryType;
 import me.herry.minecraftAI.ai.perception.PerceptionSystem;
 import me.herry.minecraftAI.ai.perception.Visibility;
+import me.herry.minecraftAI.ai.primitive.PrimitiveAction;
+import me.herry.minecraftAI.ai.primitive.PrimitiveTarget;
+import me.herry.minecraftAI.ai.primitive.PrimitiveType;
 import me.herry.minecraftAI.ai.team.ShaftRegistry;
 import me.herry.minecraftAI.ai.util.BlockPoint;
 import me.herry.minecraftAI.ai.util.Positions;
@@ -27,7 +30,7 @@ import java.util.Set;
 /**
  * 인벤토리의 블록을 주변의 빈자리에 설치한다.
  */
-public final class PlaceBlockAction extends AbstractAction {
+public final class PlaceBlockAction extends AbstractAction implements PrimitiveAction {
     private static final int TIMEOUT = 60;
     private static final int SEARCH_RADIUS = 2;
     private static final float FACING_TOLERANCE = 20.0F;
@@ -181,5 +184,15 @@ public final class PlaceBlockAction extends AbstractAction {
         if (!block.canPlace(data)) return false;
         // 그 칸에 떨어져 있는 아이템은 블록에 밀려나므로 막지 않는다. 좁은 굴에서는 캔 돌이 유일한 빈칸에 떨어져 있곤 한다.
         return !BlockPlacing.hasBlockingEntity(block);
+    }
+
+    @Override
+    public PrimitiveType getPrimitiveType() {
+        return PrimitiveType.PLACE_BLOCK;
+    }
+
+    @Override
+    public PrimitiveTarget getTarget() {
+        return new PrimitiveTarget.Item(material.name(), 1);
     }
 }
