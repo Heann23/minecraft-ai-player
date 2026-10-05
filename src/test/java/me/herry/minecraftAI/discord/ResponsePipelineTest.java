@@ -55,8 +55,10 @@ class ResponsePipelineTest {
         var playback = new ResponsePipeline.Playback() {
             public void stop() {}
             public void play(Token turn, String text, byte[] pcm, java.util.function.BooleanSupplier valid, java.util.function.IntConsumer heard) throws Exception {
-                plays.incrementAndGet(); playbackEntered.countDown(); await(nextEntered);
-                try { new CountDownLatch(1).await(); } finally { playbackEnded.countDown(); }
+                try {
+                    plays.incrementAndGet(); playbackEntered.countDown(); await(nextEntered);
+                    new CountDownLatch(1).await();
+                } finally { playbackEnded.countDown(); }
             }
         };
         try (var pipeline = new ResponsePipeline(turns, request -> "첫 문장이에요. 취소할 문장이에요.", text -> {
