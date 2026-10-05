@@ -87,4 +87,14 @@ class JdaAudioAdapterTest {
             fixture.audio.close(); fixture.audio.connected(true); assertFalse(fixture.audio.canProvide()); assertFalse(fixture.audio.canReceiveUser());
         }
     }
+    @Test void administrativeQuietBlocksExplicitCallsAndSurvivesReconnectUntilListen() throws Exception {
+        try (var fixture = new Fixture(directory)) {
+            fixture.audio.listening(false).get(3, TimeUnit.SECONDS); assertFalse(fixture.audio.canReceiveUser());
+            fixture.speech(packet(USER, false, (short) 12000)); assertEquals(0, fixture.recognitions.get());
+            fixture.audio.connected(false); fixture.audio.connected(true);
+            fixture.audio.participants(Set.of(USER), Map.of()).get(3, TimeUnit.SECONDS); assertFalse(fixture.audio.canReceiveUser());
+            fixture.audio.listening(true).get(3, TimeUnit.SECONDS); fixture.speech(packet(USER, false, (short) 12000)); fixture.waitFrame();
+            assertNotNull(fixture.audio.provide20MsAudio()); assertEquals(1, fixture.recognitions.get());
+        }
+    }
 }

@@ -128,6 +128,23 @@ public final class DiscordSession implements AutoCloseable {
             return memory.forget(subject);
         });
     }
+    /** Explicit personal slash input, independent of uncertain voice recognition or generated text. */
+    public CompletableFuture<Void> confirmedName(String userId, String name, String interactionId) {
+        if (name == null || !name.matches("[가-힣A-Za-z]{1,20}")) throw new IllegalArgumentException("confirmed name");
+        return confirmedFact(userId, DiscordMemory.Kind.NAME, "preferred", name, interactionId);
+    }
+    public CompletableFuture<Void> confirmedSpeechStyle(String userId, boolean allowed, String interactionId) {
+        return confirmedFact(userId, DiscordMemory.Kind.SPEECH_AGREEMENT, "casual", allowed ? "ALLOWED" : "REFUSED", interactionId);
+    }
+    private CompletableFuture<Void> confirmedFact(String userId, DiscordMemory.Kind kind, String label, String value, String interactionId) {
+        var subject = new DiscordMemory.Subject(settings.guildId(), settings.characterId(), userId);
+        var key = new DiscordMemory.Key(subject, kind, "", label);
+        if (interactionId == null || !interactionId.matches("[A-Za-z0-9_-]{1,80}")) throw new IllegalArgumentException("confirmation source");
+        return post(() -> {
+            ingress.reset(); speech.refreshRoutes(); turns.forget(userId); responses.cancel();
+            return store.remember(key, value, DiscordMemory.Evidence.EXPLICIT, "slash-" + interactionId, 0).thenApply(snapshot -> null);
+        });
+    }
     public PcmPlayback.Frame nextFrame() { return playback.nextFrame(); }
     public boolean submitted(PcmPlayback.Frame frame) { return playback.submitted(frame); }
     public Status status() { return new Status(closed.get(), userCount, events.getQueue().size(), processedInputs.get(), dropped.get(), diagnosticFailures.get(), store.hasFailure()); }

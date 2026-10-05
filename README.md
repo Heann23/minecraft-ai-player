@@ -93,3 +93,34 @@ AI 가 무엇을 하고 있는지 볼 때:
 - AI 는 서버 접속 인원 한 명으로 셉니다.
 - AI 주변의 청크가 로드된 채로 유지됩니다 (`ai.view-distance`).
 - 아직 개발 중이라 AI 가 죽거나 한곳에서 헤맬 수 있습니다. 그럴 때는 `/ai why` 와 `/ai brain` 으로 이유를 볼 수 있습니다.
+
+## Discord 음성 대화 (개발 중)
+
+별도 `plugins/MinecraftAI/discord.yml`로 설정합니다. 기본값은 꺼져 있으며,
+Discord 연결이나 로컬 제공자가 실패해도 게임 AI는 계속 실행합니다.
+이 기능은 개발 브랜치의 초안이며 실제 봇·한국어 모델·음질·지연 시험은 아직 남아 있습니다.
+
+1. 서버 실행 환경에 `MINECRAFTAI_DISCORD_TOKEN`을 설정합니다. 토큰은 설정 파일이나 저장소에 넣지 않습니다.
+2. `discord.yml`의 `guild-id`, `voice-channel-id`를 따옴표로 감싼 ID로 지정합니다.
+3. 로컬 [Ollama](https://docs.ollama.com/api/chat), [whisper.cpp 서버](https://github.com/ggml-org/whisper.cpp/tree/master/examples/server),
+   [Piper HTTP 서버](https://github.com/OHF-Voice/piper1-gpl/blob/main/docs/API_HTTP.md)를 준비합니다.
+   `providers.llm.model`에 설치한 한국어 대화 모델을 지정합니다. 모델을 자동 다운로드하지 않습니다.
+4. `enabled: true`로 설정하고 서버를 재시작합니다. Java 실행 옵션에 `--enable-native-access=ALL-UNNAMED`를 추가합니다.
+
+봇에는 지정한 일반 음성 채널의 보기·접속·발언·메시지 보내기 권한과 `applications.commands`가 필요합니다.
+수신 안내와 관리 명령을 등록한 뒤 해당 채널에 접속하며, Stage 채널과 다른 서버·채널로 이동하지 않습니다.
+"해리야"로 말을 걸고 후속 대화를 이어갑니다. LLM은 대화에만 사용하며 게임 행동을 실행하지 않습니다.
+
+| Discord 명령 | 기능 |
+|---|---|
+| `/herry status` | 음성 연결과 기억 저장 상태 확인 |
+| `/herry name name:<호칭>` | 본인의 이름·호칭 직접 확정 |
+| `/herry speech allowed:<true 또는 false>` | 본인에게 반말할 허락 또는 거절 저장 |
+| `/herry forget` | 본인의 기억과 임시 대화 문맥 삭제 |
+| `/herry quiet`, `/herry listen` | 서버 관리자: 음성 수신·답변 중단 또는 재개 |
+| `/herry leave`, `/herry resume` | 서버 관리자: 퇴장 또는 지정 채널 접속 재개 |
+
+명령 회신은 본인에게만 보입니다. 음성 답변은 같은 채널의 참가자에게 들립니다.
+원본 음성과 인식 전문은 파일로 저장하지 않습니다. 인식 신뢰도가 보정되지 않은 음성만으로
+이름이나 말투 허락을 확정하지 않으며, 개인 명령으로 저장한 최소 기억은 재시작 후 복원합니다.
+백업에서도 삭제 기록을 우선 적용합니다. `audio.minimum-rms`는 초기 잡음 구분 값이며 실제 마이크로 조정해야 합니다.

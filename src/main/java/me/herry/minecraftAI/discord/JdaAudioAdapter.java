@@ -15,7 +15,7 @@ public final class JdaAudioAdapter implements AudioReceiveHandler, AudioSendHand
     private final double minimumRms;
     private final Consumer<String> diagnostic;
     private volatile Set<String> users = Set.of();
-    private boolean connected, closed;
+    private boolean connected, closed, muted;
     private long membership;
     private PcmPlayback.Frame pending;
     public JdaAudioAdapter(DiscordSession session, double minimumRms, Consumer<String> diagnostic) {
@@ -27,35 +27,41 @@ public final class JdaAudioAdapter implements AudioReceiveHandler, AudioSendHand
         if (closed) return;
         connected = value; pending = null; membership++;
         if (!value) { users = Set.of(); observe(session.quiet(true)); observe(session.participants(Set.of(), Map.of())); }
-        else observe(session.quiet(false));
+        else observe(session.quiet(muted));
+    }
+    public synchronized CompletableFuture<Void> listening(boolean enabled) {
+        if (closed) return CompletableFuture.failedFuture(new IllegalStateException("Discord audio closed"));
+        muted = !enabled; pending = null;
+        return session.quiet(!enabled);
     }
     public synchronized CompletableFuture<Void> participants(Set<String> ids, Map<String, String> aliases) {
         if (closed || !connected) return CompletableFuture.completedFuture(null);
         Set<String> next = Set.copyOf(ids); users = Set.of(); long generation = ++membership;
         CompletableFuture<Void> accepted = session.participants(next, aliases);
-        accepted.whenComplete((ignored, failure) -> {
-            synchronized (JdaAudioAdapter.this) { if (!closed && connected && membership == generation && failure == null) users = next; }
+        // Completion must cover the transport gate too. Returning the original future allowed
+        // the first packet to arrive after admission but before this callback published users.
+        return accepted.thenRun(() -> {
+            synchronized (JdaAudioAdapter.this) { if (!closed && connected && membership == generation) users = next; }
         });
-        return accepted;
     }
-    @Override public synchronized boolean canReceiveUser() { return !closed && connected; }
+    @Override public synchronized boolean canReceiveUser() { return !closed && connected && !muted; }
     @Override public void handleUserAudio(UserAudio audio) {
         if (audio.getUser().isBot()) return;
         receive(audio.getUser().getId(), audio.getAudioData(1.0));
     }
     /** Exposed packet boundary for tests; speaker identity still comes only from JDA's user packet. */
     void receive(String user, byte[] pcm) {
-        synchronized (this) { if (closed || !connected || !users.contains(user)) return; }
+        synchronized (this) { if (closed || !connected || muted || !users.contains(user)) return; }
         if (pcm == null || pcm.length != PcmAudio.FRAME_BYTES) { diagnostic.accept("discord-audio-format"); return; }
         observe(session.audio(user, pcm, PcmAudio.rms(pcm) >= minimumRms, false));
     }
     @Override public synchronized boolean canProvide() {
-        if (closed || !connected) return false;
+        if (closed || !connected || muted) return false;
         if (pending == null) pending = session.nextFrame();
         return pending != null;
     }
     @Override public synchronized ByteBuffer provide20MsAudio() {
-        if (closed || !connected || pending == null) return null;
+        if (closed || !connected || muted || pending == null) return null;
         PcmPlayback.Frame frame = pending; pending = null;
         // JDA has requested this frame. This is handoff confirmation, not remote audibility.
         if (!session.submitted(frame)) return null;
