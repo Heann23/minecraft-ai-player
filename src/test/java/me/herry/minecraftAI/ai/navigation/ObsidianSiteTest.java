@@ -110,6 +110,37 @@ class ObsidianSiteTest {
         assertEquals(site.pour(), onTop.pour());
     }
 
+    // 한 번 캐고 난 뒤에는 구멍에서 먼 쪽 둑을 고른다. 물은 가까운 구멍으로만 흘러서 판 위로 퍼지지 않는다.
+    @Test
+    void secondRoundStandsAwayFromTheMinedHoles() {
+        lake(10, 14, 10, 14);
+        // 서쪽 세 줄은 굳었고(흑요석), 그중 서쪽 두 줄의 여섯 칸은 이미 캐서 구멍이다.
+        for (int x = 10; x <= 12; x++) {
+            for (int z = 10; z <= 14; z++) terrain.set(x, SURFACE, z, BlockClass.SOLID);
+        }
+        for (int x = 10; x <= 11; x++) {
+            for (int z = 11; z <= 13; z++) {
+                terrain.set(x, SURFACE, z, BlockClass.OPEN);
+                sources.remove(new BlockPoint(x, SURFACE, z));
+            }
+        }
+        ObsidianSite site = find(new BlockPoint(13, SURFACE, 12));
+        assertNotNull(site);
+        assertTrue(site.stand().x() >= 13, "구멍에서 먼 쪽이어야 한다: " + site.stand());
+        assertEquals(0, site.holes());
+    }
+
+    // 굳은 흑요석 판 위에는 서지 않는다. 둑은 호수 밖의 땅이다.
+    @Test
+    void neverStandsOnThePlateItself() {
+        lake(10, 14, 10, 14);
+        for (BlockPoint cell : sources) terrain.set(cell.x(), cell.y(), cell.z(), BlockClass.SOLID);
+        ObsidianSite site = find(new BlockPoint(12, SURFACE, 12));
+        assertNotNull(site);
+        assertFalse(isLava.test(site.stand()));
+        assertFalse(isLava.test(site.pour()));
+    }
+
     @Test
     void skipsUsedSites() {
         lake(10, 14, 10, 14);

@@ -24,14 +24,18 @@ import java.util.function.Predicate;
  * @param lakeX 호수가 있는 쪽 (stand 에서 본 방향)
  * @param lakeZ 호수가 있는 쪽
  * @param cells 받침 위에서 손이 닿는 호수 표면의 칸 수. 많을수록 좋은 자리다
+ * @param holes 물을 부을 자리 가까이에 있는 캐낸 구멍의 수. 적을수록 좋은 자리다
  */
-public record ObsidianSite(BlockPoint stand, BlockPoint pour, int lakeX, int lakeZ, int cells) {
+public record ObsidianSite(BlockPoint stand, BlockPoint pour, int lakeX, int lakeZ, int cells, int holes) {
     // 받침 위에 선 눈높이에서 손이 닿는 거리. 서버가 허용하는 4.5칸보다 조금 짧게 잡는다.
     public static final double REACH = 4.4;
     // 둑 블록의 바닥에서 눈까지: 둑 한 칸 + 받침 한 칸 + 눈높이
     private static final double EYE_ABOVE_STAND = 1.0 + 1.0 + 1.62;
     private static final int[][] DIRECTIONS = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
     private static final int WINDOW = 4;
+    // 흐르는 물이 내려갈 곳을 찾는 거리
+    private static final int FLOW_SEARCH = 4;
+    private static final int HOLE_PENALTY = 2;
 
     /**
      * 용암 원천 하나(lava)의 주변에서 가장 좋은 자리를 찾는다. 없으면 null.
@@ -49,7 +53,7 @@ public record ObsidianSite(BlockPoint stand, BlockPoint pour, int lakeX, int lak
                 ObsidianSite site = at(terrain, isLake, stand, false);
                 if (site == null) continue;
                 // 손이 닿는 용암이 많은 자리가 먼저다. 같으면 좌표 순서로 골라서, 다시 물어도 같은 자리가 나오게 한다.
-                if (best == null || site.cells > best.cells || site.cells == best.cells && before(site.stand, best.stand)) best = site;
+                if (best == null || site.score() > best.score() || site.score() == best.score() && before(site.stand, best.stand)) best = site;
             }
         }
         return best;
@@ -61,7 +65,8 @@ public record ObsidianSite(BlockPoint stand, BlockPoint pour, int lakeX, int lak
      * @param onPedestal 이미 받침을 놓고 그 위에 서 있는지. 그러면 둑 바로 위 칸은 받침이 차지하고 있다
      */
     public static @Nullable ObsidianSite at(TerrainView terrain, Predicate<BlockPoint> isLake, BlockPoint stand, boolean onPedestal) {
-        if (terrain.classify(stand.x(), stand.y(), stand.z()) != BlockClass.SOLID) return null;
+        // 둑은 호수 밖의 땅이어야 한다. 굳은 흑요석 판 위에 서면 부은 물이 판의 구멍으로만 흘러서 캘 칸이 물에 덮이지 않는다.
+        if (terrain.classify(stand.x(), stand.y(), stand.z()) != BlockClass.SOLID || isLake.test(stand)) return null;
         // 받침 한 칸과 그 위에 설 두 칸이 비어 있어야 한다.
         for (int up = onPedestal ? 2 : 1; up <= 3; up++) {
             if (terrain.classify(stand.x(), stand.y() + up, stand.z()) != BlockClass.OPEN) return null;
@@ -74,8 +79,9 @@ public record ObsidianSite(BlockPoint stand, BlockPoint pour, int lakeX, int lak
                 BlockPoint pour = stand.offset(-lake[1] * side, 0, lake[0] * side);
                 if (!isPourSpot(terrain, isLake, pour, lake)) continue;
                 if (!isDry(terrain, stand, pour, lake)) continue;
-                ObsidianSite site = new ObsidianSite(stand, pour, lake[0], lake[1], reachable(stand, isLake, terrain).size());
-                if (best == null || site.cells > best.cells) best = site;
+                ObsidianSite site = new ObsidianSite(stand, pour, lake[0], lake[1], reachable(stand, isLake, terrain).size(),
+                        holesNear(terrain, pour));
+                if (best == null || site.score() > best.score()) best = site;
             }
         }
         return best;
@@ -113,7 +119,7 @@ public record ObsidianSite(BlockPoint stand, BlockPoint pour, int lakeX, int lak
 
     // 물을 부을 둑 블록: 단단하고, 위가 비어 있고, 호수와 맞닿아 있어서 부은 물이 바로 용암 위로 흐른다.
     private static boolean isPourSpot(TerrainView terrain, Predicate<BlockPoint> isLake, BlockPoint pour, int[] lake) {
-        if (terrain.classify(pour.x(), pour.y(), pour.z()) != BlockClass.SOLID) return false;
+        if (terrain.classify(pour.x(), pour.y(), pour.z()) != BlockClass.SOLID || isLake.test(pour)) return false;
         if (terrain.classify(pour.x(), pour.y() + 1, pour.z()) != BlockClass.OPEN
                 || terrain.classify(pour.x(), pour.y() + 2, pour.z()) != BlockClass.OPEN) return false;
         return isOpenSurface(terrain, isLake, pour.offset(lake[0], 0, lake[1]));
@@ -134,6 +140,27 @@ public record ObsidianSite(BlockPoint stand, BlockPoint pour, int lakeX, int lak
             }
         }
         return true;
+    }
+
+    // 손이 닿는 칸이 많을수록, 물을 빼앗아 갈 구멍이 가까이에 적을수록 좋은 자리다.
+    public int score() {
+        return cells - HOLE_PENALTY * holes;
+    }
+
+    /**
+     * 물을 부을 자리 가까이에 있는, 호수 표면 높이의 빈칸 수. 이미 캐낸 자리다.
+     * 물은 네 칸 안에 내려갈 곳이 있으면 그쪽으로만 흐른다. 그러면 호수 위로 퍼지지 않아서 캘 칸이 물에 덮이지 않는다.
+     */
+    private static int holesNear(TerrainView terrain, BlockPoint pour) {
+        int holes = 0;
+        for (int dx = -FLOW_SEARCH; dx <= FLOW_SEARCH; dx++) {
+            for (int dz = -FLOW_SEARCH; dz <= FLOW_SEARCH; dz++) {
+                if (Math.abs(dx) + Math.abs(dz) > FLOW_SEARCH) continue;
+                BlockClass cell = terrain.classify(pour.x() + dx, pour.y(), pour.z() + dz);
+                if (cell == BlockClass.OPEN || cell == BlockClass.WATER) holes++;
+            }
+        }
+        return holes;
     }
 
     private static boolean before(BlockPoint a, BlockPoint b) {

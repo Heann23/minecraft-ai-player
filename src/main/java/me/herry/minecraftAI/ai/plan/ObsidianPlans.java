@@ -3,6 +3,7 @@ package me.herry.minecraftAI.ai.plan;
 import me.herry.minecraftAI.ai.AIPlayer;
 import me.herry.minecraftAI.ai.action.Action;
 import me.herry.minecraftAI.ai.action.BreakBlockAction;
+import me.herry.minecraftAI.ai.action.CenterOnBlockAction;
 import me.herry.minecraftAI.ai.action.FillBucketAction;
 import me.herry.minecraftAI.ai.action.MoveToAction;
 import me.herry.minecraftAI.ai.action.PickupItemAction;
@@ -92,12 +93,16 @@ public final class ObsidianPlans {
         if (!ai.getInventory().has(Material.WATER_BUCKET)) return List.of();
 
         Predicate<BlockPoint> lava = cell -> isLakeSurface(world, cell);
-        ObsidianSite onPedestal = ObsidianSite.at(terrain, lava, feet.offset(0, -2, 0), true);
+        MemorySystem memory = ai.getMemory();
+        // 한 번 쓴 자리에서는 다시 붓지 않는다. 거기서 캘 수 있는 것은 이미 다 캤다. 같은 자리에서 붓고 거두기만 되풀이하게 된다.
+        Predicate<BlockPoint> used = stand -> memory.contains(MemoryType.CHECKED_PLACE, world.getUID(), stand, ai.getTicks());
+        ObsidianSite onPedestal = used.test(feet.offset(0, -2, 0)) ? null : ObsidianSite.at(terrain, lava, feet.offset(0, -2, 0), true);
         if (onPedestal != null && terrain.classify(feet.x(), feet.y() - 1, feet.z()) == BlockClass.SOLID) {
             ai.debug("Pouring water next to the lava lake, on " + onPedestal.pour());
-            return List.of(new PourBucketAction(onPedestal.pour()), new WaitAction(SPREAD_WAIT_TICKS));
+            // 받침의 한가운데에 서야 한다. 붓는 쪽에서 먼 가장자리에 서 있으면 시선이 받침의 모서리에 걸려서 물이 받침 위(자기 발밑)에 놓인다.
+            return List.of(new CenterOnBlockAction(feet), new PourBucketAction(onPedestal.pour()), new WaitAction(SPREAD_WAIT_TICKS));
         }
-        if (ObsidianSite.at(terrain, lava, feet.offset(0, -1, 0), false) != null) {
+        if (!used.test(feet.offset(0, -1, 0)) && ObsidianSite.at(terrain, lava, feet.offset(0, -1, 0), false) != null) {
             // 한 칸 높은 받침 위에 서 있어야 퍼지는 물에 떠밀리지 않는다.
             return TerrainPlans.pillarUp(ai, null);
         }
@@ -107,10 +112,8 @@ public final class ObsidianPlans {
             // 다이아몬드를 찾던 깊이의 동굴에는 용암 호수가 흔하다.
             return GatherPlans.findDiamond(ai);
         }
-        MemorySystem memory = ai.getMemory();
         ObsidianSite site = ObsidianSite.find(terrain, lava, lake, SITE_RADIUS,
-                stand -> memory.contains(MemoryType.CHECKED_PLACE, world.getUID(), stand, ai.getTicks())
-                        || memory.contains(MemoryType.UNREACHABLE, world.getUID(), stand.offset(0, 1, 0), ai.getTicks()));
+                stand -> used.test(stand) || memory.contains(MemoryType.UNREACHABLE, world.getUID(), stand.offset(0, 1, 0), ai.getTicks()));
         if (site == null) {
             // 설 자리가 없는 호수다 (사방이 용암이거나 천장이 낮다). 다른 호수를 찾게 잊는다.
             ai.debug("No place to stand by the lava at " + lake);
@@ -126,11 +129,19 @@ public final class ObsidianPlans {
         Player player = ai.getPlayer();
         int have = ai.getInventory().count(Material.OBSIDIAN) + looseObsidian(player);
         if (have < Milestone.PORTAL_OBSIDIAN) {
+            int dry = 0;
+            int hidden = 0;
             for (BlockPoint cell : ObsidianSite.reachable(stand, point -> typeAt(world, point) == Material.OBSIDIAN, terrain)) {
-                if (!isMinable(world, cell) || !canSee(player, world, cell)) continue;
-                ai.debug("Mining obsidian at " + cell + " (" + have + " so far)");
-                return List.of(BreakBlockAction.underWater(cell));
+                if (!isMinable(world, cell)) {
+                    dry++;
+                } else if (!canSee(player, world, cell)) {
+                    hidden++;
+                } else {
+                    ai.debug("Mining obsidian at " + cell + " (" + have + " so far)");
+                    return List.of(BreakBlockAction.underWater(cell));
+                }
             }
+            ai.debug("No more obsidian to mine from here: " + dry + " without water above or beside lava, " + hidden + " out of sight");
         }
         ai.debug("Taking the water back from " + water + " with " + have + " obsidian mined");
         return List.of(new FillBucketAction(water), new WaitAction(DRAIN_WAIT_TICKS), new PickupItemAction(LOOSE_RADIUS, false),
