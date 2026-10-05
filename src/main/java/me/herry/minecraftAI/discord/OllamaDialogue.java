@@ -29,6 +29,7 @@ public final class OllamaDialogue implements ResponsePipeline.Model, AutoCloseab
     }
     @Override public String respond(ResponsePipeline.Request request) throws IOException, InterruptedException {
         if (request.permissionQuestion()) throw new IllegalArgumentException("permission questions are code-owned");
+        verifyLocalModel();
         JsonObject payload = payload(request);
         byte[] encoded = payload.toString().getBytes(StandardCharsets.UTF_8);
         if (encoded.length > 256_000) throw new IllegalArgumentException("dialogue payload bounds");
@@ -45,6 +46,26 @@ public final class OllamaDialogue implements ResponsePipeline.Model, AutoCloseab
                 if (content.isEmpty() || content.length() > 4000 || content.contains("<think>") || content.contains("</think>")) throw invalid();
                 return content;
         } catch (IOException | RuntimeException error) { throw invalid(); }
+    }
+    /** A loopback Ollama server can proxy cloud models. Inspect metadata before sending any dialogue. */
+    private void verifyLocalModel() throws IOException, InterruptedException {
+        JsonObject query = new JsonObject(); query.addProperty("model", settings.model()); query.addProperty("verbose", false);
+        var timeout = settings.timeout().compareTo(java.time.Duration.ofSeconds(3)) > 0 ? java.time.Duration.ofSeconds(3) : settings.timeout();
+        var response = http.post(settings.endpoint().resolve("show"), "application/json; charset=utf-8",
+                query.toString().getBytes(StandardCharsets.UTF_8), timeout, 65_536);
+        if (!response.mediaType().equals("application/json")) throw invalid();
+        JsonObject metadata = ProviderJson.read(response.body());
+        for (String key : java.util.List.of("remote_model", "remote_host"))
+            if (metadata.has(key) && !ProviderJson.string(metadata, key).isEmpty()) throw new IOException("local dialogue model is remote");
+        var information = metadata.get("model_info"); var capabilities = metadata.get("capabilities");
+        if (information == null || !information.isJsonObject() || information.getAsJsonObject().isEmpty()
+                || capabilities == null || !capabilities.isJsonArray() || capabilities.getAsJsonArray().size() > 32) throw invalid();
+        boolean completion = false;
+        for (var value : capabilities.getAsJsonArray()) {
+            if (!value.isJsonPrimitive() || !value.getAsJsonPrimitive().isString()) throw invalid();
+            completion |= value.getAsString().equals("completion");
+        }
+        if (!completion) throw invalid();
     }
     private JsonObject payload(ResponsePipeline.Request request) {
         JsonObject body = new JsonObject(); body.addProperty("model", settings.model()); body.addProperty("stream", false);

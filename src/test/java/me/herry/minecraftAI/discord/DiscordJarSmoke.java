@@ -17,6 +17,12 @@ public final class DiscordJarSmoke {
         if (LibDave.getMaxSupportedProtocolVersion() <= 0 || !OpusLibrary.loadFromJar() || !OpusLibrary.isInitialized())
             throw new IllegalStateException("Packaged voice natives failed");
         HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/api/show", exchange -> {
+            exchange.getRequestBody().readAllBytes();
+            byte[] response = "{\"model_info\":{\"architecture\":\"test-local\"},\"capabilities\":[\"completion\"]}".getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "application/json"); exchange.sendResponseHeaders(200, response.length);
+            try { exchange.getResponseBody().write(response); } finally { exchange.close(); }
+        });
         server.createContext("/api/chat", exchange -> {
             exchange.getRequestBody().readAllBytes();
             byte[] response = "{\"done\":true,\"message\":{\"role\":\"assistant\",\"content\":\"반가워요.\"}}".getBytes(StandardCharsets.UTF_8);

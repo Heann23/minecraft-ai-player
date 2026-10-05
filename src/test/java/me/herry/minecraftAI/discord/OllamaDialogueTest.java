@@ -27,9 +27,16 @@ class OllamaDialogueTest {
         final HttpServer server; final AtomicReference<JsonObject> input = new AtomicReference<>();
         final AtomicReference<byte[]> output = new AtomicReference<>("{\"done\":true,\"message\":{\"role\":\"assistant\",\"content\":\"반가워요.\"}}".getBytes(StandardCharsets.UTF_8));
         final AtomicReference<String> type = new AtomicReference<>("application/json");
+        final AtomicReference<String> metadata = new AtomicReference<>("{\"model_info\":{\"general.architecture\":\"test-local\"},\"capabilities\":[\"completion\"]}");
+        final AtomicReference<JsonObject> inspection = new AtomicReference<>();
         final OllamaDialogue model;
         Fixture() throws Exception {
             server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+            server.createContext("/api/show", exchange -> {
+                inspection.set(JsonParser.parseString(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8)).getAsJsonObject());
+                byte[] result = metadata.get().getBytes(StandardCharsets.UTF_8); exchange.getResponseHeaders().set("Content-Type", "application/json");
+                exchange.sendResponseHeaders(200, result.length); try { exchange.getResponseBody().write(result); } finally { exchange.close(); }
+            });
             server.createContext("/api/chat", exchange -> {
                 input.set(JsonParser.parseString(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8)).getAsJsonObject());
                 byte[] result = output.get(); exchange.getResponseHeaders().set("Content-Type", type.get());
@@ -105,5 +112,28 @@ class OllamaDialogueTest {
         for (var entry : Map.<String,Object>of("providers.llm.model", 4, "providers.llm.endpoint", "http://example.com:11434/api/chat",
                 "providers.llm.timeout-seconds", 0, "providers.llm.output-tokens", 2000, "providers.llm.context-tokens", 4096.5).entrySet())
             assertThrows(IllegalArgumentException.class, () -> OllamaSettings.read(key -> key.equals(entry.getKey()) ? entry.getValue() : null));
+    }
+    @Test void cloudMetadataIsRejectedBeforeAnyPrivatePromptOrMemoryIsSent() throws Exception {
+        try (var fixture = new Fixture()) {
+            for (String json : new String[]{"{\"remote_host\":\"https://ollama.com\",\"remote_model\":\"cloud-model\"}",
+                    "{\"remote_host\":\"https://example.com\",\"model_info\":{},\"capabilities\":[\"completion\"]}",
+                    "{\"remote_model\":\"cloud-model\",\"model_info\":{},\"capabilities\":[\"completion\"]}"}) {
+                fixture.metadata.set(json);
+                assertThrows(java.io.IOException.class, () -> fixture.model.respond(request(List.of(agreement("A", "ALLOWED", 0)))));
+                assertNull(fixture.input.get()); assertEquals("test-local", fixture.inspection.get().get("model").getAsString());
+                assertFalse(fixture.inspection.get().has("messages"));
+            }
+        }
+    }
+    @Test void modelInspectionFailsClosedAndIsRepeatedWhenTheModelChanges() throws Exception {
+        try (var fixture = new Fixture()) {
+            assertEquals("반가워요.", fixture.model.respond(request(List.of()))); fixture.input.set(null);
+            for (String metadata : new String[]{"{}", "{\"model_info\":{},\"capabilities\":[\"completion\"]}",
+                    "{\"model_info\":{\"architecture\":\"x\"},\"capabilities\":[\"embedding\"]}",
+                    "{\"remote_host\":7,\"model_info\":{\"architecture\":\"x\"},\"capabilities\":[\"completion\"]}",
+                    "{\"model_info\":{\"architecture\":\"x\"},\"capabilities\":[7]}"}) {
+                fixture.metadata.set(metadata); assertThrows(java.io.IOException.class, () -> fixture.model.respond(request(List.of()))); assertNull(fixture.input.get());
+            }
+        }
     }
 }
