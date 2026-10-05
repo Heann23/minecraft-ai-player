@@ -68,6 +68,12 @@ final class ShaftPlans {
         return !ShaftAccess.canReach(new BukkitTerrainView(ai.getPlayer().getWorld()), feet, FollowPathAction.waypointGoal(above));
     }
 
+    // 접근로가 막혔어도 가까운 굴의 입구가 위에 있으면 먼저 올라갈 길을 만든다.
+    static boolean hasHigherShaft(AIPlayer ai) {
+        return ai.getTeam().getShafts().higher(ai.getWorldId(), ai.getPosition(),
+                SHAFT_CLIMB_RANGE, SHAFT_MIN_DEPTH) != null;
+    }
+
     // 지금 있는 굴을 따라 입구까지 걸어 올라간다.
     static List<Action> followShaftUp(AIPlayer ai) {
         if (shaftFailedRecently(ai)) return List.of();
