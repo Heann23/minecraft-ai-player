@@ -6,6 +6,7 @@ import me.herry.minecraftAI.ai.action.BreakBlockAction;
 import me.herry.minecraftAI.ai.action.CraftItemAction;
 import me.herry.minecraftAI.ai.action.ExploreAreaAction;
 import me.herry.minecraftAI.ai.action.MoveToAction;
+import me.herry.minecraftAI.ai.action.NearbyBlocks;
 import me.herry.minecraftAI.ai.action.PickupItemAction;
 import me.herry.minecraftAI.ai.action.PlaceBlockAction;
 import me.herry.minecraftAI.ai.action.SmeltItemAction;
@@ -20,7 +21,6 @@ import me.herry.minecraftAI.ai.util.Positions;
 import me.herry.minecraftAI.ai.world.Base;
 import org.bukkit.Material;
 import org.bukkit.World;
-import org.bukkit.entity.Player;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
@@ -32,6 +32,8 @@ import java.util.List;
 public final class CraftPlans {
     // 작업대에 손이 닿는 거리
     private static final double TABLE_REACH = 3.5;
+    // 손이 닿지 않는 작업대나 화로에는 바로 옆 칸까지 다가간다.
+    private static final double STATION_CLOSE = 2.0;
     // 한 번에 제련하는 최대 개수와 한 번에 만드는 횃불 개수
     private static final int SMELT_BATCH = 16;
     private static final int TORCH_BATCH = 8;
@@ -145,9 +147,7 @@ public final class CraftPlans {
     private static boolean prepareFurnace(AIPlayer ai, List<Action> actions) {
         BlockPoint furnace = Progression.nearbyFurnace(ai);
         if (furnace != null) {
-            Player player = ai.getPlayer();
-            boolean inReach = Positions.center(player.getWorld(), furnace).distance(player.getEyeLocation()) <= TABLE_REACH;
-            if (!inReach) actions.add(new MoveToAction(PathGoal.reach(furnace, TABLE_REACH), true));
+            approach(ai, actions, furnace, true);
             return true;
         }
         if (!ai.getInventory().has(Material.FURNACE)) {
@@ -168,10 +168,7 @@ public final class CraftPlans {
         BlockPoint table = ownTableNearby(ai);
         if (table == null) return List.of();
         List<Action> actions = new ArrayList<>();
-        Player player = ai.getPlayer();
-        if (Positions.center(player.getWorld(), table).distance(player.getEyeLocation()) > TABLE_REACH) {
-            actions.add(new MoveToAction(PathGoal.reach(table, TABLE_REACH), false));
-        }
+        approach(ai, actions, table, false);
         actions.add(new BreakBlockAction(table));
         actions.add(new PickupItemAction(PACK_DROP_RADIUS, false));
         ai.debug("Packing up the crafting table at " + table);
@@ -198,9 +195,7 @@ public final class CraftPlans {
     private static boolean ensureTable(AIPlayer ai, List<Action> actions) {
         BlockPoint table = Progression.nearbyTable(ai);
         if (table != null) {
-            Player player = ai.getPlayer();
-            boolean inReach = Positions.center(player.getWorld(), table).distance(player.getEyeLocation()) <= TABLE_REACH;
-            if (!inReach) actions.add(new MoveToAction(PathGoal.reach(table, TABLE_REACH), true));
+            approach(ai, actions, table, true);
             return true;
         }
 
@@ -212,6 +207,16 @@ public final class CraftPlans {
         makeRoom(ai, actions, Material.CRAFTING_TABLE);
         actions.add(new PlaceBlockAction(Material.CRAFTING_TABLE, MemoryType.WORKBENCH));
         return true;
+    }
+
+    /**
+     * 작업대나 화로에 손이 닿지 않으면 그 바로 옆 칸까지 가는 행동을 더한다.
+     * 멀리 있을 때뿐 아니라, 가까워도 벽에 가려 있을 때(집 밖에서 집 안의 작업대 등)도 돌아서 다가간다.
+     * 바로 옆 칸에서는 사이를 가로막는 블록이 있을 수 없다.
+     */
+    private static void approach(AIPlayer ai, List<Action> actions, BlockPoint station, boolean rememberUnreachable) {
+        if (NearbyBlocks.canTouch(ai.getPlayer(), station, TABLE_REACH)) return;
+        actions.add(new MoveToAction(PathGoal.reach(station, STATION_CLOSE), rememberUnreachable));
     }
 
     /**

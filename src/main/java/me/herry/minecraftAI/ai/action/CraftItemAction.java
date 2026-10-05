@@ -4,11 +4,8 @@ import me.herry.minecraftAI.ai.AIPlayer;
 import me.herry.minecraftAI.ai.crafting.CraftingSystem;
 import me.herry.minecraftAI.ai.memory.MemoryType;
 import me.herry.minecraftAI.ai.util.BlockPoint;
-import me.herry.minecraftAI.ai.util.Positions;
-import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.Sound;
-import org.bukkit.World;
 import org.bukkit.entity.Player;
 import org.jetbrains.annotations.Nullable;
 
@@ -45,7 +42,7 @@ public final class CraftItemAction extends AbstractAction {
         steps = plan.steps();
 
         if (plan.needsTable()) {
-            table = findTable(ai.getPlayer());
+            table = NearbyBlocks.find(ai.getPlayer(), Material.CRAFTING_TABLE, TABLE_RADIUS);
             if (table == null) {
                 fail("no crafting table nearby");
                 return;
@@ -64,7 +61,7 @@ public final class CraftItemAction extends AbstractAction {
         if (getElapsed() % STEP_INTERVAL != 0) return;
 
         CraftingSystem.CraftStep step = steps.get(stepIndex);
-        if (step.needsTable() && !isTable(player.getWorld(), table)) {
+        if (step.needsTable() && !NearbyBlocks.is(player.getWorld(), table, Material.CRAFTING_TABLE)) {
             fail("crafting table disappeared");
             return;
         }
@@ -81,28 +78,5 @@ public final class CraftItemAction extends AbstractAction {
             ai.getInventory().wearBestArmor();
             succeed();
         }
-    }
-
-    // 손이 닿는 범위에 있는 작업대를 찾는다.
-    private static @Nullable BlockPoint findTable(Player player) {
-        World world = player.getWorld();
-        Location eye = player.getEyeLocation();
-        int ex = eye.getBlockX();
-        int ey = eye.getBlockY();
-        int ez = eye.getBlockZ();
-        for (int dx = -TABLE_RADIUS; dx <= TABLE_RADIUS; dx++) {
-            for (int dz = -TABLE_RADIUS; dz <= TABLE_RADIUS; dz++) {
-                for (int dy = -TABLE_RADIUS; dy <= TABLE_RADIUS; dy++) {
-                    BlockPoint point = new BlockPoint(ex + dx, ey + dy, ez + dz);
-                    if (isTable(world, point) && Positions.center(world, point).distance(eye) <= TABLE_RADIUS + 0.5) return point;
-                }
-            }
-        }
-        return null;
-    }
-
-    private static boolean isTable(World world, @Nullable BlockPoint point) {
-        if (point == null || point.y() < world.getMinHeight() || point.y() >= world.getMaxHeight()) return false;
-        return Positions.isLoaded(world, point) && Positions.block(world, point).getType() == Material.CRAFTING_TABLE;
     }
 }
