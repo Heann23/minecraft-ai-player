@@ -9,6 +9,7 @@ import me.herry.minecraftAI.ai.action.MarkShaftAction;
 import me.herry.minecraftAI.ai.action.MoveToAction;
 import me.herry.minecraftAI.ai.action.PillarUpAction;
 import me.herry.minecraftAI.ai.action.PlaceFillerAction;
+import me.herry.minecraftAI.ai.action.WaitAction;
 import me.herry.minecraftAI.ai.navigation.AStarSearch;
 import me.herry.minecraftAI.ai.navigation.BlockClass;
 import me.herry.minecraftAI.ai.navigation.BukkitTerrainView;
@@ -57,6 +58,7 @@ public final class TerrainPlans {
     private static final int WALL_SEARCH = 12;
     // 몬스터가 이 거리 안에 있는 다른 빈 곳으로는 굴을 뚫지 않는다.
     private static final double COVER_RANGE = 6.0;
+    private static final int HIDDEN_WAIT_TICKS = 100;
 
     private TerrainPlans() {
     }
@@ -133,6 +135,8 @@ public final class TerrainPlans {
         // 동굴 한가운데라 계단을 낼 벽이 바로 옆에 없고 쌓을 블록도 없으면, 가장 가까운 벽 앞으로 가서 그 벽에 계단을 판다.
         List<Action> wall = moveToWall(ai);
         if (!wall.isEmpty()) return wall;
+        // 숨은 자리의 사방이 몬스터 쪽이라 어디로도 뚫을 수 없으면 그 안에서 기다린다. 걸어서 옮겨 갈 곳이 없다.
+        if (RefugePlans.isHidden(ai)) return List.of(new WaitAction(HIDDEN_WAIT_TICKS));
         if (isDeepUnderground(ai.getPlayer().getWorld(), ai.getPosition())) {
             ai.debug("No way up from here, moving elsewhere in the cave");
             return List.of(ExploreAreaAction.cave(4.0, 12.0));
@@ -207,6 +211,8 @@ public final class TerrainPlans {
     // 블록을 하나 쌓고 그 위에 올라선다. 쌓을 블록이 없거나 머리 위가 위험하면 빈 목록.
     public static List<Action> pillarUp(AIPlayer ai, @Nullable Consumer<BlockPoint> onPlaced) {
         if (!PillarUpAction.canPillar(ai)) return List.of();
+        // 올라서려면 머리 위 칸을 캐야 한다. 그 칸이 몬스터가 있는 쪽으로 뚫리면 숨은 자리가 열린다.
+        if (breaksCover(ai, new BukkitTerrainView(ai.getPlayer().getWorld()), ai.getPosition().offset(0, 2, 0))) return List.of();
         ai.debug("Placing a block underfoot to climb up from " + ai.getPosition());
         return List.of(new PillarUpAction(onPlaced));
     }

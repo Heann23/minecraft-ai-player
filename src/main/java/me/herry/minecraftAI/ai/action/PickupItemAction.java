@@ -145,6 +145,9 @@ public final class PickupItemAction extends AbstractAction {
      */
     private boolean clearWay(AIPlayer ai, Player player) {
         if (clears >= MAX_CLEARS) return false;
+        // 몬스터를 피해 숨은 지 얼마 안 됐고 몬스터가 아직 주변에 있으면, 아이템 하나 때문에 벽을 캐지 않는다.
+        // 막아 둔 블록을 캐서 숨은 자리를 몬스터 쪽으로 연 일이 있었다.
+        if (ai.getCombatMemory().isWaryAfterRefuge(ai.getTicks()) && !ai.getPerception().getHostiles().isEmpty()) return false;
         Location eye = player.getEyeLocation();
         Location item = current.getLocation().add(0.0, 0.25, 0.0);
         Vector direction = item.toVector().subtract(eye.toVector());
