@@ -212,8 +212,14 @@ public final class TerrainPlans {
     // 블록을 하나 쌓고 그 위에 올라선다. 쌓을 블록이 없거나 머리 위가 위험하면 빈 목록.
     public static List<Action> pillarUp(AIPlayer ai, @Nullable Consumer<BlockPoint> onPlaced) {
         if (!PillarUpAction.canPillar(ai)) return List.of();
+        World world = ai.getPlayer().getWorld();
+        BukkitTerrainView terrain = new BukkitTerrainView(world);
+        BlockPoint ceiling = ai.getPosition().offset(0, 2, 0);
         // 올라서려면 머리 위 칸을 캐야 한다. 그 칸이 몬스터가 있는 쪽으로 뚫리면 숨은 자리가 열린다.
-        if (RefugePlans.breaksCover(ai, new BukkitTerrainView(ai.getPlayer().getWorld()), ai.getPosition().offset(0, 2, 0))) return List.of();
+        if (RefugePlans.breaksCover(ai, terrain, ceiling)) return List.of();
+        // 그 칸이 지나온 굴의 발판이면 캐는 행동이 거절한다. 그래도 계획을 세우면 그 자리에서 1초에 몇 번씩 실패만 되풀이한다
+        // (기본 시드의 y 54 에서 10분 동안 그랬다). 다른 방법(벽으로 가서 계단 파기, 자리 옮기기)으로 넘어가게 한다.
+        if (cutsShaft(ai, world, terrain, ceiling)) return List.of();
         ai.debug("Placing a block underfoot to climb up from " + ai.getPosition());
         return List.of(new PillarUpAction(onPlaced));
     }
