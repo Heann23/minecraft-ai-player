@@ -7,7 +7,7 @@ import java.util.concurrent.Future;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
-/** Startup and resource cleanup never wait on Bukkit's server thread. No secrets in status or diagnostics. */
+/** Startup/cleanup run on a worker. Only final server shutdown may await cleanup before the plugin JAR closes. */
 public final class DiscordRuntime implements AutoCloseable {
     public enum State { STARTING, DISABLED, RUNNING, FAILED, STOPPED }
     public interface Connection extends AutoCloseable {
@@ -66,6 +66,17 @@ public final class DiscordRuntime implements AutoCloseable {
     public long diagnosticFailures() { return diagnosticFailures.get(); }
     public CompletableFuture<State> started() { return started.copy(); }
     public CompletableFuture<Void> stopped() { return stopped.copy(); }
+    /** No waiting during game ticks or a normal plugin disable. Paper's final stop has already ended game ticking. */
+    public boolean awaitServerShutdown(boolean serverStopping, java.time.Duration timeout) {
+        if (timeout == null || timeout.toMillis() < 1 || timeout.compareTo(java.time.Duration.ofSeconds(6)) > 0)
+            throw new IllegalArgumentException("Discord shutdown bounds");
+        if (!serverStopping) return stopped.isDone();
+        if (!isClosed()) throw new IllegalStateException("Discord close must start before awaiting shutdown");
+        try { stopped.get(timeout.toMillis(), java.util.concurrent.TimeUnit.MILLISECONDS); return true; }
+        catch (java.util.concurrent.TimeoutException timedOut) { report("discord-shutdown-deadline"); return false; }
+        catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); report("discord-shutdown-interrupted"); return false; }
+        catch (java.util.concurrent.ExecutionException failed) { report("discord-shutdown-failed"); return false; }
+    }
     @Override public void close() {
         Connection resource;
         synchronized (gate) {

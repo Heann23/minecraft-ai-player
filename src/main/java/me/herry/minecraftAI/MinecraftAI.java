@@ -68,7 +68,10 @@ public final class MinecraftAI extends JavaPlugin {
         discordGameTask = null;
         if (discordGame != null) discordGame.close();
         discordGame = null;
-        if (discord != null) discord.close();
+        if (discord != null) {
+            discord.close();
+            discord.awaitServerShutdown(Bukkit.isStopping(), java.time.Duration.ofSeconds(6));
+        }
         discord = null;
         if (controller != null) controller.shutdown();
         controller = null;

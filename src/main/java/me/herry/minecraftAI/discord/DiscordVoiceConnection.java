@@ -238,7 +238,13 @@ public final class DiscordVoiceConnection extends ListenerAdapter implements Dis
     @Override public void close() {
         if (!closed.compareAndSet(false, true)) return;
         stop();
-        try { if (jda != null) jda.shutdownNow(); }
+        try {
+            if (jda != null) {
+                jda.shutdownNow();
+                try { if (!jda.awaitShutdown(2, TimeUnit.SECONDS)) diagnostic.accept("discord-gateway-shutdown-deadline"); }
+                catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); diagnostic.accept("discord-gateway-shutdown-interrupted"); }
+            }
+        }
         finally { try { session.close(); } finally { try { speech.close(); } finally { dialogue.close(); } } }
     }
 }

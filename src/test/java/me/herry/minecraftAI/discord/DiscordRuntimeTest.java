@@ -85,6 +85,39 @@ class DiscordRuntimeTest {
         assertEquals(DiscordRuntime.State.FAILED, runtime.started().get(3, TimeUnit.SECONDS)); assertEquals(1, runtime.diagnosticFailures());
         runtime.close(); runtime.stopped().get(3, TimeUnit.SECONDS);
     }
+    @Test void normalDisableDoesNotWaitForBlockingCleanupButFinalServerStopCanAwaitIt() throws Exception {
+        var entered = new CountDownLatch(1); var release = new CountDownLatch(1);
+        var runtime = new DiscordRuntime(() -> settings(true), key -> "token", (settings, token) -> new DiscordRuntime.Connection() {
+            public void stop() {}
+            public void close() { entered.countDown(); ignoringInterrupt(release); }
+        }, code -> fail(code));
+        try {
+            runtime.started().get(3, TimeUnit.SECONDS); runtime.close(); await(entered);
+            assertTimeout(java.time.Duration.ofSeconds(1), () -> assertFalse(runtime.awaitServerShutdown(false, java.time.Duration.ofSeconds(6))));
+            release.countDown(); assertTrue(runtime.awaitServerShutdown(true, java.time.Duration.ofSeconds(3)));
+        } finally { release.countDown(); runtime.close(); }
+    }
+    @Test void finalStopHasFiniteDeadlineAndReportsOnlyCodeEvenIfProviderIgnoresInterrupts() throws Exception {
+        var entered = new CountDownLatch(1); var release = new CountDownLatch(1); var codes = new CopyOnWriteArrayList<String>();
+        var runtime = new DiscordRuntime(() -> settings(true), key -> "token", (settings, token) -> new DiscordRuntime.Connection() {
+            public void stop() {}
+            public void close() { entered.countDown(); ignoringInterrupt(release); }
+        }, codes::add);
+        try {
+            runtime.started().get(3, TimeUnit.SECONDS); runtime.close(); await(entered);
+            assertTimeout(java.time.Duration.ofSeconds(1), () -> assertFalse(runtime.awaitServerShutdown(true, java.time.Duration.ofMillis(20))));
+            assertEquals(List.of("discord-shutdown-deadline"), codes);
+        } finally { release.countDown(); runtime.close(); runtime.stopped().get(3, TimeUnit.SECONDS); }
+    }
+    @Test void finalShutdownRequiresCloseAndRejectsIndefiniteOrUnboundedWait() throws Exception {
+        try (var runtime = new DiscordRuntime(() -> settings(false), key -> null, (settings, token) -> null, ignored -> {})) {
+            runtime.started().get(3, TimeUnit.SECONDS);
+            assertThrows(IllegalStateException.class, () -> runtime.awaitServerShutdown(true, java.time.Duration.ofSeconds(1)));
+            for (var timeout : List.of(java.time.Duration.ZERO, java.time.Duration.ofNanos(1), java.time.Duration.ofSeconds(7)))
+                assertThrows(IllegalArgumentException.class, () -> runtime.awaitServerShutdown(true, timeout));
+            assertThrows(IllegalArgumentException.class, () -> runtime.awaitServerShutdown(true, null));
+        }
+    }
     private static void ignoringInterrupt(CountDownLatch latch) {
         boolean interrupted = false;
         for (;;) { try { latch.await(); break; } catch (InterruptedException ignored) { interrupted = true; } }
