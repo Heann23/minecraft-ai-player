@@ -74,7 +74,7 @@ public final class DiscordSession implements AutoCloseable {
         turns = new ConversationTurns(wallClock, settings.followupMillis(), settings.contextLines());
         memory = new ConversationMemory(turns, store); ingress = new VoiceIngress(java.util.Objects.requireNonNull(capturePolicy), monotonicMillis);
         playback = new PcmPlayback(); responses = new ResponsePipeline(turns, model, voice, playback, this.diagnostic);
-        textConversation = new DiscordTextConversation(settings, store, model, wallClock);
+        textConversation = new DiscordTextConversation(settings, store, model, wallClock, this::beforeTextPreference);
         events = new ThreadPoolExecutor(1, 1, 0, TimeUnit.MILLISECONDS, new ArrayBlockingQueue<>(128), r -> daemon(r, "MinecraftAI-discord-events"));
         speech = new SpeechRecognitionWorker(ingress, recognizer, result -> {
             pendingRecognitions.incrementAndGet();
@@ -214,6 +214,14 @@ public final class DiscordSession implements AutoCloseable {
             textConversation.forget(userId);
             ingress.reset(); speech.refreshRoutes(); turns.forget(userId); responses.cancel();
             return store.remember(key, value, DiscordMemory.Evidence.EXPLICIT, "slash-" + interactionId, 0).thenApply(snapshot -> null);
+        });
+    }
+    private CompletableFuture<Void> beforeTextPreference(String user, java.util.function.BooleanSupplier current) {
+        return post(() -> {
+            if (!current.getAsBoolean()) return done();
+            if (memoryMaintenance) throw new IllegalStateException("memory restore in progress");
+            greetings.clearPending(); ingress.reset(); speech.refreshRoutes(); turns.forget(user); responses.cancel();
+            return done();
         });
     }
     public CompletableFuture<String> backup() {

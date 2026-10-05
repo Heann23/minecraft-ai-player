@@ -7,6 +7,9 @@ import java.util.function.LongSupplier;
 
 /** Private, bounded text context per user. Reuses dialogue and confirmed memory; no speech or game access. */
 public final class DiscordTextConversation implements AutoCloseable {
+    @FunctionalInterface interface BeforePreference {
+        CompletableFuture<Void> begin(String user, java.util.function.BooleanSupplier current);
+    }
     public record Reply(ConversationTurns.Token turn, String text) {}
     public record Status(boolean closed, boolean running, int queued, long completed, long cancelled, long failed, long rejected) {
         public String describe() {
@@ -20,6 +23,7 @@ public final class DiscordTextConversation implements AutoCloseable {
     private final DiscordMemoryStore store;
     private final ResponsePipeline.Model model;
     private final LongSupplier clock;
+    private final BeforePreference beforePreference;
     private final LinkedHashMap<String, ConversationTurns> contexts = new LinkedHashMap<>();
     private final LinkedHashMap<String, Work> work = new LinkedHashMap<>();
     private final Set<CompletableFuture<Reply>> pending = ConcurrentHashMap.newKeySet();
@@ -31,8 +35,12 @@ public final class DiscordTextConversation implements AutoCloseable {
             new ArrayBlockingQueue<>(4), task -> { var thread = new Thread(task, "MinecraftAI-discord-text"); thread.setDaemon(true); return thread; });
     private boolean closed;
     public DiscordTextConversation(DiscordSettings settings, DiscordMemoryStore store, ResponsePipeline.Model model, LongSupplier clock) {
+        this(settings, store, model, clock, (user, current) -> CompletableFuture.completedFuture(null));
+    }
+    DiscordTextConversation(DiscordSettings settings, DiscordMemoryStore store, ResponsePipeline.Model model, LongSupplier clock, BeforePreference beforePreference) {
         this.settings = java.util.Objects.requireNonNull(settings); this.store = java.util.Objects.requireNonNull(store);
         this.model = java.util.Objects.requireNonNull(model); this.clock = java.util.Objects.requireNonNull(clock);
+        this.beforePreference = java.util.Objects.requireNonNull(beforePreference);
     }
     public synchronized CompletableFuture<Reply> reply(String user, String text, String interaction) {
         if (closed) return CompletableFuture.failedFuture(new IllegalStateException("text conversation closed"));
@@ -49,7 +57,7 @@ public final class DiscordTextConversation implements AutoCloseable {
         cancelWork(user);
         var result = new CompletableFuture<Reply>(); pending.add(result);
         var conversation = turns;
-        var task = new FutureTask<Void>(() -> { generate(user, conversation, accepted.token(), result); return null; });
+        var task = new FutureTask<Void>(() -> { generate(user, text, conversation, accepted.token(), result); return null; });
         work.put(user, new Work(turns, accepted.token(), result, task));
         result.whenComplete((reply, error) -> {
             pending.remove(result);
@@ -63,13 +71,25 @@ public final class DiscordTextConversation implements AutoCloseable {
         }
         return result;
     }
-    private void generate(String user, ConversationTurns turns, ConversationTurns.Token token, CompletableFuture<Reply> result) {
+    private void generate(String user, String input, ConversationTurns turns, ConversationTurns.Token token, CompletableFuture<Reply> result) {
         try {
             if (!turns.isCurrent(token)) { result.cancel(false); return; }
             var subject = new DiscordMemory.Subject(settings.guildId(), settings.characterId(), user);
+            var change = ConfirmedTextPreference.read(input);
+            if (change != null) {
+                beforePreference.begin(user, () -> turns.isCurrent(token)).get(3, TimeUnit.SECONDS);
+                CompletableFuture<DiscordMemory.Snapshot> saved;
+                synchronized (this) {
+                    if (!turns.isCurrent(token)) { result.cancel(false); return; }
+                    var key = new DiscordMemory.Key(subject, DiscordMemory.Kind.AVOID_JOKE, "", "all");
+                    saved = store.remember(key, change.value(), DiscordMemory.Evidence.EXPLICIT, "text-" + token.conversation() + "-" + token.turn(), 0);
+                }
+                saved.get(3, TimeUnit.SECONDS);
+            }
             var facts = store.visible(subject, Set.of(user)).get(3, TimeUnit.SECONDS);
             if (!turns.isCurrent(token)) { result.cancel(false); return; }
-            String answer = model.respond(new ResponsePipeline.Request(token, DiscordSession.boundedContext(turns.context()), DiscordSession.boundedMemory(facts), false, () -> turns.isCurrent(token)));
+            String answer = change == null ? model.respond(new ResponsePipeline.Request(token, DiscordSession.boundedContext(turns.context()), DiscordSession.boundedMemory(facts), false, () -> turns.isCurrent(token)))
+                    : change.reply(DiscordPersonalSettings.casual(subject, facts, clock.getAsLong()));
             if (answer == null || answer.isBlank() || answer.length() > 1900) throw new IllegalArgumentException("text reply bounds");
             if (!turns.generated(token, answer)) { result.cancel(false); return; }
             result.complete(new Reply(token, answer));

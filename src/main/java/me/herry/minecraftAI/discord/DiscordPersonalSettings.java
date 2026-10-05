@@ -7,6 +7,13 @@ import static me.herry.minecraftAI.discord.DiscordMemory.*;
 /** Code-owned view of only the invoking user's confirmed preferences. No model or private transcript. */
 final class DiscordPersonalSettings {
     private DiscordPersonalSettings() {}
+    static boolean casual(Subject subject, List<Fact> facts, long now) {
+        var agreements = facts.stream().filter(fact -> fact.key().subject().equals(subject)
+                && fact.key().kind() == Kind.SPEECH_AGREEMENT && fact.key().label().equals("casual")
+                && fact.evidence() == Evidence.EXPLICIT && !fact.expired(now)).toList();
+        return agreements.stream().anyMatch(fact -> fact.value().equals("ALLOWED"))
+                && agreements.stream().noneMatch(fact -> fact.value().equals("REFUSED"));
+    }
     static String describe(Subject subject, Snapshot snapshot, long now) {
         List<Fact> facts = snapshot.facts().values().stream().filter(fact -> fact.key().subject().equals(subject)
                 && fact.key().otherUserId().isEmpty() && fact.evidence() == Evidence.EXPLICIT
