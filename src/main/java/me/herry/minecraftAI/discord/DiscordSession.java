@@ -238,10 +238,22 @@ public final class DiscordSession implements AutoCloseable {
     public PcmPlayback.Frame nextFrame() { return playback.nextFrame(); }
     public CompletableFuture<DiscordTextConversation.Reply> textReply(String user, String text, String interaction) {
         CompletableFuture<DiscordTextConversation.Reply> result = new CompletableFuture<>();
+        var active = new java.util.concurrent.atomic.AtomicReference<CompletableFuture<DiscordTextConversation.Reply>>();
+        result.whenComplete((reply, error) -> {
+            if (result.isCancelled()) { var pending = active.get(); if (pending != null) pending.cancel(true); }
+        });
         post(() -> {
+            if (result.isCancelled()) return done();
             if (memoryMaintenance) throw new IllegalStateException("memory restore in progress");
-            return textConversation.reply(user, text, interaction).thenAccept(result::complete);
-        }).whenComplete((ignored, error) -> { if (error != null) result.completeExceptionally(error); });
+            var pending = textConversation.reply(user, text, interaction); active.set(pending);
+            if (result.isCancelled()) pending.cancel(true);
+            return pending.thenAccept(reply -> { if (!result.complete(reply)) textConversation.discard(reply); });
+        }).whenComplete((ignored, error) -> {
+            if (error == null) return;
+            var cause = error instanceof java.util.concurrent.CompletionException ? error.getCause() : error;
+            if (cause instanceof java.util.concurrent.CancellationException) result.cancel(false);
+            else result.completeExceptionally(error);
+        });
         return result;
     }
     public boolean textCurrent(DiscordTextConversation.Reply reply) { return textConversation.current(reply); }
