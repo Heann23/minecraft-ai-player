@@ -173,6 +173,19 @@ public final class DiscordVoiceConnection extends ListenerAdapter implements Dis
                 hook.editOriginal("채널 제어에는 서버 관리 권한이 필요해요. 내 기억은 본인만 수정할 수 있어요.").queue(ignored -> {}, failed -> diagnostic.accept("discord-command-reply-failed")); return;
             }
             java.util.concurrent.CompletableFuture<String> result;
+            if (event.getSubcommandName().equals("chat")) {
+                session.textReply(event.getUser().getId(), java.util.Objects.requireNonNull(event.getOption("message")).getAsString(), event.getId())
+                        .whenComplete((reply, failed) -> {
+                            if (failed != null || stopped.get() || !session.textCurrent(reply)) {
+                                hook.editOriginal("대화를 처리하지 못했어요. 잠시 뒤 다시 시도해 주세요.").queue(ignored -> {}, failure -> diagnostic.accept("discord-command-reply-failed"));
+                                return;
+                            }
+                            hook.editOriginal(reply.text()).setAllowedMentions(Set.of()).queue(sent -> session.textSubmitted(reply), failure -> {
+                                session.textDiscard(reply); diagnostic.accept("discord-command-reply-failed");
+                            });
+                        });
+                return;
+            }
             try { result = command(event); }
             catch (RuntimeException invalid) { result = java.util.concurrent.CompletableFuture.completedFuture("입력값을 확인해 주세요. 호칭은 한글·영문 1~20자로 입력해요."); }
             result.whenComplete((message, failed) -> hook.editOriginal(failed == null ? message : "처리하지 못했어요. 연결이나 기억 저장 상태를 확인해 주세요.")

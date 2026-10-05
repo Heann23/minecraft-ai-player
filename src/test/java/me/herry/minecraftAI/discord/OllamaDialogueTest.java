@@ -142,6 +142,13 @@ class OllamaDialogueTest {
             assertNull(fixture.input.get()); fixture.model.close(); assertThrows(java.io.IOException.class, () -> fixture.model.respond(normal));
         }
     }
+    @Test void retiredTurnDoesNotSendMetadataOrPrivateDialogue() throws Exception {
+        try (var fixture = new Fixture()) {
+            var normal = request(List.of());
+            assertThrows(java.io.IOException.class, () -> fixture.model.respond(new ResponsePipeline.Request(normal.turn(), normal.context(), normal.memory(), false, () -> false)));
+            assertNull(fixture.inspection.get()); assertNull(fixture.input.get());
+        }
+    }
     @Test void voiceReplyDropsEmojiTrailersButPreservesKoreanAndNumbers() throws Exception {
         try (var fixture = new Fixture()) {
             fixture.output("{\"done\":true,\"message\":{\"role\":\"assistant\",\"content\":\"안녕하세요! 나무 3개가 있나요? 🌲👩🏾‍🌾❤️\"}}");

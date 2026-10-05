@@ -51,11 +51,11 @@ class ResponsePipelineTest {
     @Test void canceledLookaheadCannotBecomePlayedOrHeardContext() throws Exception {
         var turns = turns(); var token = call(turns, "cancel-lookahead");
         var nextEntered = new CountDownLatch(1); var nextEnded = new CountDownLatch(1);
-        var playbackEnded = new CountDownLatch(1); var plays = new AtomicInteger();
+        var playbackEntered = new CountDownLatch(1); var playbackEnded = new CountDownLatch(1); var plays = new AtomicInteger();
         var playback = new ResponsePipeline.Playback() {
             public void stop() {}
             public void play(Token turn, String text, byte[] pcm, java.util.function.BooleanSupplier valid, java.util.function.IntConsumer heard) throws Exception {
-                plays.incrementAndGet(); await(nextEntered);
+                plays.incrementAndGet(); playbackEntered.countDown(); await(nextEntered);
                 try { new CountDownLatch(1).await(); } finally { playbackEnded.countDown(); }
             }
         };
@@ -63,7 +63,7 @@ class ResponsePipelineTest {
             if (text.contains("취소")) { nextEntered.countDown(); try { new CountDownLatch(1).await(); } finally { nextEnded.countDown(); } }
             return new byte[3840];
         }, playback, code -> fail(code))) {
-            pipeline.respond(request(turns, token)); await(nextEntered); pipeline.interrupt("A");
+            pipeline.respond(request(turns, token)); await(nextEntered); await(playbackEntered); pipeline.interrupt("A");
             await(nextEnded); await(playbackEnded); assertEquals(1, plays.get());
             assertTrue(turns.context().stream().noneMatch(Line::assistant));
         }

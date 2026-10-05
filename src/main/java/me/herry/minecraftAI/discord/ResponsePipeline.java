@@ -11,9 +11,9 @@ import java.util.function.Consumer;
 /** Single inference lane. Providers must honor interruption and bounded request deadlines. */
 public final class ResponsePipeline implements AutoCloseable {
     public record Request(ConversationTurns.Token turn, List<ConversationTurns.Line> context, List<DiscordMemory.Fact> memory,
-                          boolean permissionQuestion) {
+                          boolean permissionQuestion, java.util.function.BooleanSupplier current) {
         public Request {
-            Objects.requireNonNull(turn); context = List.copyOf(context); memory = List.copyOf(memory);
+            Objects.requireNonNull(turn); Objects.requireNonNull(current); context = List.copyOf(context); memory = List.copyOf(memory);
             if (context.size() > 128 || memory.size() > 64
                     || context.stream().mapToLong(line -> line.text().length()).sum()
                     + memory.stream().mapToLong(fact -> fact.value().length()).sum() > 32_768)
@@ -21,6 +21,9 @@ public final class ResponsePipeline implements AutoCloseable {
         }
         public Request(ConversationTurns.Token turn, List<ConversationTurns.Line> context, List<DiscordMemory.Fact> memory) {
             this(turn, context, memory, false);
+        }
+        public Request(ConversationTurns.Token turn, List<ConversationTurns.Line> context, List<DiscordMemory.Fact> memory, boolean permissionQuestion) {
+            this(turn, context, memory, permissionQuestion, () -> true);
         }
     }
     public interface Model { String respond(Request request) throws Exception; }
@@ -85,7 +88,8 @@ public final class ResponsePipeline implements AutoCloseable {
         java.util.concurrent.Future<byte[]> prepared = null;
         try {
             if (!valid(request)) return;
-            String response = greeting != null ? greeting : request.permissionQuestion ? "말 편하게 해도 될까요?" : model.respond(request);
+            String response = greeting != null ? greeting : request.permissionQuestion ? "말 편하게 해도 될까요?"
+                    : model.respond(new Request(request.turn, request.context, request.memory, false, () -> valid(request)));
             if (!valid(request) || !turns.generated(request.turn, response)) return;
             int completedCharacters = 0;
             var sentences = SentenceChunks.split(response);

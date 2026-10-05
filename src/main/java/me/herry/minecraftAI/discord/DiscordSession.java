@@ -30,6 +30,7 @@ public final class DiscordSession implements AutoCloseable {
     private final SpeechRecognitionWorker speech;
     private final PcmPlayback playback;
     private final ResponsePipeline responses;
+    private final DiscordTextConversation textConversation;
     private final Consumer<String> diagnostic;
     private final ThreadPoolExecutor events;
     private final ScheduledExecutorService timer;
@@ -72,6 +73,7 @@ public final class DiscordSession implements AutoCloseable {
         turns = new ConversationTurns(wallClock, settings.followupMillis(), settings.contextLines());
         memory = new ConversationMemory(turns, store); ingress = new VoiceIngress(java.util.Objects.requireNonNull(capturePolicy), monotonicMillis);
         playback = new PcmPlayback(); responses = new ResponsePipeline(turns, model, voice, playback, this.diagnostic);
+        textConversation = new DiscordTextConversation(settings, store, model, wallClock);
         events = new ThreadPoolExecutor(1, 1, 0, TimeUnit.MILLISECONDS, new ArrayBlockingQueue<>(128), r -> daemon(r, "MinecraftAI-discord-events"));
         speech = new SpeechRecognitionWorker(ingress, recognizer, result -> {
             pendingRecognitions.incrementAndGet();
@@ -178,6 +180,7 @@ public final class DiscordSession implements AutoCloseable {
         return post(() -> {
             if (memoryMaintenance) throw new IllegalStateException("memory restore in progress");
             greetings.clearPending();
+            textConversation.forget(userId);
             ingress.reset(); speech.refreshRoutes(); turns.cancelCurrent(); responses.cancel();
             return memory.forget(subject);
         });
@@ -197,6 +200,7 @@ public final class DiscordSession implements AutoCloseable {
         return post(() -> {
             if (memoryMaintenance) throw new IllegalStateException("memory restore in progress");
             greetings.clearPending();
+            textConversation.forget(userId);
             ingress.reset(); speech.refreshRoutes(); turns.forget(userId); responses.cancel();
             return store.remember(key, value, DiscordMemory.Evidence.EXPLICIT, "slash-" + interactionId, 0).thenApply(snapshot -> null);
         });
@@ -218,7 +222,7 @@ public final class DiscordSession implements AutoCloseable {
         MemoryFiles.requireBackupName(identifier);
         return post(() -> {
             if (memoryMaintenance) throw new IllegalStateException("memory restore in progress");
-            memoryMaintenance = true; greetings.clearPending(); turns.quiet(true); turns.resetContext(); responses.cancel(); ingress.reset(); speech.refreshRoutes();
+            memoryMaintenance = true; textConversation.reset(); greetings.clearPending(); turns.quiet(true); turns.resetContext(); responses.cancel(); ingress.reset(); speech.refreshRoutes();
             CompletableFuture<Void> result = new CompletableFuture<>();
             store.restoreBackup(identifier).whenComplete((snapshot, error) -> post(() -> {
                 memoryMaintenance = false;
@@ -229,6 +233,17 @@ public final class DiscordSession implements AutoCloseable {
         });
     }
     public PcmPlayback.Frame nextFrame() { return playback.nextFrame(); }
+    public CompletableFuture<DiscordTextConversation.Reply> textReply(String user, String text, String interaction) {
+        CompletableFuture<DiscordTextConversation.Reply> result = new CompletableFuture<>();
+        post(() -> {
+            if (memoryMaintenance) throw new IllegalStateException("memory restore in progress");
+            return textConversation.reply(user, text, interaction).thenAccept(result::complete);
+        }).whenComplete((ignored, error) -> { if (error != null) result.completeExceptionally(error); });
+        return result;
+    }
+    public boolean textCurrent(DiscordTextConversation.Reply reply) { return textConversation.current(reply); }
+    public void textSubmitted(DiscordTextConversation.Reply reply) { textConversation.submitted(reply); }
+    public void textDiscard(DiscordTextConversation.Reply reply) { textConversation.discard(reply); }
     public boolean submitted(PcmPlayback.Frame frame) { return playback.submitted(frame); }
     public Status status() {
         var memoryStatus = store.status();
@@ -240,12 +255,12 @@ public final class DiscordSession implements AutoCloseable {
         for (VoiceIngress.Onset onset : captured.onsets()) { responses.interrupt(onset.route().userId()); speech.refreshRoutes(); }
         for (VoiceIngress.Utterance utterance : captured.completed()) speech.submit(utterance);
     }
-    private static List<ConversationTurns.Line> boundedContext(List<ConversationTurns.Line> context) {
+    static List<ConversationTurns.Line> boundedContext(List<ConversationTurns.Line> context) {
         int first = context.size(), size = 0;
         while (first > 0 && size + context.get(first - 1).text().length() <= 16_000) size += context.get(--first).text().length();
         return List.copyOf(context.subList(first, context.size()));
     }
-    private static List<DiscordMemory.Fact> boundedMemory(List<DiscordMemory.Fact> facts) {
+    static List<DiscordMemory.Fact> boundedMemory(List<DiscordMemory.Fact> facts) {
         List<DiscordMemory.Fact> ordered = facts.stream().sorted(Comparator
                 .comparingInt((DiscordMemory.Fact fact) -> priority(fact.key().kind()))
                 .thenComparing(Comparator.comparingLong(DiscordMemory.Fact::recordedAt).reversed())).toList();
@@ -282,7 +297,7 @@ public final class DiscordSession implements AutoCloseable {
         if (!closed.compareAndSet(false, true)) return;
         timer.shutdownNow();
         synchronized (eventGate) { ingress.close(); turns.close(); userCount = 0; }
-        responses.close(); playback.close(); speech.close();
+        textConversation.close(); responses.close(); playback.close(); speech.close();
         for (Runnable task : events.shutdownNow()) if (task instanceof DiscordSession.Event event) event.result.cancel(false);
         pendingEvents.forEach(result -> result.cancel(false)); store.close();
     }

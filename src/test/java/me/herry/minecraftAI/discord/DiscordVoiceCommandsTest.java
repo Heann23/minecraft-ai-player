@@ -10,7 +10,7 @@ class DiscordVoiceCommandsTest {
             assertFalse(DiscordVoiceCommands.allowed("guild", "guild", action, false));
             assertTrue(DiscordVoiceCommands.allowed("guild", "guild", action, true));
         }
-        for (String action : Set.of("status", "name", "speech", "forget")) assertTrue(DiscordVoiceCommands.allowed("guild", "guild", action, false));
+        for (String action : Set.of("status", "name", "speech", "forget", "chat")) assertTrue(DiscordVoiceCommands.allowed("guild", "guild", action, false));
     }
     @Test void wrongGuildUnknownCommandAndMissingScopeCannotBeAuthorized() {
         assertFalse(DiscordVoiceCommands.allowed("guild", "other", "leave", true));
@@ -20,7 +20,7 @@ class DiscordVoiceCommandsTest {
     }
     @Test void personalCommandsExposeNoTargetUserOrGameExecutionOption() {
         var definition = DiscordVoiceCommands.definition();
-        assertEquals("herry", definition.getName()); assertEquals(11, definition.getSubcommands().size());
+        assertEquals("herry", definition.getName()); assertEquals(12, definition.getSubcommands().size());
         for (var command : definition.getSubcommands()) {
             assertTrue(command.getOptions().stream().noneMatch(option -> option.getName().equals("user") || option.getName().equals("target") || option.getName().equals("ai")));
             if (command.getName().equals("name")) assertEquals(20, command.getOptions().getFirst().getMaxLength());

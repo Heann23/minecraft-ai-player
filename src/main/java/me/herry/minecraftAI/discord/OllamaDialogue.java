@@ -26,14 +26,23 @@ public final class OllamaDialogue implements ResponsePipeline.Model, AutoCloseab
     private final OllamaSettings settings;
     private final LongSupplier clock;
     private final LocalHttp http;
+    private final java.util.concurrent.locks.ReentrantLock inference = new java.util.concurrent.locks.ReentrantLock();
     public OllamaDialogue(OllamaSettings settings, LongSupplier clock) {
         this.settings = java.util.Objects.requireNonNull(settings); this.clock = java.util.Objects.requireNonNull(clock);
         if (settings.model().isEmpty()) throw new IllegalArgumentException("local dialogue model is not configured");
         http = new LocalHttp();
     }
     @Override public String respond(ResponsePipeline.Request request) throws IOException, InterruptedException {
+        inference.lockInterruptibly();
+        try {
+            if (!request.current().getAsBoolean()) throw new IOException("dialogue turn retired");
+            return respondOnce(request);
+        } finally { inference.unlock(); }
+    }
+    private String respondOnce(ResponsePipeline.Request request) throws IOException, InterruptedException {
         if (request.permissionQuestion()) throw new IllegalArgumentException("permission questions are code-owned");
         verifyLocalModel();
+        if (!request.current().getAsBoolean()) throw new IOException("dialogue turn retired");
         JsonObject payload = payload(request);
         byte[] encoded = payload.toString().getBytes(StandardCharsets.UTF_8);
         if (encoded.length > 256_000) throw new IllegalArgumentException("dialogue payload bounds");
