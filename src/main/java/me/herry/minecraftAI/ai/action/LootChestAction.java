@@ -2,6 +2,9 @@ package me.herry.minecraftAI.ai.action;
 
 import me.herry.minecraftAI.ai.AIPlayer;
 import me.herry.minecraftAI.ai.memory.MemoryType;
+import me.herry.minecraftAI.ai.primitive.PrimitiveAction;
+import me.herry.minecraftAI.ai.primitive.PrimitiveTarget;
+import me.herry.minecraftAI.ai.primitive.PrimitiveType;
 import me.herry.minecraftAI.ai.team.Phrases;
 import me.herry.minecraftAI.ai.util.BlockPoint;
 import me.herry.minecraftAI.ai.util.Positions;
@@ -17,7 +20,7 @@ import org.bukkit.inventory.ItemStack;
  * 구조물의 전리품 상자를 열어서 내용물을 챙긴다.
  * 실제 플레이어처럼 상자를 열기 때문에, 그때 전리품이 채워지고 다른 플러그인도 상자가 열린 것을 알 수 있다.
  */
-public final class LootChestAction extends AbstractAction {
+public final class LootChestAction extends AbstractAction implements PrimitiveAction {
     private static final int TIMEOUT = 100;
     private static final double MAX_REACH = 4.9;
     // 상자를 열고 나서 내용물을 꺼내기까지의 시간. 바로 닫으면 연 것처럼 보이지 않는다.
@@ -97,5 +100,15 @@ public final class LootChestAction extends AbstractAction {
             if (leftover == null || leftover.getAmount() < item.getAmount()) taken++;
         }
         return taken;
+    }
+
+    @Override
+    public PrimitiveType getPrimitiveType() {
+        return PrimitiveType.INTERACT_BLOCK;
+    }
+
+    @Override
+    public PrimitiveTarget getTarget() {
+        return new PrimitiveTarget.Block(chest);
     }
 }

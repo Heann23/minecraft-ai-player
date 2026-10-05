@@ -11,6 +11,14 @@ public enum MemoryType {
     COAL_ORE(true),
     IRON_ORE(true),
     DIAMOND_ORE(true),
+    // 자갈. 캐면 가끔 부싯돌이 나온다. 흔해서 저장하지 않는다. 부싯돌을 얻으려고 직접 놓은 자갈도 여기에 적는다.
+    GRAVEL(false),
+    // 양동이로 뜰 수 있는 물 (위가 트인 원천). 강과 바다에 흔해서 저장하지 않는다.
+    WATER_SOURCE(false),
+    // 위가 트인 용암 원천. 물을 부어 흑요석을 만들 수 있는 용암 호수의 표면이다. 피할 곳(DANGER_PLACE)과는 따로 적는다.
+    LAVA_LAKE(true),
+    // 네더 포탈의 틀을 짓기로 한 자리 (서 있을 기준점). 짓다가 떠났다 와도 같은 자리에서 이어서 짓는다.
+    PORTAL_SITE(true),
     WORKBENCH(true),
     // 이 AI 가 직접 놓은 작업대. 다 쓰고 나면 다시 캐서 들고 다닌다. 남이 놓은 작업대는 가져가지 않는다.
     OWN_WORKBENCH(true),

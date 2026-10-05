@@ -6,7 +6,10 @@ import com.mojang.authlib.properties.Property;
 import com.mojang.authlib.properties.PropertyMap;
 import me.herry.minecraftAI.ai.AIBody;
 import me.herry.minecraftAI.ai.AISkin;
+import me.herry.minecraftAI.ai.util.BlockPoint;
 import org.jetbrains.annotations.Nullable;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.core.UUIDUtil;
 import net.minecraft.network.DisconnectionDetails;
 import net.minecraft.network.chat.Component;
@@ -15,14 +18,20 @@ import net.minecraft.server.level.ClientInformation;
 import net.minecraft.server.level.ParticleStatus;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.network.CommonListenerCookie;
+import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.HumanoidArm;
 import net.minecraft.world.entity.player.ChatVisiblity;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.Vec3;
 import org.bukkit.Bukkit;
 import org.bukkit.GameMode;
 import org.bukkit.Location;
 import org.bukkit.craftbukkit.CraftServer;
+import org.bukkit.block.BlockFace;
 import org.bukkit.craftbukkit.CraftWorld;
+import org.bukkit.craftbukkit.block.CraftBlock;
 import org.bukkit.entity.Player;
 import org.bukkit.event.player.PlayerRespawnEvent;
 
@@ -153,5 +162,27 @@ public final class FakePlayerBody implements AIBody {
     @Override
     public boolean isBlockedHorizontally() {
         return handle.horizontalCollision;
+    }
+
+    // 클라이언트가 우클릭 패킷을 보냈을 때 서버가 타는 경로를 그대로 부른다. 시선은 지금의 회전으로 계산된다.
+    @Override
+    public boolean useItem() {
+        if (!isUsable()) return false;
+        ItemStack stack = handle.getItemInHand(InteractionHand.MAIN_HAND);
+        if (stack.isEmpty()) return false;
+        return handle.gameMode.useItem(handle, handle.level(), stack, InteractionHand.MAIN_HAND).consumesAction();
+    }
+
+    @Override
+    public boolean useItemOn(BlockPoint block, BlockFace face) {
+        if (!isUsable()) return false;
+        ItemStack stack = handle.getItemInHand(InteractionHand.MAIN_HAND);
+        if (stack.isEmpty()) return false;
+        BlockPos pos = new BlockPos(block.x(), block.y(), block.z());
+        Direction direction = CraftBlock.blockFaceToNotch(face);
+        // 클라이언트가 보내는 것처럼 그 면의 한가운데를 눌렀다고 알린다.
+        Vec3 hit = Vec3.atCenterOf(pos).add(direction.getStepX() * 0.5, direction.getStepY() * 0.5, direction.getStepZ() * 0.5);
+        BlockHitResult result = new BlockHitResult(hit, direction, pos, false);
+        return handle.gameMode.useItemOn(handle, handle.level(), stack, InteractionHand.MAIN_HAND, result).consumesAction();
     }
 }

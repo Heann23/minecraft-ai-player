@@ -56,7 +56,9 @@ AI 가 무엇을 하고 있는지 볼 때:
 |---|---|
 | `/ai status [이름]` | 체력, 위치, 지금 하는 일 |
 | `/ai why [이름]` | 지금 그 일을 하는 이유 |
-| `/ai plan [이름]` | 지금 세워 둔 계획 |
+| `/ai plan [이름]` | 지금 세워 둔 계획 (목표를 "무엇을 얼마나"로 적은 것과 계획을 세운 스킬 포함) |
+| `/ai observe [이름]` | 마지막으로 판단할 때 AI 가 알고 있던 것 전부 (몸, 가방, 환경, 진행, 기억) |
+| `/ai learn [이름]` | 학습용 기록을 남기고 있는지, 후보 정책이 지금의 규칙과 얼마나 같은 판단을 했는지 |
 | `/ai brain [이름]` | 최근의 판단 기록 |
 | `/ai memory [이름]` | 기억하고 있는 것 (집, 상자, 광석 위치 등) |
 | `/ai inv [이름]` | 인벤토리 보기 |
@@ -87,6 +89,24 @@ AI 가 무엇을 하고 있는지 볼 때:
 | `performance.tick-budget-ms` | 5.0 | 한 틱에서 미뤄도 되는 일에 쓰는 시간 |
 | `persistence.enabled` | true | 서버를 재시작해도 AI 를 되살릴지 |
 | `chat.enabled` | true | AI 가 채팅으로 말할지 |
+| `learning.record` | false | AI 의 판단과 그 결과를 학습용 데이터로 남길지 |
+| `learning.max-megabytes` | 512 | 남길 수 있는 총 크기. 넘으면 더 남기지 않음 |
+| `learning.shadow-policy` | none | 행동은 그대로 두고 판단만 견주어 볼 후보 정책 (`none`, `repeat-last`) |
+
+### 학습용 데이터
+
+`learning.record` 를 켜면 `plugins/MinecraftAI/training-data/<AI 이름>/` 에 에피소드마다 파일 하나(`.jsonl`, 한 줄에 기록 하나)가 생깁니다.
+에피소드는 자율 행동을 켠 때(또는 되살아난 때)부터 죽거나, 멈추거나, 서버가 꺼질 때까지입니다.
+
+- `episode_start` / `episode_end`: 시작과 끝. 끝난 까닭(`DEATH`, `STOPPED`, `REMOVED`, `SHUTDOWN`, `ERROR`, `COMPLETED`)을 구분합니다.
+- `decision`: 새 계획을 세운 판단 하나. 그때 알고 있던 것(`observation`), 지금의 규칙이 고른 목표(`teacher`),
+  후보 정책이 골랐을 목표(`shadow`), 실제로 실행한 목표와 스킬과 행동들(`executed`)이 들어 있습니다.
+- `action`: 그 계획의 행동 하나가 성공하거나 실패한 것.
+- `outcome`: 그 계획이 어떻게 끝났는지(`SUCCEEDED`, `FAILED`, `INTERRUPTED`, `NO_PLAN`)와 목표의 완료 조건이 채워졌는지.
+- `event`: 새로 이룬 항목(`MILESTONE`)과 단계 변화(`STAGE`).
+
+기록은 AI 의 행동에 영향을 주지 않습니다. 파일은 별도 스레드가 쓰고, 쓰지 못하는 기록은 버립니다.
+후보 정책은 관측만 받아서 답을 낼 뿐이고, 실제로 실행하는 것은 언제나 지금의 규칙이 고른 목표입니다.
 
 ## 알아 둘 점
 

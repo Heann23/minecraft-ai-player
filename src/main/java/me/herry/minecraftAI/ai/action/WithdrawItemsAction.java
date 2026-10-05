@@ -1,6 +1,9 @@
 package me.herry.minecraftAI.ai.action;
 
 import me.herry.minecraftAI.ai.AIPlayer;
+import me.herry.minecraftAI.ai.primitive.PrimitiveAction;
+import me.herry.minecraftAI.ai.primitive.PrimitiveTarget;
+import me.herry.minecraftAI.ai.primitive.PrimitiveType;
 import me.herry.minecraftAI.ai.team.Phrases;
 import me.herry.minecraftAI.ai.util.BlockPoint;
 import org.bukkit.Material;
@@ -13,7 +16,7 @@ import java.util.function.Predicate;
 /**
  * 집 상자에서 필요한 재료를 꺼낸다. 새로 캐러 가기 전에, 이미 모아 둔 것이 있으면 그것부터 쓴다.
  */
-public final class WithdrawItemsAction extends ChestAction {
+public final class WithdrawItemsAction extends ChestAction implements PrimitiveAction {
     private final Predicate<Material> wanted;
     private final int maxAmount;
 
@@ -58,5 +61,15 @@ public final class WithdrawItemsAction extends ChestAction {
         }
         ai.getTeam().say(ai, Phrases.fetched(), false);
         succeed();
+    }
+
+    @Override
+    public PrimitiveType getPrimitiveType() {
+        return PrimitiveType.INTERACT_BLOCK;
+    }
+
+    @Override
+    public PrimitiveTarget getTarget() {
+        return new PrimitiveTarget.Block(chest);
     }
 }

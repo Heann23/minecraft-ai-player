@@ -23,6 +23,7 @@ final class AISnapshots {
     private static final String BODY = "body";
     private static final String BUILD = "build";
     private static final String FURNACE = "furnace";
+    private static final String SHAFTS = "shafts";
 
     private AISnapshots() {
     }
@@ -58,6 +59,8 @@ final class AISnapshots {
         // 화로에 넣어 둔 것은 서버를 재시작해도 화로에 남아 있으므로, 어느 화로였는지를 기억해 둔다.
         FurnaceJob furnace = ai.getFurnaceJob();
         if (furnace != null) snapshot.sections.put(FURNACE, furnace.exportState());
+        // 파 놓은 굴. 땅속에서 되살아났을 때 돌아갈 길이고, 그 발판을 캐지 않게 하는 기록이다.
+        snapshot.sections.put(SHAFTS, ai.getTeam().getShafts().exportState(ai.getName()));
         return snapshot;
     }
 
@@ -78,5 +81,8 @@ final class AISnapshots {
         if (!build.isEmpty()) ai.setBuildJob(BuildJob.importState(build));
         Map<String, Object> furnace = snapshot.section(FURNACE);
         if (!furnace.isEmpty()) ai.setFurnaceJob(FurnaceJob.importState(furnace));
+        // 굴 기록이 없는 예전 저장 파일이면 그대로 둔다.
+        Map<String, Object> shafts = snapshot.section(SHAFTS);
+        if (!shafts.isEmpty()) ai.getTeam().getShafts().importState(ai.getName(), shafts);
     }
 }

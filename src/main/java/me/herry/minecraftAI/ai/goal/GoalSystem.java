@@ -47,6 +47,8 @@ public final class GoalSystem {
     public static final int FOOD_STOCK = 8;
     // 땅속으로 내려가기 전에 음식을 이만큼은 챙긴다.
     public static final int TRIP_FOOD = 6;
+    // 땅속으로 내려가기 전에 나무를 이만큼은 챙긴다 (판자로 환산, 원목 4개). 곡괭이 자루와 화로 연료에 든다.
+    public static final int TRIP_WOOD = 16;
     // 음식이 없을 때 허기가 이 값 이하로 떨어지면 하던 일을 멈추고 먹을 것을 찾으러 간다.
     public static final int FORAGE_BELOW = 10;
     public static final double HOME_LEASH = 24.0;
@@ -115,6 +117,20 @@ public final class GoalSystem {
         register(GoalType.MINE_DIAMOND, situation -> situation.knowsDiamond && situation.canMineDiamond && !situation.inventoryFull ? 314.0 : 0.0);
         register(GoalType.FIND_IRON, situation -> wantsIron(situation) && !situation.knowsIron ? 150.0 : 0.0);
         register(GoalType.FIND_DIAMOND, situation -> wantsDiamond(situation) && !situation.knowsDiamond ? 150.0 : 0.0);
+        // 부싯돌은 자갈을 캘 때 열에 한 번쯤 나온다. 캘 자갈이 있으면(아는 것, 가진 것) 바로 하고, 없으면 찾으러 다닌다.
+        register(GoalType.GATHER_FLINT, situation -> situation.need != Situation.Need.FLINT || staysBelow(situation) && !hasGravel(situation) ? 0.0
+                : hasGravel(situation) ? 305.0 : 150.0);
+        // 물은 강이나 호수에서 뜬다. 아는 물이 있으면 바로 가고, 없으면 지상에서 찾는다.
+        register(GoalType.FILL_BUCKET, situation -> situation.nextMilestone != Milestone.WATER_BUCKET || !situation.emptyBucket
+                || staysBelow(situation) && !situation.knowsWater ? 0.0 : situation.knowsWater ? 305.0 : 150.0);
+        register(GoalType.GATHER_OBSIDIAN, GoalSystem::gatherObsidian);
+        // 흑요석 10개와 부싯돌과 부시가 있으면 집 근처에 포탈 틀을 짓고 불을 붙인다. 지상에서 하는 일이라 땅속에서 밤을 나는 동안에는 미룬다.
+        register(GoalType.BUILD_PORTAL, situation -> situation.nextMilestone == Milestone.NETHER_PORTAL && situation.flintAndSteel
+                && !staysBelow(situation) ? 305.0 : 0.0);
+        // 네더에서 할 일을 스스로 할 수 있게 되면 포탈로 들어간다. 아직 그런 일이 없어서, 지금은 사람이 시킬 때만 들어간다.
+        register(GoalType.ENTER_NETHER, situation -> !situation.inNether && situation.knowsPortal && situation.netherWorkReady() ? 300.0 : 0.0);
+        // 네더에 있는데 거기서 할 수 있는 일이 없으면 다른 일보다 먼저 돌아온다. 급한 일(위험, 싸움)만 그보다 앞선다.
+        register(GoalType.LEAVE_NETHER, situation -> situation.inNether && situation.knowsPortal && !situation.netherWorkReady() ? 330.0 : 0.0);
         register(GoalType.EXPLORE, situation -> 50.0);
     }
 
@@ -241,11 +257,27 @@ public final class GoalSystem {
     private static double stockFood(Situation situation) {
         if (!situation.hasPickaxe || situation.inventoryFull) return 0.0;
         if (situation.preyNearby) return situation.foodCount < FOOD_STOCK ? 260.0 : 0.0;
+        // 화로에 넣어 둔 음식이 구워지는 중이면 곧 먹을 것이 생긴다. 그것을 두고 사냥감을 찾으러 떠나지 않는다.
+        if (situation.furnaceBusy && situation.furnaceCooksFood) return 0.0;
         // 광물을 찾아 땅속으로 내려갈 차례인데 음식이 모자라면, 내려가기 전에 지상에서 사냥감을 찾는다.
         // 땅속에는 사냥감이 없어서, 빈손으로 내려가면 굶주린 채로 올라와서 구해야 한다.
-        boolean aboutToDescend = wantsIron(situation) && !situation.knowsIron || wantsDiamond(situation) && !situation.knowsDiamond;
-        boolean shouldSearch = aboutToDescend && !situation.underground && !situation.foodSearchExhausted;
+        boolean shouldSearch = aboutToDescend(situation) && !situation.foodSearchExhausted;
         return shouldSearch && situation.foodCount < TRIP_FOOD ? 160.0 : 0.0;
+    }
+
+    // 지상에 있고, 다음 할 일이 광물을 찾아 땅속으로 내려가는 것인지.
+    public static boolean aboutToDescend(Situation situation) {
+        boolean searching = wantsIron(situation) && !situation.knowsIron || wantsDiamond(situation) && !situation.knowsDiamond;
+        return searching && !situation.underground;
+    }
+
+    /**
+     * 내려가기 전에 나무를 더 챙겨야 하는지. 땅속에는 나무가 없는데 곡괭이 자루(막대)와 화로 연료에 나무가 든다.
+     * 모자란 채로 내려가면 돌 곡괭이가 부서졌을 때 새로 만들지 못하고, 나무를 구하러 밤의 지상까지 올라오게 된다
+     * (고정 시드에서 판자를 연료로 다 쓰고 내려갔다가 그렇게 됐다).
+     */
+    public static boolean packsWoodForTrip(Situation situation) {
+        return aboutToDescend(situation) && situation.plankEquivalent < TRIP_WOOD;
     }
 
     // 캔 철이 다음 장비를 만들 만큼 모였으면 화로에서 제련한다.
@@ -400,6 +432,7 @@ public final class GoalSystem {
         if (situation.need == Situation.Need.WOOD) return true;
         // 제련할 철은 모였는데 화로에 넣을 연료가 없으면 나무를 구한다.
         if (situation.need == Situation.Need.IRON && hasEnoughOre(situation) && !situation.hasFuel) return true;
+        if (packsWoodForTrip(situation)) return true;
         boolean gathering = situation.currentGoal == GoalType.COLLECT_WOOD || situation.currentGoal == GoalType.FIND_WOOD;
         return gathering && situation.plankEquivalent < WOOD_TARGET;
     }
@@ -428,6 +461,21 @@ public final class GoalSystem {
     }
 
     // 다음 장비에 필요한 만큼 철을 아직 못 모았을 때만 철을 찾으러 다닌다.
+    /**
+     * 흑요석은 용암 호수에 물을 부어 굳힌 뒤 다이아몬드 곡괭이로 캔다.
+     * 물을 흘려 놓고 캐는 중에는 끝까지 한다. 그동안 물 양동이가 비어 있어서 다음 단계가 "물 양동이"로 보이지만
+     * 물을 뜨러 가지 않고(FILL_BUCKET 305), 구멍에 떨어진 흑요석도 물을 거둔 뒤에 줍는다(PICKUP_ITEMS 320).
+     */
+    private static double gatherObsidian(Situation situation) {
+        if (situation.obsidianWork) return 322.0;
+        if (situation.nextMilestone != Milestone.OBSIDIAN || !situation.canMineObsidian || !situation.waterBucket) return 0.0;
+        return situation.knowsLava ? 305.0 : 150.0;
+    }
+
+    private static boolean hasGravel(Situation situation) {
+        return situation.knowsGravel || situation.gravel > 0;
+    }
+
     private static boolean wantsIron(Situation situation) {
         return situation.need == Situation.Need.IRON && situation.hasPickaxe && !hasEnoughOre(situation);
     }

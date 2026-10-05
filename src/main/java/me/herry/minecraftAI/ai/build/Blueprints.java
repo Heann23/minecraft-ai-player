@@ -12,7 +12,9 @@ import java.util.List;
 public final class Blueprints {
     public static final String SHELTER = "shelter";
 
+    public static final String PORTAL = "portal";
     private static final Blueprint SHELTER_BLUEPRINT = buildShelter();
+    private static final Blueprint PORTAL_BLUEPRINT = buildPortal();
 
     private Blueprints() {
     }
@@ -23,7 +25,61 @@ public final class Blueprints {
 
     // 저장 파일에 적힌 이름으로 설계도를 찾는다. 없어진 설계도면 null.
     public static @Nullable Blueprint byName(String name) {
+        if (PORTAL.equals(name)) return PORTAL_BLUEPRINT;
         return SHELTER.equals(name) ? SHELTER_BLUEPRINT : null;
+    }
+
+    public static Blueprint portal() {
+        return PORTAL_BLUEPRINT;
+    }
+
+    /**
+     * 네더 포탈의 틀. 기준점(AI 가 서는 칸)의 한 칸 북쪽(-Z)에 동서로 선다.
+     * 모서리를 뺀 4x5 틀은 흑요석 10개다. 모서리 네 칸은 흔한 블록으로 채운다: 옆 기둥과 윗줄은 맞닿은 블록이 있어야
+     * 놓을 수 있는데 모서리가 그 받침이 된다.
+     *
+     * <pre>
+     *   앞에서 본 모습 (O 흑요석, c 모서리의 흔한 블록, . 비워야 하는 칸)     위에서 본 모습
+     *     dy=4   c  O  O  c                                               dz=-1   c O O c     ← 틀
+     *     dy=3   O  .  .  O                                               dz= 0   . @ . .     ← AI 가 서는 기준점
+     *     dy=2   O  .  .  O
+     *     dy=1   O  .  .  O
+     *     dy=0   c  O  O  c      ← 땅 위에 놓는다 (dy=0 이 서 있는 높이)
+     *          dx=-1  0  1  2
+     * </pre>
+     *
+     * 기준점에서 가장 먼 칸(윗줄 모서리)이 눈에서 3.7칸이라 한자리에서 다 지을 수 있다.
+     */
+    private static Blueprint buildPortal() {
+        final int left = -1;
+        final int right = 2;
+        final int top = 4;
+        final int frameZ = -1;
+        List<Blueprint.Part> parts = new ArrayList<>();
+        // 1. 틀 안쪽과 서 있을 자리를 비운다.
+        for (int dy = 1; dy < top; dy++) {
+            for (int dx = left + 1; dx < right; dx++) parts.add(new Blueprint.Part(dx, dy, frameZ, BlockRole.CLEAR));
+        }
+        for (int dy = 0; dy <= 1; dy++) parts.add(new Blueprint.Part(0, dy, 0, BlockRole.CLEAR));
+        // 2. 틀과 서 있을 자리의 바닥.
+        for (int dx = left; dx <= right; dx++) {
+            parts.add(new Blueprint.Part(dx, -1, frameZ, BlockRole.FLOOR));
+            parts.add(new Blueprint.Part(dx, -1, 0, BlockRole.FLOOR));
+        }
+        // 3. 아랫줄, 양쪽 기둥을 한 층씩, 윗줄(모서리 먼저) 순서로 놓는다. 블록은 먼저 놓인 이웃에 붙는다.
+        for (int dx = left; dx <= right; dx++) parts.add(new Blueprint.Part(dx, 0, frameZ, roleAt(dx, left, right)));
+        for (int dy = 1; dy < top; dy++) {
+            parts.add(new Blueprint.Part(left, dy, frameZ, BlockRole.FRAME));
+            parts.add(new Blueprint.Part(right, dy, frameZ, BlockRole.FRAME));
+        }
+        parts.add(new Blueprint.Part(left, top, frameZ, BlockRole.WALL));
+        parts.add(new Blueprint.Part(right, top, frameZ, BlockRole.WALL));
+        for (int dx = left + 1; dx < right; dx++) parts.add(new Blueprint.Part(dx, top, frameZ, BlockRole.FRAME));
+        return new Blueprint(PORTAL, parts);
+    }
+
+    private static BlockRole roleAt(int dx, int left, int right) {
+        return dx == left || dx == right ? BlockRole.WALL : BlockRole.FRAME;
     }
 
     /**

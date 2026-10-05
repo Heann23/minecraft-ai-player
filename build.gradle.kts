@@ -9,7 +9,7 @@ plugins {
 }
 
 group = "me.herry"
-version = "1.1.9"
+version = "1.8.0"
 description = "Autonomous AI player"
 
 java {

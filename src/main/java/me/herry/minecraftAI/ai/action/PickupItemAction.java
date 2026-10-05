@@ -5,6 +5,9 @@ import me.herry.minecraftAI.ai.AIPlayer;
 import me.herry.minecraftAI.ai.memory.MemoryType;
 import me.herry.minecraftAI.ai.navigation.NavigationSystem;
 import me.herry.minecraftAI.ai.navigation.PathGoal;
+import me.herry.minecraftAI.ai.primitive.PrimitiveAction;
+import me.herry.minecraftAI.ai.primitive.PrimitiveTarget;
+import me.herry.minecraftAI.ai.primitive.PrimitiveType;
 import me.herry.minecraftAI.ai.util.BlockPoint;
 import me.herry.minecraftAI.ai.util.Positions;
 import org.bukkit.FluidCollisionMode;
@@ -20,7 +23,7 @@ import org.bukkit.util.Vector;
 /**
  * 주변에 떨어진 아이템으로 걸어가서 줍는다. 아이템은 가까이 가면 자동으로 주워진다.
  */
-public final class PickupItemAction extends AbstractAction {
+public final class PickupItemAction extends AbstractAction implements PrimitiveAction {
     private static final int TIMEOUT = 400;
     private static final int PER_ITEM_TICKS = 100;
     private static final long UNREACHABLE_TTL = 1200L;
@@ -145,6 +148,9 @@ public final class PickupItemAction extends AbstractAction {
      */
     private boolean clearWay(AIPlayer ai, Player player) {
         if (clears >= MAX_CLEARS) return false;
+        // 몬스터를 피해 숨은 지 얼마 안 됐고 몬스터가 아직 주변에 있으면, 아이템 하나 때문에 벽을 캐지 않는다.
+        // 막아 둔 블록을 캐서 숨은 자리를 몬스터 쪽으로 연 일이 있었다.
+        if (ai.getCombatMemory().isWaryAfterRefuge(ai.getTicks()) && !ai.getPerception().getHostiles().isEmpty()) return false;
         Location eye = player.getEyeLocation();
         Location item = current.getLocation().add(0.0, 0.25, 0.0);
         Vector direction = item.toVector().subtract(eye.toVector());
@@ -210,5 +216,15 @@ public final class PickupItemAction extends AbstractAction {
         if (!close) body.inputLook(Positions.yawTo(dx, dz), 0.0F);
         body.inputMove(close ? 0.0F : 1.0F, 0.0F);
         body.inputJump(player.isInWater());
+    }
+
+    @Override
+    public PrimitiveType getPrimitiveType() {
+        return PrimitiveType.PICKUP_ITEM;
+    }
+
+    @Override
+    public PrimitiveTarget getTarget() {
+        return new PrimitiveTarget.Area(radius);
     }
 }

@@ -9,6 +9,8 @@ import org.bukkit.Tag;
 import org.bukkit.World;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.function.Predicate;
+
 /**
  * 집을 지을 자리를 고른다. 특정 좌표에 기대지 않고, 지금 서 있는 곳 주변에서 가장 평평하고 손볼 것이 적은 땅을 찾는다.
  * 물이나 용암이 있는 곳, 나무가 서 있는 곳은 피한다.
@@ -32,6 +34,13 @@ public final class SiteFinder {
      * @return 건물의 기준점(실내 한가운데, 서 있는 높이). 지을 만한 자리가 없으면 null.
      */
     public static @Nullable BlockPoint find(World world, BlockPoint feet, Blueprint blueprint) {
+        return find(world, feet, blueprint, site -> true);
+    }
+
+    /**
+     * @param allowed 그 기준점에 지어도 되는지 (다른 건물과 겹치지 않는지 등)
+     */
+    public static @Nullable BlockPoint find(World world, BlockPoint feet, Blueprint blueprint, Predicate<BlockPoint> allowed) {
         BukkitTerrainView terrain = new BukkitTerrainView(world);
         BlockPoint best = null;
         double bestScore = Double.MAX_VALUE;
@@ -45,7 +54,7 @@ public final class SiteFinder {
                 if (world.getHighestBlockYAt(x, z, HeightMap.MOTION_BLOCKING_NO_LEAVES) >= y) continue;
 
                 int cost = cost(world, terrain, blueprint, x, y, z);
-                if (cost > MAX_COST) continue;
+                if (cost > MAX_COST || !allowed.test(new BlockPoint(x, y, z))) continue;
                 // 손볼 것이 적은 자리를 먼저, 같으면 가까운 자리를 고른다.
                 double score = cost * 4.0 + Math.sqrt(dx * dx + dz * dz) + Math.abs(y - feet.y());
                 if (score < bestScore) {

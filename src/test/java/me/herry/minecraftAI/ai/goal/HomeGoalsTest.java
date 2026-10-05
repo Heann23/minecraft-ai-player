@@ -101,6 +101,8 @@ class HomeGoalsTest {
         Situation situation = new Situation();
         situation.nextMilestone = Milestone.IRON_PICKAXE;
         situation.need = Situation.Need.IRON;
+        // 내려갈 때 챙길 나무는 이미 있다 (없으면 나무부터 구한다).
+        situation.plankEquivalent = GoalSystem.TRIP_WOOD;
         situation.ironNeeded = 3;
         situation.homeKnown = true;
         situation.homeSheltered = true;
@@ -151,6 +153,8 @@ class HomeGoalsTest {
         Situation situation = new Situation();
         situation.nextMilestone = Milestone.IRON_PICKAXE;
         situation.need = Situation.Need.IRON;
+        // 내려갈 때 챙길 나무는 이미 있다 (없으면 나무부터 구한다).
+        situation.plankEquivalent = GoalSystem.TRIP_WOOD;
         situation.ironNeeded = 3;
         situation.hasPickaxe = true;
         situation.knowsIron = true;
@@ -207,6 +211,8 @@ class HomeGoalsTest {
         situation.stage = Stage.DIAMOND_AGE;
         situation.nextMilestone = Milestone.DIAMOND_PICKAXE;
         situation.need = Situation.Need.DIAMOND;
+        // 내려갈 때 챙길 나무는 이미 있다 (없으면 나무부터 구한다).
+        situation.plankEquivalent = GoalSystem.TRIP_WOOD;
         situation.diamondsNeeded = 3;
         situation.hasPickaxe = true;
         assertEquals(GoalType.EXPLORE, select(situation));

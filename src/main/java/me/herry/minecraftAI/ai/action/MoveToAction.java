@@ -3,11 +3,14 @@ package me.herry.minecraftAI.ai.action;
 import me.herry.minecraftAI.ai.AIPlayer;
 import me.herry.minecraftAI.ai.navigation.NavigationSystem;
 import me.herry.minecraftAI.ai.navigation.PathGoal;
+import me.herry.minecraftAI.ai.primitive.PrimitiveAction;
+import me.herry.minecraftAI.ai.primitive.PrimitiveTarget;
+import me.herry.minecraftAI.ai.primitive.PrimitiveType;
 
 /**
  * 목표 지점까지 걸어서 이동한다.
  */
-public final class MoveToAction extends AbstractAction {
+public final class MoveToAction extends AbstractAction implements PrimitiveAction {
     private static final int TIMEOUT = 1200;
 
     private final PathGoal goal;
@@ -45,5 +48,15 @@ public final class MoveToAction extends AbstractAction {
     @Override
     protected void onEnd(AIPlayer ai) {
         ai.getNavigation().stop();
+    }
+
+    @Override
+    public PrimitiveType getPrimitiveType() {
+        return PrimitiveType.MOVE_TO;
+    }
+
+    @Override
+    public PrimitiveTarget getTarget() {
+        return new PrimitiveTarget.Block(goal.target());
     }
 }

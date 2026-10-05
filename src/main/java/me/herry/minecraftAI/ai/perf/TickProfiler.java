@@ -11,6 +11,7 @@ public final class TickProfiler {
         PERCEPTION("인식"),
         BLOCK_SCAN("블록 검색"),
         DECISION("상황 요약+목표 선택"),
+        OBSERVATION("관측 스냅샷"),
         PLANNING("계획"),
         ACTION("행동 실행"),
         // 행동 실행 안에 포함된 시간이다. 따로 보려고 한 번 더 잰다.

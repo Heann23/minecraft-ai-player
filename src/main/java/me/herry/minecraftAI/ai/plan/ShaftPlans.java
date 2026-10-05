@@ -3,6 +3,7 @@ package me.herry.minecraftAI.ai.plan;
 import me.herry.minecraftAI.ai.AIPlayer;
 import me.herry.minecraftAI.ai.action.Action;
 import me.herry.minecraftAI.ai.action.FollowPathAction;
+import me.herry.minecraftAI.ai.action.WaitAction;
 import me.herry.minecraftAI.ai.navigation.BukkitTerrainView;
 import me.herry.minecraftAI.ai.navigation.ShaftAccess;
 import me.herry.minecraftAI.ai.team.ShaftRegistry;
@@ -22,6 +23,9 @@ final class ShaftPlans {
     // 굴을 따라갈 때 한 번에 경로를 찾는 구간의 길이
     private static final int SHAFT_STRIDE = 12;
     private static final long SHAFT_RETRY_WINDOW = 600L;
+    private static final double DEAD_END_RANGE = 2.0;
+    // 막다른 굴의 끝에서 이만큼 되돌아간 자리에서 다른 쪽으로 새로 판다.
+    private static final int DEAD_END_BACK_OFF = 6;
 
     private ShaftPlans() {
     }
@@ -82,6 +86,26 @@ final class ShaftPlans {
         }
         ai.debug("Walking up the tunnel to " + shaft.entrance());
         return List.of(new FollowPathAction(waypoints));
+    }
+
+    /**
+     * 굴의 끝에 서 있는데 어느 쪽으로도 더 팔 수 없을 때 부른다. 처음에는 적어 두고 잠깐 기다렸다가 다시 보게 하고,
+     * 되풀이되면 그 굴을 막다른 굴로 치고 몇 단 되돌아간다. 다음 계획에서 그 자리부터 다른 쪽으로 새 굴을 판다.
+     * 막다른 굴로 치지 않으면, 다른 데로 옮겨 갔다가도 "이미 파 둔 굴"이라며 이 끝으로 되돌아오기를 끝없이 되풀이한다.
+     */
+    static List<Action> leaveDeadEnd(AIPlayer ai) {
+        ShaftRegistry shafts = ai.getTeam().getShafts();
+        BlockPoint feet = ai.getPosition();
+        // 한 칸만 기록된 굴(파기 시작하자마자 막힌 자리)은 굴로 치지 않는다. 기다려도 막다른 굴이 되지 않으니 예전처럼 자리를 옮긴다.
+        if (!shafts.noteBlockedEnd(ai.getWorldId(), feet, DEAD_END_RANGE, ai.getTicks())) return List.of();
+        ShaftRegistry.Shaft dead = shafts.deadEndNear(ai.getWorldId(), feet, DEAD_END_RANGE);
+        if (dead == null) return List.of(new WaitAction((int) ShaftRegistry.BLOCKED_RECHECK_TICKS));
+
+        List<BlockPoint> points = dead.points();
+        BlockPoint back = points.get(Math.max(0, points.size() - 1 - DEAD_END_BACK_OFF));
+        if (back.equals(feet)) return List.of();
+        ai.debug("Nothing more to dig at the end of the tunnel at " + dead.end() + ", going back to " + back + " to dig another way");
+        return List.of(new FollowPathAction(List.of(back)));
     }
 
     // 굴을 따라가려다 방금 실패했는지. 굴이 끊기거나 막혔다는 뜻이라 한동안 그 굴에 기대지 않는다.

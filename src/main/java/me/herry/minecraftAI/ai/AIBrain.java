@@ -9,16 +9,20 @@ import me.herry.minecraftAI.ai.brain.DecisionTrace;
 import me.herry.minecraftAI.ai.brain.Directive;
 import me.herry.minecraftAI.ai.brain.GoalReasons;
 import me.herry.minecraftAI.ai.brain.RecoveryTracker;
+import me.herry.minecraftAI.ai.experience.Experience;
 import me.herry.minecraftAI.ai.goal.GoalSystem;
 import me.herry.minecraftAI.ai.goal.GoalType;
+import me.herry.minecraftAI.ai.goal.LegacyGoalAdapter;
 import me.herry.minecraftAI.ai.goal.Milestone;
 import me.herry.minecraftAI.ai.goal.Situation;
+import me.herry.minecraftAI.ai.goal.model.Goal;
 import me.herry.minecraftAI.ai.navigation.NavigationSystem;
 import me.herry.minecraftAI.ai.perception.Perception;
 import me.herry.minecraftAI.ai.perf.TickProfiler;
 import me.herry.minecraftAI.ai.plan.BuildPlans;
 import me.herry.minecraftAI.ai.plan.Plan;
 import me.herry.minecraftAI.ai.plan.Planner;
+import me.herry.minecraftAI.ai.skill.SkillPlan;
 import me.herry.minecraftAI.ai.util.BlockPoint;
 import org.jetbrains.annotations.Nullable;
 
@@ -52,6 +56,8 @@ final class AIBrain {
     // 쉬게 한 목표는, 그 자리에서 이만큼 떨어진 곳으로 옮기면 다시 시도한다.
     private static final double REST_RELEASE_DISTANCE = 12.0;
     private static final String NO_PLAN = "(계획 없음)";
+    // 갇힌 곳에서 길을 파서 나오는 계획은 어느 스킬의 것도 아니라서 이 이름으로 적는다.
+    private static final String DIG_WAY_OUT = "DigWayOut";
 
     private record Choice(GoalType goal, double score, DecisionTrace.Origin origin) {
     }
@@ -61,6 +67,8 @@ final class AIBrain {
     private final GoalSystem goals = new GoalSystem();
     private final RecoveryTracker recovery = new RecoveryTracker();
     private final DecisionLog log = new DecisionLog();
+    // 목표 명세, 스킬, 관측, 학습용 기록. 판단에는 쓰지 않는다.
+    private final DecisionJournal journal;
     // 쉬게 한 목표와, 쉬게 할 때 서 있던 자리
     private final Map<GoalType, BlockPoint> restedAt = new EnumMap<>(GoalType.class);
 
@@ -76,9 +84,10 @@ final class AIBrain {
     private int trappedStreak;
     private boolean escaping;
 
-    AIBrain(AIPlayer ai, Planner planner) {
+    AIBrain(AIPlayer ai, AIServices services) {
         this.ai = ai;
-        this.planner = planner;
+        this.planner = services.planner();
+        this.journal = DecisionJournal.create(ai, services);
     }
 
     void tick() {
@@ -109,6 +118,7 @@ final class AIBrain {
         plan = null;
         trappedStreak = 0;
         currentGoal = GoalType.IDLE;
+        journal.reset();
         goals.clearCooldowns();
         recovery.reset();
         restedAt.clear();
@@ -123,6 +133,14 @@ final class AIBrain {
 
     GoalType getCurrentGoal() {
         return currentGoal;
+    }
+
+    boolean isEscaping() {
+        return escaping;
+    }
+
+    DecisionJournal getJournal() {
+        return journal;
     }
 
     @Nullable GoalType getForcedGoal() {
@@ -150,6 +168,7 @@ final class AIBrain {
         if (directive != null && plan != null && !isCombatGoal(currentGoal)) {
             plan.cancel(ai);
             plan = null;
+            journal.planEnded(ai.getTicks(), Experience.Outcome.INTERRUPTED, "asked to do something else");
         }
     }
 
@@ -205,6 +224,10 @@ final class AIBrain {
         Choice choice = choose(situation, now);
         profiler.end(TickProfiler.Section.DECISION, started);
 
+        started = profiler.begin();
+        journal.observe(situation, currentGoal, getCurrentActionName(), describePlan(), escaping, recovery.restCount(currentGoal));
+        profiler.end(TickProfiler.Section.OBSERVATION, started);
+
         boolean planDone = plan == null || plan.isFinished();
         // 몬스터를 피해 달아나던 중에 용암이나 물에 빠지면 목표는 그대로 "위험 탈출"이라서 계획이 바뀌지 않는다.
         // 달아나는 행동으로는 헤엄쳐 나올 수 없으므로 계획을 버리고 다시 세우게 한다.
@@ -212,6 +235,7 @@ final class AIBrain {
                 && choice.goal() == GoalType.ESCAPE_DANGER && currentGoal == GoalType.ESCAPE_DANGER) {
             plan.cancel(ai);
             planDone = true;
+            journal.planEnded(now, Experience.Outcome.INTERRUPTED, "fell into a hazard while running away");
         }
         // 긴급한 목표는 하던 행동을 끊고 바로 시작한다. 그 밖의 목표는 현재 계획이 끝난 뒤에 바꾼다.
         if (choice.goal() != currentGoal && (planDone || choice.score() >= GoalSystem.EMERGENCY_SCORE)) {
@@ -271,6 +295,7 @@ final class AIBrain {
         ai.debug("Goal changed: " + currentGoal + " -> " + choice.goal());
         if (plan != null) plan.cancel(ai);
         plan = null;
+        journal.planEnded(now, Experience.Outcome.INTERRUPTED, "switched to " + choice.goal());
         recovery.onGoalSwitched(currentGoal);
         ai.getMemory().setLastGoal(currentGoal.name());
         previousGoal = currentGoal;
@@ -305,6 +330,7 @@ final class AIBrain {
             if (!way.isEmpty()) {
                 plan = new Plan(currentGoal, way);
                 escaping = true;
+                journal.decided(now, activeTrace, LegacyGoalAdapter.toGoal(currentGoal, lastSituation), DIG_WAY_OUT, true, way);
                 waitingForPlan = false;
                 log.notePlan(plan.describe());
                 ai.debug("Trapped, digging a way out: " + plan.describe());
@@ -312,18 +338,25 @@ final class AIBrain {
             }
         }
 
-        List<Action> actions = planner.plan(currentGoal, ai);
+        // 고른 목표를 "무엇을 얼마나"로 옮겨 적고, 그것을 맡는 스킬에게 계획을 세우게 한다.
+        Goal spec = LegacyGoalAdapter.toGoal(currentGoal, lastSituation);
+        SkillPlan chosen = planner.plan(spec, ai, lastSituation);
+        List<Action> actions = chosen.actions();
         if (actions.isEmpty()) {
+            actions = List.of(new WaitAction(NO_PLAN_WAIT_TICKS));
+            journal.decided(now, activeTrace, spec, "", false, actions);
+            journal.planEnded(now, Experience.Outcome.NO_PLAN, "no plan");
             ai.debug("No plan available for " + currentGoal);
             log.notePlan(NO_PLAN);
             log.noteFailure(now, currentGoal, NO_PLAN, "no plan");
             onPlanFailed(now, "no plan");
-            plan = new Plan(currentGoal, List.of(new WaitAction(NO_PLAN_WAIT_TICKS)));
+            plan = new Plan(currentGoal, actions);
             waitingForPlan = true;
             return;
         }
         plan = new Plan(currentGoal, actions);
         waitingForPlan = false;
+        journal.decided(now, activeTrace, spec, chosen.skill(), false, actions);
         log.notePlan(plan.describe());
         ai.debug("Plan for " + currentGoal + ": " + plan.describe());
     }
@@ -332,20 +365,30 @@ final class AIBrain {
         Action action = plan == null ? null : plan.current();
         if (action == null) return;
 
-        if (action.getStatus() == ActionStatus.READY) ai.debug("Action started: " + action.getName());
+        if (action.getStatus() == ActionStatus.READY) {
+            ai.debug("Action started: " + action.getName());
+            journal.actionStarted(now);
+        }
         action.update(ai);
 
         if (action.getStatus() == ActionStatus.SUCCESS) {
             ai.debug("Action success: " + action.getName());
+            journal.actionFinished(plan.position(), action, now);
             plan.advance();
             // 계획이 없어서 기다린 것은 성공으로 세지 않는다. 그래야 계획을 못 세우는 목표가 결국 쉬게 된다.
             if (plan.isFinished() && !waitingForPlan) onPlanSucceeded();
+            if (plan.isFinished()) journal.planEnded(now, Experience.Outcome.SUCCEEDED, "");
         } else if (action.getStatus() == ActionStatus.FAILED) {
+            journal.actionFinished(plan.position(), action, now);
+            journal.planEnded(now, Experience.Outcome.FAILED, action.getName() + ": " + action.getFailReason());
             ai.debug("Action failed: " + action.getName() + " (" + action.getFailReason() + ")");
             ai.getMemory().recordFailure(action.getName(), action.getFailReason(), now);
             log.noteFailure(now, currentGoal, action.getName(), action.getFailReason());
-            if (NavigationSystem.FAIL_TRAPPED.equals(action.getFailReason())) trappedStreak++;
-            onPlanFailed(now, action.getName() + ": " + action.getFailReason());
+            boolean trapped = NavigationSystem.FAIL_TRAPPED.equals(action.getFailReason());
+            if (trapped) trappedStreak++;
+            // 길을 한 단 파고 가 보니 아직 갇혀 있는 것은 목표의 실패로 세지 않는다. 바로 다음 단을 판다.
+            if (recovery.countsAsFailure(trapped)) onPlanFailed(now, action.getName() + ": " + action.getFailReason());
+            else trappedStreak = TRAPPED_THRESHOLD;
             // 계획의 나머지는 버리고, 다음 판단 때 현재 상황에 맞춰 다시 세운다.
             plan = null;
             ai.debug("Replanning...");
@@ -355,7 +398,8 @@ final class AIBrain {
     private void onPlanSucceeded() {
         // 길을 파서 빠져나온 것은 목표를 이룬 것이 아니다. 그것까지 성공으로 세면, 길을 내도 닿지 못하는 목표가
         // "실패 → 탈출 → 실패"를 끝없이 되풀이하면서도 쉬지 않는다.
-        if (!escaping) recovery.onPlanSucceeded(currentGoal);
+        if (escaping) recovery.onEscapeStep();
+        else recovery.onPlanSucceeded(currentGoal);
         // 한 단을 파고 나온 직후에는 아직 갇혀 있을 수 있다. 다음 이동이 또 막히면 바로 이어서 판다.
         trappedStreak = escaping ? TRAPPED_THRESHOLD - 1 : 0;
     }

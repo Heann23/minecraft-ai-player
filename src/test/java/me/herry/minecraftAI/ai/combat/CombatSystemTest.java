@@ -84,6 +84,66 @@ class CombatSystemTest {
         assertFalse(memory.wasEngaged());
     }
 
+    // 회귀: 다이아몬드 깊이의 굴이 몬스터가 가득한 동굴로 뚫렸다. 보이는 스켈레톤 하나를 잡으러 굴 밖으로 나섰다가
+    // 몇 초 만에 거미, 크리퍼, 좀비에게 둘러싸여 죽었다 (철 검과 갑옷, 보이는 것은 1마리, 주변에는 14마리).
+    @Test
+    void countsTheMonstersItCannotSeeBeforeGoingOutToFightUnderground() {
+        double ironGear = 3.36;
+        List<Hostile> den = List.of(new Hostile(ThreatType.SKELETON, 9, true), zombie(6), zombie(8), zombie(9),
+                new Hostile(ThreatType.SPIDER, 7, false), new Hostile(ThreatType.CREEPER, 8, false),
+                new Hostile(ThreatType.CREEPER, 9, false), new Hostile(ThreatType.SKELETON, 10, false));
+        // 보이는 스켈레톤 하나만 보면 싸울 만하지만, 주변을 다 합치면 감당할 수 없다.
+        assertEquals(Decision.FIGHT, combat.decide(20, 20, ironGear, List.of(den.get(0))));
+        assertTrue(combat.isOutnumbered(20, 20, ironGear, den));
+
+        // 주변에 한두 마리뿐이면 평소대로 싸운다.
+        assertFalse(combat.isOutnumbered(20, 20, ironGear, List.of(den.get(0), zombie(8))));
+        // 교전 범위 밖에 있는 몬스터는 세지 않는다.
+        List<Hostile> farAway = List.of(zombie(12), zombie(14), zombie(15), zombie(20), zombie(22), zombie(25),
+                new Hostile(ThreatType.CREEPER, 18, false), new Hostile(ThreatType.CREEPER, 19, false),
+                new Hostile(ThreatType.CREEPER, 21, false));
+        assertFalse(combat.isOutnumbered(20, 20, ironGear, farAway));
+        // 다쳤으면 더 적은 수에도 나서지 않는다.
+        List<Hostile> few = List.of(zombie(5), zombie(7), zombie(9), new Hostile(ThreatType.SKELETON, 8, false));
+        assertFalse(combat.isOutnumbered(20, 20, ironGear, few));
+        assertTrue(combat.isOutnumbered(8, 20, ironGear, few));
+    }
+
+    // 회귀: 숨으려고 판 구덩이에 좀비가 따라 들어왔다. 달아나기가 "성공"으로 끝나기를 되풀이하는 20초 동안
+    // 1초에 한 대씩 맞기만 하다가 죽었다. 달아나기 시작한 뒤에도 계속 맞고 있으면 벗어나지 못한 것이다.
+    @Test
+    void knowsWhenItKeepsGettingHitWhileRunningAway() {
+        CombatMemory memory = new CombatMemory();
+        // 싸우다가 맞은 것은 세지 않는다.
+        memory.trackFleeing(false, 1000);
+        memory.onHit(1000);
+        memory.onHit(1020);
+        memory.onHit(1040);
+        assertEquals(0, memory.hitsWhileFleeing(1040, 100));
+        memory.trackFleeing(true, 1050);
+        assertEquals(0, memory.hitsWhileFleeing(1050, 100));
+
+        memory.onHit(1060);
+        memory.onHit(1080);
+        memory.trackFleeing(true, 1090);
+        assertEquals(2, memory.hitsWhileFleeing(1090, 100));
+        memory.onHit(1100);
+        assertEquals(3, memory.hitsWhileFleeing(1100, 100));
+        // 오래전에 맞은 것은 세지 않는다.
+        assertEquals(1, memory.hitsWhileFleeing(1190, 100));
+        // 달아나기를 그만두면 처음부터 다시 센다.
+        memory.trackFleeing(false, 1200);
+        assertEquals(0, memory.hitsWhileFleeing(1200, 100));
+        memory.trackFleeing(true, 1210);
+        assertEquals(0, memory.hitsWhileFleeing(1210, 100));
+
+        // 여러 번 맞아도 최근 것만 기억한다.
+        for (int i = 0; i < 20; i++) memory.onHit(1220 + i);
+        assertEquals(8, memory.hitsWhileFleeing(1240, 100));
+        memory.reset();
+        assertEquals(0, memory.hitsWhileFleeing(1240, 100));
+    }
+
     @Test
     void noHostilesMeansNoCombat() {
         assertEquals(Decision.NONE, combat.decide(20, 20, HAND, List.of()));

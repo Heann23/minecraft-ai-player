@@ -1,5 +1,6 @@
 package me.herry.minecraftAI.config;
 
+import me.herry.minecraftAI.ai.policy.GoalPolicies;
 import org.bukkit.configuration.file.FileConfiguration;
 
 import java.util.function.Consumer;
@@ -43,6 +44,12 @@ public final class AIConfig {
 
     public final boolean persistenceEnabled;
     public final int autosaveInterval;
+
+    // 판단과 그 결과를 학습용 데이터로 남길지, 남길 수 있는 총 크기
+    public final boolean recordExperience;
+    public final long experienceMaxBytes;
+    // 실제 행동은 그대로 두고 판단만 견주어 볼 후보 정책의 이름 (GoalPolicies). 쓰지 않으면 none
+    public final String shadowPolicy;
 
     public final boolean debugEnabled;
 
@@ -88,6 +95,11 @@ public final class AIConfig {
 
         persistenceEnabled = config.getBoolean("persistence.enabled", true);
         autosaveInterval = clamp(config.getInt("persistence.autosave-interval", 6000), 200, 72000);
+
+        recordExperience = config.getBoolean("learning.record", false);
+        experienceMaxBytes = clamp(config.getInt("learning.max-megabytes", 512), 1, 65536) * 1024L * 1024L;
+        shadowPolicy = ConfigRules.oneOf("learning.shadow-policy", config.getString("learning.shadow-policy", GoalPolicies.NONE),
+                GoalPolicies.NAMES, GoalPolicies.NONE, warn);
 
         debugEnabled = config.getBoolean("debug.enabled", false);
     }

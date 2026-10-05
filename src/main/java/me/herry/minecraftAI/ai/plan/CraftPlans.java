@@ -12,6 +12,7 @@ import me.herry.minecraftAI.ai.action.PlaceBlockAction;
 import me.herry.minecraftAI.ai.action.SmeltItemAction;
 import me.herry.minecraftAI.ai.crafting.CraftingSystem;
 import me.herry.minecraftAI.ai.goal.Milestone;
+import me.herry.minecraftAI.ai.goal.Situation;
 import me.herry.minecraftAI.ai.memory.MemoryEntry;
 import me.herry.minecraftAI.ai.memory.MemoryType;
 import me.herry.minecraftAI.ai.navigation.PathGoal;
@@ -63,7 +64,7 @@ public final class CraftPlans {
     }
 
     static List<Action> craftTool(AIPlayer ai) {
-        Milestone milestone = Progression.next(ai);
+        Milestone milestone = chosenMilestone(ai);
         if (milestone == null) return List.of();
 
         Material target = Progression.materialOf(milestone);
@@ -77,13 +78,30 @@ public final class CraftPlans {
         return actions;
     }
 
+    /**
+     * 판단할 때 고른 "다음에 이룰 것". 땅속에서 밤을 나는 동안에는 지상에서만 준비할 수 있는 항목(방패, 집)을 건너뛰고
+     * 그다음 것을 고르는데, 여기서 순서대로 다시 고르면 건너뛴 항목을 만들려다가 계획이 서지 않는다.
+     */
+    private static @Nullable Milestone chosenMilestone(AIPlayer ai) {
+        Situation situation = ai.getLastSituation();
+        return situation == null || situation.nextMilestone == null ? Progression.next(ai) : situation.nextMilestone;
+    }
+
     // 굴을 팔 때 막 쓸 돌 곡괭이를 만든다. 좋은 곡괭이는 그것이 있어야만 캘 수 있는 블록에 쓴다.
     static List<Action> craftWorkTool(AIPlayer ai) {
-        CraftingSystem.CraftPlan plan = ai.getCrafting().plan(Material.STONE_PICKAXE, 1, ai.getInventory().snapshot());
+        return craftItem(ai, Material.STONE_PICKAXE, 1);
+    }
+
+    /**
+     * 가진 재료로 그 아이템을 만든다. 작업대가 필요하면 가까운 것 앞으로 가거나 가진 것을 놓는다.
+     * 재료가 모자라거나 작업대를 구할 방법이 없으면 빈 목록.
+     */
+    public static List<Action> craftItem(AIPlayer ai, Material item, int amount) {
+        CraftingSystem.CraftPlan plan = ai.getCrafting().plan(item, amount, ai.getInventory().snapshot());
         if (!plan.isFeasible()) return List.of();
         List<Action> actions = new ArrayList<>();
         if (plan.needsTable() && !ensureTable(ai, actions)) return List.of();
-        actions.add(new CraftItemAction(Material.STONE_PICKAXE, 1));
+        actions.add(new CraftItemAction(item, amount));
         return actions;
     }
 

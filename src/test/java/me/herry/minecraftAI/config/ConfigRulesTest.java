@@ -73,4 +73,20 @@ class ConfigRulesTest {
         assertEquals(6, ConfigRules.criticalHealth(10, 6, warnings::add));
         assertEquals(1, warnings.size());
     }
+
+    // 정해진 이름 중 하나여야 하는 값: 대소문자와 앞뒤 공백은 봐주고, 목록에 없으면 기본값으로 바꾸면서 알린다.
+    @Test
+    void oneOfFallsBackAndWarnsOnUnknownNames() {
+        List<String> warnings = new ArrayList<>();
+        List<String> allowed = List.of("none", "repeat-last");
+        assertEquals("repeat-last", ConfigRules.oneOf("learning.shadow-policy", " Repeat-Last ", allowed, "none", warnings::add));
+        assertEquals("none", ConfigRules.oneOf("learning.shadow-policy", "none", allowed, "none", warnings::add));
+        assertTrue(warnings.isEmpty());
+
+        assertEquals("none", ConfigRules.oneOf("learning.shadow-policy", "repeat_last", allowed, "none", warnings::add));
+        assertEquals("none", ConfigRules.oneOf("learning.shadow-policy", null, allowed, "none", warnings::add));
+        assertEquals(2, warnings.size());
+        assertTrue(warnings.get(0).contains("learning.shadow-policy"));
+        assertTrue(warnings.get(0).contains("repeat_last"));
+    }
 }

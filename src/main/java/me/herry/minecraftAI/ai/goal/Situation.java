@@ -9,7 +9,7 @@ import me.herry.minecraftAI.ai.survival.SurvivalSystem;
  */
 public final class Situation {
     // 다음 장비를 만들기 위해 지금 부족한 재료의 종류
-    public enum Need { NONE, WOOD, STONE, IRON, DIAMOND, OTHER }
+    public enum Need { NONE, WOOD, STONE, IRON, DIAMOND, FLINT, OTHER }
 
     public GoalType currentGoal = GoalType.IDLE;
 
@@ -82,6 +82,27 @@ public final class Situation {
     // 가진 다이아몬드와 다음 장비에 필요한 개수
     public int diamonds;
     public int diamondsNeeded;
+    // 가진 자갈의 개수와, 캐러 갈 수 있는 자갈을 알고 있는지. 부싯돌은 자갈을 캘 때 가끔 나온다.
+    public int gravel;
+    public boolean knowsGravel;
+    // 빈 양동이가 있는지와, 가서 뜰 수 있는 물을 알고 있는지
+    public boolean emptyBucket;
+    public boolean knowsWater;
+    // 물 양동이와 다이아몬드 곡괭이가 있는지, 갈 수 있는 용암 호수를 아는지, 받침 위에서 물을 흘려 놓고 흑요석을 캐는 중인지
+    public boolean waterBucket;
+    public boolean canMineObsidian;
+    public boolean knowsLava;
+    public boolean obsidianWork;
+    // 부싯돌과 부시가 있는지. 포탈 틀에 불을 붙일 때 쓴다.
+    public boolean flintAndSteel;
+    // 네더에 있는지와, 지금 있는 차원에서 들어갈 네더 포탈을 아는지
+    public boolean inNether;
+    public boolean knowsPortal;
+
+    // 다음에 이룰 것이 네더에서 하는 일이고, 그것을 스스로 할 수 있는지. 할 수 없으면 네더에 들어가 있을 까닭이 없다.
+    public boolean netherWorkReady() {
+        return nextMilestone != null && nextMilestone.stage() == Stage.NETHER && nextMilestone.isAutomated();
+    }
     // 화로에 넣을 연료(석탄, 숯, 나무)가 있는지
     public boolean hasFuel;
     // 석탄과 숯의 개수, 횃불의 개수

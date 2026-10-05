@@ -20,6 +20,8 @@ class FurnaceGoalsTest {
         situation.foodCount = GoalSystem.TRIP_FOOD;
         situation.nextMilestone = Milestone.IRON_PICKAXE;
         situation.need = Situation.Need.IRON;
+        // 내려갈 때 챙길 나무는 이미 있다 (없으면 나무부터 구한다).
+        situation.plankEquivalent = GoalSystem.TRIP_WOOD;
         situation.ironNeeded = 3;
         situation.hasPickaxe = true;
         situation.canMineIron = true;
@@ -182,9 +184,30 @@ class FurnaceGoalsTest {
         situation.furnaceBusy = false;
         situation.nextMilestone = Milestone.IRON_PICKAXE;
         situation.need = Situation.Need.IRON;
+        // 내려갈 때 챙길 나무는 이미 있다 (없으면 나무부터 구한다).
+        situation.plankEquivalent = GoalSystem.TRIP_WOOD;
         situation.ironNeeded = 3;
         situation.rawIron = 3;
         situation.hasFuel = true;
         assertEquals(GoalType.SMELT_IRON, select(situation));
+    }
+
+    // 회귀: 굴을 세 단 내려간 자리에서 가진 돼지고기 7개를 모두 화로에 넣었더니 "음식이 0개"가 됐고,
+    // 굽는 것을 두고 사냥감을 찾으러 나서려 했다 (굴 안이라 갈 길이 없어서 실패를 되풀이했다).
+    @Test
+    void doesNotGoHuntingWhileItsFoodIsCooking() {
+        Situation situation = smelting();
+        situation.foodCount = 0;
+        situation.furnaceCooksFood = true;
+        assertEquals(0.0, goals.score(GoalType.STOCK_FOOD, situation));
+        assertEquals(GoalType.FIND_IRON, select(situation));
+
+        // 굽는 것이 철이면 음식은 여전히 없다. 내려가기 전에 사냥감을 찾는다.
+        situation.furnaceCooksFood = false;
+        assertEquals(GoalType.STOCK_FOOD, select(situation));
+        // 사냥감이 바로 보이면 굽는 중이어도 잡는다.
+        situation.furnaceCooksFood = true;
+        situation.preyNearby = true;
+        assertEquals(GoalType.STOCK_FOOD, select(situation));
     }
 }

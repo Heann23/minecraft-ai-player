@@ -101,8 +101,17 @@ public final class FurnacePlans {
         if (noWalkingPath && !NearbyBlocks.canTouch(ai.getPlayer(), job.pos(), CraftPlans.TABLE_REACH)) {
             List<Action> step = TerrainPlans.stepToward(ai, job.pos(), false);
             if (!step.isEmpty()) {
+                ai.setFurnaceBlockedSince(-1L);
                 ai.debug("Making a way back to the furnace at " + job.pos());
                 return step;
+            }
+            // 지금 선 자리에서는 길을 낼 수 없어도(몬스터를 피해 숨은 직후, 물가 등) 조금 뒤나 옮겨 간 자리에서는 될 수 있다.
+            // 한동안 계속 길을 내지 못했을 때만 넣어 둔 것을 포기한다.
+            long now = ai.getTicks();
+            if (ai.getFurnaceBlockedSince() < 0) ai.setFurnaceBlockedSince(now);
+            if (!FurnaceJob.shouldGiveUp(ai.getFurnaceBlockedSince(), now)) {
+                ai.debug("Cannot make a way back to the furnace at " + job.pos() + " from here, trying again later");
+                return List.of();
             }
             ai.debug("No way back to the furnace at " + job.pos() + ", giving up what was put in it");
             ai.setFurnaceJob(null);

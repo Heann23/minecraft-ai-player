@@ -8,6 +8,9 @@ import me.herry.minecraftAI.ai.inventory.HandPolicy;
 import me.herry.minecraftAI.ai.memory.MemorySystem;
 import me.herry.minecraftAI.ai.navigation.BlockClass;
 import me.herry.minecraftAI.ai.navigation.BukkitTerrainView;
+import me.herry.minecraftAI.ai.primitive.PrimitiveAction;
+import me.herry.minecraftAI.ai.primitive.PrimitiveTarget;
+import me.herry.minecraftAI.ai.primitive.PrimitiveType;
 import me.herry.minecraftAI.ai.util.Positions;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
@@ -25,7 +28,7 @@ import org.jetbrains.annotations.Nullable;
 /**
  * 대상에게 다가가서 죽을 때까지 공격한다. 몬스터와의 전투와 동물 사냥에 함께 쓴다.
  */
-public final class AttackEntityAction extends AbstractAction {
+public final class AttackEntityAction extends AbstractAction implements PrimitiveAction {
     private static final int TIMEOUT = 600;
     private static final double ATTACK_RANGE = 3.0;
     private static final double GIVE_UP_DISTANCE = 40.0;
@@ -316,5 +319,15 @@ public final class AttackEntityAction extends AbstractAction {
         return BukkitTerrainView.classify(world.getBlockAt(x, y, z).getType()) == BlockClass.OPEN
                 && BukkitTerrainView.classify(world.getBlockAt(x, y + 1, z).getType()) == BlockClass.OPEN
                 && BukkitTerrainView.classify(world.getBlockAt(x, y - 1, z).getType()) == BlockClass.SOLID;
+    }
+
+    @Override
+    public PrimitiveType getPrimitiveType() {
+        return PrimitiveType.ATTACK;
+    }
+
+    @Override
+    public PrimitiveTarget getTarget() {
+        return new PrimitiveTarget.Entity(target.getType().name(), target.getUniqueId().toString());
     }
 }

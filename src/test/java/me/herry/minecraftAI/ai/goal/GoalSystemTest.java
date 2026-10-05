@@ -81,6 +81,8 @@ class GoalSystemTest {
         situation.foodCount = GoalSystem.TRIP_FOOD;
         situation.nextMilestone = Milestone.IRON_PICKAXE;
         situation.need = Situation.Need.IRON;
+        // 내려갈 때 챙길 나무는 이미 있다 (없으면 나무부터 구한다).
+        situation.plankEquivalent = GoalSystem.TRIP_WOOD;
         situation.ironNeeded = 3;
         situation.hasPickaxe = true;
         assertEquals(GoalType.FIND_IRON, select(situation));
@@ -110,6 +112,8 @@ class GoalSystemTest {
         situation.foodCount = GoalSystem.TRIP_FOOD;
         situation.nextMilestone = Milestone.IRON_PICKAXE;
         situation.need = Situation.Need.IRON;
+        // 내려갈 때 챙길 나무는 이미 있다 (없으면 나무부터 구한다).
+        situation.plankEquivalent = GoalSystem.TRIP_WOOD;
         situation.ironNeeded = 3;
         situation.hasPickaxe = true;
         situation.canMineIron = true;
@@ -296,6 +300,8 @@ class GoalSystemTest {
         Situation situation = new Situation();
         situation.nextMilestone = Milestone.IRON_CHESTPLATE;
         situation.need = Situation.Need.IRON;
+        // 내려갈 때 챙길 나무는 이미 있다 (없으면 나무부터 구한다).
+        situation.plankEquivalent = GoalSystem.TRIP_WOOD;
         situation.ironNeeded = 8;
         situation.hasPickaxe = true;
         situation.canMineIron = true;
@@ -313,6 +319,8 @@ class GoalSystemTest {
         Situation situation = new Situation();
         situation.nextMilestone = Milestone.IRON_CHESTPLATE;
         situation.need = Situation.Need.IRON;
+        // 내려갈 때 챙길 나무는 이미 있다 (없으면 나무부터 구한다).
+        situation.plankEquivalent = GoalSystem.TRIP_WOOD;
         situation.ironNeeded = 8;
         situation.hasPickaxe = true;
         situation.canMineIron = true;

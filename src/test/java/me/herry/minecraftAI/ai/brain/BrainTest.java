@@ -121,10 +121,11 @@ class BrainTest {
     void explainsWhenTheNextStepIsBeyondItsSkills() {
         Situation situation = new Situation();
         situation.stage = Stage.NETHER_ENTRY;
-        situation.nextMilestone = Milestone.OBSIDIAN;
+        situation.stage = Stage.NETHER;
+        situation.nextMilestone = Milestone.BLAZE_RODS;
         String reason = GoalReasons.explain(GoalType.EXPLORE, situation);
 
-        assertTrue(reason.contains("흑요석"), reason);
+        assertTrue(reason.contains("블레이즈"), reason);
         assertTrue(reason.contains("할 줄 모르는"), reason);
     }
 

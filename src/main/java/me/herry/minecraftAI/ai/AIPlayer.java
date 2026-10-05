@@ -7,13 +7,16 @@ import me.herry.minecraftAI.ai.build.BuildJob;
 import me.herry.minecraftAI.ai.combat.CombatMemory;
 import me.herry.minecraftAI.ai.combat.CombatSystem;
 import me.herry.minecraftAI.ai.crafting.CraftingSystem;
+import me.herry.minecraftAI.ai.experience.Experience;
 import me.herry.minecraftAI.ai.crafting.FurnaceJob;
 import me.herry.minecraftAI.ai.goal.GoalType;
 import me.herry.minecraftAI.ai.goal.Milestone;
 import me.herry.minecraftAI.ai.goal.Situation;
+
 import me.herry.minecraftAI.ai.inventory.InventorySystem;
 import me.herry.minecraftAI.ai.memory.MemorySystem;
 import me.herry.minecraftAI.ai.navigation.NavigationSystem;
+
 import me.herry.minecraftAI.ai.perception.Perception;
 import me.herry.minecraftAI.ai.perception.PerceptionSystem;
 import me.herry.minecraftAI.ai.perf.TickProfiler;
@@ -72,6 +75,7 @@ public final class AIPlayer {
     private @Nullable TreeJob treeJob;
     private @Nullable BuildJob buildJob;
     private @Nullable FurnaceJob furnaceJob;
+    private long furnaceBlockedSince = -1L;
     private LivingEntity assistTarget;
     private long assistUntil;
     private long sleepRetryAfter;
@@ -85,7 +89,7 @@ public final class AIPlayer {
         this.perception = new PerceptionSystem(body, services.config(), services.budget());
         this.inventory = new InventorySystem(body);
         this.navigation = new NavigationSystem(body, services.config(), this::debug, services.budget(), profiler, inventory);
-        this.brain = new AIBrain(this, services.planner());
+        this.brain = new AIBrain(this, services);
     }
 
     /**
@@ -126,6 +130,7 @@ public final class AIPlayer {
         if (state != AIState.STOPPED) return false;
         state = AIState.RUNNING;
         debug("Autonomous behavior started");
+        brain.getJournal().beginEpisode(Experience.StartReason.START);
         getTeam().say(this, Phrases.hello(getTeam().teamSize()), true);
         return true;
     }
@@ -137,6 +142,7 @@ public final class AIPlayer {
             return true;
         }
         if (state != AIState.RUNNING) return false;
+        brain.getJournal().endEpisode(Experience.EndReason.STOPPED);
         brain.reset();
         // 멈춰 있는 동안 주변 엔티티나 월드에 대한 참조를 들고 있지 않는다.
         perception.reset();
@@ -155,6 +161,7 @@ public final class AIPlayer {
         resumeAfterRespawn = state == AIState.RUNNING;
         // 죽은 자리는 오래 기억한다. 떨어뜨린 아이템을 찾으러 가거나 위험한 곳을 피하는 데 쓴다.
         worldModel.recordDeath(getWorldId(), getPosition());
+        brain.getJournal().endEpisode(Experience.EndReason.DEATH);
         brain.reset();
         treeJob = null;
         state = AIState.DEAD;
@@ -168,11 +175,14 @@ public final class AIPlayer {
         combatMemory.reset();
         state = resumeAfterRespawn ? AIState.RUNNING : AIState.STOPPED;
         debug("Respawned");
-        if (state == AIState.RUNNING) getTeam().say(this, Phrases.respawned(), true);
+        if (state != AIState.RUNNING) return;
+        brain.getJournal().beginEpisode(Experience.StartReason.RESPAWN);
+        getTeam().say(this, Phrases.respawned(), true);
     }
 
     public void onAttacked(Entity attacker) {
         memory.recordAttack(getWorldId(), getPosition(), attacker.getUniqueId(), ticks);
+        if (attacker instanceof Enemy) combatMemory.onHit(ticks);
         brain.onAttacked();
         // 몬스터에게 맞았으면 근처의 동료에게 도움을 청한다 (동료가 있을 때만).
         if (state == AIState.RUNNING && attacker instanceof LivingEntity living && attacker instanceof Enemy) {
@@ -206,6 +216,9 @@ public final class AIPlayer {
     // 월드가 바뀌면 진행 중이던 경로와 계획의 좌표가 의미를 잃는다.
     public void onWorldChanged() {
         if (state == AIState.RUNNING) brain.reset();
+        // 차원을 넘으라고 시킨 일은 넘어온 것으로 끝났다. 그대로 두면 넘어온 자리에서 같은 목표를 계속 붙들고 있는다.
+        GoalType forced = brain.getForcedGoal();
+        if (forced == GoalType.ENTER_NETHER || forced == GoalType.LEAVE_NETHER) brain.setForcedGoal(null);
         perception.reset();
         digDirection = null;
         treeJob = null;
@@ -266,11 +279,23 @@ public final class AIPlayer {
 
     public void setFurnaceJob(@Nullable FurnaceJob furnaceJob) {
         this.furnaceJob = furnaceJob;
+        furnaceBlockedSince = -1L;
+    }
+
+    // 넣어 둔 화로까지 길을 낼 수 없게 된 시각. 막혀 있지 않으면 음수.
+    public long getFurnaceBlockedSince() {
+        return furnaceBlockedSince;
+    }
+
+    public void setFurnaceBlockedSince(long furnaceBlockedSince) {
+        this.furnaceBlockedSince = furnaceBlockedSince;
     }
 
     // 제거되기 전에 진행 중인 행동과 이동 입력을 정리한다.
     public void shutdown() {
         try {
+            // 서버가 꺼지는 것이면 AIController 가 먼저 그 까닭으로 닫아 두었다. 그 밖에는 제거된 것이다.
+            brain.getJournal().endEpisode(Experience.EndReason.REMOVED);
             brain.reset();
         } finally {
             state = AIState.STOPPED;
@@ -391,6 +416,15 @@ public final class AIPlayer {
     // 현재 계획의 행동 목록. 실행 중인 행동은 대괄호로 표시된다.
     public String describePlan() {
         return brain.describePlan();
+    }
+
+    public boolean isEscaping() {
+        return brain.isEscaping();
+    }
+
+    // 목표 명세, 계획을 세운 스킬, 마지막 관측, 학습용 기록
+    public DecisionJournal getJournal() {
+        return brain.getJournal();
     }
 
     // 지금 하고 있는 일과 그 이유. 아직 한 번도 판단하지 않았으면 null.

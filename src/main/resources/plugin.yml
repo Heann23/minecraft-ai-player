@@ -8,7 +8,7 @@ load: POSTWORLD
 commands:
   ai:
     description: AI 플레이어 제어
-    usage: "/ai <spawn [이름] [스킨]|remove|start|stop|status|inv|goal <목표|auto>|why|brain|plan|memory|perf|home <set|clear>|say <이름> <말>|save|debug <on|off>>"
+    usage: "/ai <spawn [이름] [스킨]|remove|start|stop|status|inv|goal <목표|auto>|why|brain|plan|observe|learn|memory|perf|home <set|clear>|say <이름> <말>|save|debug <on|off>>"
     permission: minecraftai.admin
 permissions:
   minecraftai.admin:

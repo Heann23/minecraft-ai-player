@@ -5,16 +5,31 @@ import me.herry.minecraftAI.ai.action.Action;
 import me.herry.minecraftAI.ai.action.DropJunkAction;
 import me.herry.minecraftAI.ai.action.WaitAction;
 import me.herry.minecraftAI.ai.goal.GoalType;
+import me.herry.minecraftAI.ai.goal.LegacyGoalAdapter;
+import me.herry.minecraftAI.ai.goal.Situation;
+import me.herry.minecraftAI.ai.goal.model.Goal;
+import me.herry.minecraftAI.ai.skill.ChopWoodSkill;
+import me.herry.minecraftAI.ai.skill.CraftItemSkill;
+import me.herry.minecraftAI.ai.skill.DirectRouteSkill;
+import me.herry.minecraftAI.ai.skill.EscapeDangerSkill;
+import me.herry.minecraftAI.ai.skill.HuntPreySkill;
+import me.herry.minecraftAI.ai.skill.LegacyPlannerSkill;
+import me.herry.minecraftAI.ai.skill.MineResourceSkill;
+import me.herry.minecraftAI.ai.skill.SkillPlan;
+import me.herry.minecraftAI.ai.skill.SkillPlanner;
+import me.herry.minecraftAI.ai.skill.SkillRegistry;
+import org.jetbrains.annotations.Nullable;
 
-import java.util.EnumMap;
 import java.util.EnumSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 
 /**
  * 목표를 달성하기 위한 행동 순서를 만든다.
  * 목표마다 계획을 만드는 함수가 따로 등록되어 있어서, 새 목표를 추가할 때 여기에 한 줄만 등록하면 된다.
+ *
+ * 등록한 함수는 스킬(LegacyPlannerSkill)로도 들어가고, 계획은 언제나 목표 -> SkillPlanner -> 스킬의 순서로 세운다.
+ * GoalSystem 이 고른 목표는 그 목표의 함수로만 세우므로 결과는 전과 같다. 새로 만든 범용 목표는 맞는 스킬 중에서 골라 세운다.
  */
 public final class Planner {
     @FunctionalInterface
@@ -30,7 +45,11 @@ public final class Planner {
             GoalType.MINE_DIAMOND, GoalType.FIND_IRON, GoalType.FIND_DIAMOND, GoalType.CRAFT_WORKBENCH, GoalType.CRAFT_TOOL,
             GoalType.CRAFT_WORK_TOOL, GoalType.COOK_FOOD, GoalType.SMELT_IRON, GoalType.BUILD_SHELTER);
 
-    private final Map<GoalType, GoalPlanner> planners = new EnumMap<>(GoalType.class);
+    // 물에서 먼저 나오는 계획은 어느 스킬의 것도 아니라서 이 이름으로 적는다.
+    public static final String LEAVE_WATER = "LeaveWater";
+
+    private final SkillRegistry skills = new SkillRegistry();
+    private final SkillPlanner skillPlanner = new SkillPlanner(skills);
 
     public Planner() {
         register(GoalType.IDLE, ai -> List.of(new WaitAction(IDLE_TICKS)));
@@ -63,14 +82,32 @@ public final class Planner {
         register(GoalType.MINE_IRON, GatherPlans::mineIron);
         register(GoalType.FIND_DIAMOND, GatherPlans::findDiamond);
         register(GoalType.MINE_DIAMOND, GatherPlans::mineDiamond);
+        register(GoalType.GATHER_FLINT, GatherPlans::gatherFlint);
+        register(GoalType.FILL_BUCKET, BucketPlans::fillBucket);
+        register(GoalType.GATHER_OBSIDIAN, ObsidianPlans::gatherObsidian);
+        register(GoalType.BUILD_PORTAL, PortalPlans::buildPortal);
+        register(GoalType.ENTER_NETHER, PortalPlans::usePortal);
+        register(GoalType.LEAVE_NETHER, PortalPlans::usePortal);
         register(GoalType.EXPLORE, GatherPlans::explore);
         register(GoalType.CRAFT_WORKBENCH, CraftPlans::craftWorkbench);
         register(GoalType.CRAFT_TOOL, CraftPlans::craftTool);
         register(GoalType.CRAFT_WORK_TOOL, CraftPlans::craftWorkTool);
+
+        // 새로 만든 범용 목표를 수행하는 스킬. 기존 목표를 옮겨 적은 것은 위에서 등록한 함수가 그대로 맡는다.
+        skills.register(new EscapeDangerSkill(this));
+        skills.register(new MineResourceSkill(this));
+        skills.register(new ChopWoodSkill(this));
+        skills.register(new HuntPreySkill(this));
+        skills.register(new CraftItemSkill());
+        skills.register(new DirectRouteSkill(this));
+    }
+
+    public SkillRegistry getSkills() {
+        return skills;
     }
 
     public void register(GoalType goal, GoalPlanner planner) {
-        planners.put(goal, planner);
+        skills.register(new LegacyPlannerSkill(goal, planner));
     }
 
     // 걸어서 나갈 수 없는 곳에서 빠져나오는 계획. 방법이 없거나 빠져나올 필요가 없으면 빈 목록.
@@ -88,13 +125,24 @@ public final class Planner {
         return GatherPlans.digWayOut(ai);
     }
 
+    // 기존 목표의 계획. 그 목표를 옮겨 적은 범용 목표로 세우는 것과 같다.
     public List<Action> plan(GoalType goal, AIPlayer ai) {
+        return plan(LegacyGoalAdapter.toGoal(goal), ai, null).actions();
+    }
+
+    /**
+     * 목표를 이루는 계획과, 그 계획을 세운 스킬.
+     *
+     * @param situation 판단할 때의 상황. 새로 만든 범용 목표는 이것을 보고 스킬을 고른다 (null 이면 계획이 서지 않는다).
+     *                  기존 목표를 옮겨 적은 것은 상황 없이도 그 목표의 함수로 세운다.
+     */
+    public SkillPlan plan(Goal goal, AIPlayer ai, @Nullable Situation situation) {
+        GoalType legacy = LegacyGoalAdapter.toLegacy(goal);
         // 물에 떠 있는 채로는 캐는 속도가 훨씬 느리고, 블록을 놓거나 굴을 팔 수도 없다. 가까이에 마른 땅이 있으면 먼저 나온다.
-        if (NEEDS_FOOTING.contains(goal) && ai.getPlayer().isInWater() && !ai.getBody().isGrounded()) {
+        if (legacy != null && NEEDS_FOOTING.contains(legacy) && ai.getPlayer().isInWater() && !ai.getBody().isGrounded()) {
             List<Action> leave = TerrainPlans.leaveWater(ai);
-            if (!leave.isEmpty()) return leave;
+            if (!leave.isEmpty()) return new SkillPlan(LEAVE_WATER, leave);
         }
-        GoalPlanner planner = planners.get(goal);
-        return planner == null ? List.of() : planner.plan(ai);
+        return skillPlanner.plan(goal, ai, situation);
     }
 }

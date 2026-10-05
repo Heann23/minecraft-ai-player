@@ -6,11 +6,17 @@ import me.herry.minecraftAI.ai.brain.DecisionLog;
 import me.herry.minecraftAI.ai.brain.DecisionTrace;
 import me.herry.minecraftAI.ai.brain.Directive;
 import me.herry.minecraftAI.ai.build.BuildJob;
+import me.herry.minecraftAI.ai.experience.ExperienceRecorder;
+import me.herry.minecraftAI.ai.experience.JsonlExperienceWriter;
+import me.herry.minecraftAI.ai.goal.model.Goal;
 import me.herry.minecraftAI.ai.memory.MemoryType;
+import me.herry.minecraftAI.ai.observation.Observation;
 import me.herry.minecraftAI.ai.perf.TickProfiler;
 import me.herry.minecraftAI.ai.perf.WorkBudget;
+import me.herry.minecraftAI.ai.policy.ShadowRunner;
 import me.herry.minecraftAI.ai.world.Base;
 import me.herry.minecraftAI.ai.world.WorldModel;
+import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -67,7 +73,47 @@ final class AIInspector {
     }
 
     static List<String> plan(AIPlayer ai) {
-        return List.of("목표: " + ai.getCurrentGoal(), "계획: " + ai.describePlan(), "현재 행동: " + ai.getCurrentActionName());
+        String skill = ai.getJournal().skill();
+        return List.of("목표: " + ai.getCurrentGoal(), "목표 명세: " + ai.getJournal().goalSpec().describe(),
+                "스킬: " + (skill.isEmpty() ? "(없음)" : skill), "계획: " + ai.describePlan(), "현재 행동: " + ai.getCurrentActionName());
+    }
+
+    // 마지막으로 판단할 때 남긴 관측 스냅샷. 학습 쪽으로 넘어갈 값이 실제와 맞는지 눈으로 확인할 때 쓴다.
+    static List<String> observe(AIPlayer ai) {
+        Observation observation = ai.getJournal().observation();
+        if (observation == null) return List.of("(아직 판단하지 않음)");
+        Goal spec = ai.getJournal().goalSpec();
+        return List.of("버전 " + observation.schemaVersion() + ", 틱 " + observation.tick(),
+                "몸: " + observation.player(), "가방: " + observation.inventory(), "환경: " + observation.environment(),
+                "진행: " + observation.progress(), "기억: " + observation.memory(), "하던 일: " + observation.task(),
+                "목표 명세 " + spec.describe() + " 완료 조건: " + (spec.isAchieved(observation) ? "채워짐" : "아직"));
+    }
+
+    /**
+     * 학습용 기록과 후보 정책의 상태: 남기고 있는지, 지금 에피소드, 남긴 양, 후보가 기존 규칙과 얼마나 같은 판단을 했는지.
+     *
+     * @param writer 기록을 파일로 쓰는 곳. 기록을 꺼 두었으면 null
+     */
+    static List<String> learn(AIPlayer ai, @Nullable JsonlExperienceWriter writer) {
+        ExperienceRecorder recorder = ai.getJournal().recorder();
+        List<String> lines = new ArrayList<>();
+        if (writer == null) {
+            lines.add("기록: 꺼짐 (config.yml 의 learning.record)");
+        } else {
+            lines.add("기록: 켜짐" + (writer.isFull() ? " (크기 제한에 닿아서 더 남기지 않는 중)" : "")
+                    + ", 에피소드 " + (recorder.episodeId() == null ? "없음" : recorder.episodeId()));
+            lines.add("남긴 판단 " + recorder.decisionCount() + "개, 파일에 쓴 줄 " + writer.writtenCount() + "개, 버린 줄 " + writer.droppedCount() + "개");
+        }
+        ShadowRunner shadow = recorder.shadow();
+        if (shadow == null) {
+            lines.add("후보 정책: 없음 (config.yml 의 learning.shadow-policy)");
+        } else {
+            ShadowRunner.Stats stats = shadow.stats();
+            lines.add("후보 정책: " + shadow.label() + (stats.enabled() ? "" : " (오류나 지연이 이어져서 꺼짐)") + ", 실행은 기존 규칙만 한다");
+            lines.add("스스로 고른 판단 " + stats.compared() + "개 중 " + stats.agreed() + "개 일치 ("
+                    + String.format(Locale.ROOT, "%.1f", stats.agreement() * 100.0) + "%), 후보 오류 " + stats.failed() + "개");
+        }
+        return lines;
     }
 
     // 거점, 포탈, 상자 내용물, 종류별 기억 개수

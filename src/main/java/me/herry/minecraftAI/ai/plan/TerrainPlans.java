@@ -9,6 +9,7 @@ import me.herry.minecraftAI.ai.action.MarkShaftAction;
 import me.herry.minecraftAI.ai.action.MoveToAction;
 import me.herry.minecraftAI.ai.action.PillarUpAction;
 import me.herry.minecraftAI.ai.action.PlaceFillerAction;
+import me.herry.minecraftAI.ai.action.WaitAction;
 import me.herry.minecraftAI.ai.navigation.AStarSearch;
 import me.herry.minecraftAI.ai.navigation.BlockClass;
 import me.herry.minecraftAI.ai.navigation.BukkitTerrainView;
@@ -56,19 +57,19 @@ public final class TerrainPlans {
     // 계단을 팔 벽을 찾는 거리
     private static final int WALL_SEARCH = 12;
     // 몬스터가 이 거리 안에 있는 다른 빈 곳으로는 굴을 뚫지 않는다.
-    private static final double COVER_RANGE = 6.0;
+    private static final int HIDDEN_WAIT_TICKS = 100;
 
     private TerrainPlans() {
     }
 
     // 머리 위로 땅이 두껍게 덮여 있는지. 나뭇잎은 지붕으로 치지 않아서 숲속은 지하로 보지 않는다.
     public static boolean isDeepUnderground(World world, BlockPoint feet) {
-        return surfaceY(world, feet.x(), feet.z()) - feet.y() >= CAVE_DEPTH;
+        return SurfaceRules.isDeepUnderground(hasCeiling(world), surfaceY(world, feet.x(), feet.z()), feet.y(), CAVE_DEPTH);
     }
 
     // 머리 위로 하늘이 열려 있는지 (나뭇잎은 가린 것으로 치지 않는다). 굴이나 동굴 안이면 false.
     public static boolean isUnderOpenSky(World world, BlockPoint feet) {
-        return surfaceY(world, feet.x(), feet.z()) <= feet.y();
+        return SurfaceRules.isUnderOpenSky(hasCeiling(world), surfaceY(world, feet.x(), feet.z()), feet.y());
     }
 
     // 협곡이나 깊은 구덩이 바닥처럼 주변 지면이 대부분 훨씬 높은 곳인지.
@@ -98,9 +99,14 @@ public final class TerrainPlans {
             int x = feet.x() + (int) Math.round(Math.cos(angle) * radius);
             int z = feet.z() + (int) Math.round(Math.sin(angle) * radius);
             if (!world.isChunkLoaded(x >> 4, z >> 4)) continue;
-            if (surfaceY(world, x, z) - feet.y() >= minDiff) higher++;
+            if (SurfaceRules.isHigherGround(hasCeiling(world), surfaceY(world, x, z), feet.y(), minDiff)) higher++;
         }
         return higher;
+    }
+
+    // 네더는 천장(기반암)이 가장 높은 블록이라 "지표면"이 없다.
+    private static boolean hasCeiling(World world) {
+        return world.getEnvironment() == World.Environment.NETHER;
     }
 
     // 그 위치의 지면에 섰을 때 발이 놓이는 높이. 가장 높은 블록의 바로 위 칸이다.
@@ -122,14 +128,21 @@ public final class TerrainPlans {
         List<Action> stair = digStairUp(ai, directionOrder(ai));
         if (!stair.isEmpty()) return stair;
         // 숨어 있는 자리의 바로 위나 옆이 몬스터가 있는 곳이라 뚫을 수 없으면, 옆으로 굴을 파서 자리를 옮긴 다음에 올라간다.
-        List<Action> aside = RefugePlans.isHidden(ai) ? digTunnel(ai, false) : List.<Action>of();
-        if (!aside.isEmpty()) return aside;
+        boolean hidden = RefugePlans.isHidden(ai);
+        // 머리 위가 지나온 굴의 발판이라 캘 수 없을 때도 마찬가지다. 계단은 어느 쪽으로 내든 머리 위를 캐야 하므로 옆으로 한 칸 비켜난다.
+        World world = ai.getPlayer().getWorld();
+        boolean underShaft = cutsShaft(ai, world, new BukkitTerrainView(world), ai.getPosition().offset(0, 2, 0));
+        List<Action> aside = hidden || underShaft ? digTunnel(ai, false) : List.<Action>of();
+        // 캘 것 없이 숨은 자리 안에서 걷기만 하는 것은 자리를 옮기는 것이 아니다.
+        if (aside.stream().anyMatch(BreakBlockAction.class::isInstance)) return aside;
 
         List<Action> pillar = pillarUp(ai, null);
         if (!pillar.isEmpty()) {
             ai.getTeam().say(ai, Phrases.climbingOut(), false);
             return pillar;
         }
+        // 숨은 자리의 사방이 몬스터 쪽이라 어디로도 뚫을 수 없으면 그 안에서 기다린다. 걸어서 옮겨 갈 곳이 없다.
+        if (hidden) return List.of(new WaitAction(HIDDEN_WAIT_TICKS));
         // 동굴 한가운데라 계단을 낼 벽이 바로 옆에 없고 쌓을 블록도 없으면, 가장 가까운 벽 앞으로 가서 그 벽에 계단을 판다.
         List<Action> wall = moveToWall(ai);
         if (!wall.isEmpty()) return wall;
@@ -207,6 +220,14 @@ public final class TerrainPlans {
     // 블록을 하나 쌓고 그 위에 올라선다. 쌓을 블록이 없거나 머리 위가 위험하면 빈 목록.
     public static List<Action> pillarUp(AIPlayer ai, @Nullable Consumer<BlockPoint> onPlaced) {
         if (!PillarUpAction.canPillar(ai)) return List.of();
+        World world = ai.getPlayer().getWorld();
+        BukkitTerrainView terrain = new BukkitTerrainView(world);
+        BlockPoint ceiling = ai.getPosition().offset(0, 2, 0);
+        // 올라서려면 머리 위 칸을 캐야 한다. 그 칸이 몬스터가 있는 쪽으로 뚫리면 숨은 자리가 열린다.
+        if (RefugePlans.breaksCover(ai, terrain, ceiling)) return List.of();
+        // 그 칸이 지나온 굴의 발판이면 캐는 행동이 거절한다. 그래도 계획을 세우면 그 자리에서 1초에 몇 번씩 실패만 되풀이한다
+        // (기본 시드의 y 54 에서 10분 동안 그랬다). 다른 방법(벽으로 가서 계단 파기, 자리 옮기기)으로 넘어가게 한다.
+        if (cutsShaft(ai, world, terrain, ceiling)) return List.of();
         ai.debug("Placing a block underfoot to climb up from " + ai.getPosition());
         return List.of(new PillarUpAction(onPlaced));
     }
@@ -358,12 +379,14 @@ public final class TerrainPlans {
     // 지나갈 칸들을 파내고 destination 으로 이동하는 행동 목록. 안전하게 팔 수 없으면 빈 목록.
     private static List<Action> digThrough(AIPlayer ai, World world, BukkitTerrainView terrain, BlockPoint destination,
                                            boolean record, BlockPoint... blocks) {
-        if (!isDigSafe(world, terrain, blocks) || undermines(ai, world, terrain, blocks) || breaksCover(ai, terrain, blocks)) return List.of();
+        if (!isDigSafe(world, terrain, blocks) || undermines(ai, world, terrain, blocks) || RefugePlans.breaksCover(ai, terrain, blocks)) return List.of();
 
         List<Action> actions = new ArrayList<>();
         for (BlockPoint block : blocks) {
             if (terrain.classify(block.x(), block.y(), block.z()) != BlockClass.OPEN) actions.add(new BreakBlockAction(block));
         }
+        // 캘 것 없이 막다른 굴을 따라 걷기만 하는 것은 파는 것이 아니다. 다른 방향을 시도하게 한다.
+        if (actions.isEmpty() && ai.getTeam().getShafts().isDeadEndStep(world.getUID(), destination)) return List.of();
         actions.add(new MoveToAction(PathGoal.arrive(destination, 0.5), false));
         if (record) {
             // 굴의 첫 칸이면 지금 서 있는 자리(입구)부터 기록한다.
@@ -400,20 +423,6 @@ public final class TerrainPlans {
             if (home != null && home.isInsideBuilding(world.getUID(), block)) return true;
             // 넣어 둔 것이 있는 화로를 굴 길에서 파내면 굽던 것이 쏟아진다. 그 칸은 비켜서 판다.
             if (FurnacePlans.holdsJob(ai, world.getUID(), block)) return true;
-        }
-        return false;
-    }
-
-    // 몬스터가 가까이 있는 다른 빈 곳으로 새로 뚫리는 블록인지. 뚫으면 그 틈으로 몬스터가 보고 때리거나 들어온다.
-    private static boolean breaksCover(AIPlayer ai, BukkitTerrainView terrain, BlockPoint... blocks) {
-        List<LivingEntity> hostiles = ai.getPerception().getHostiles();
-        if (hostiles.isEmpty() || !ai.getCombatMemory().isWaryAfterRefuge(ai.getTicks())) return false;
-        // 지금 내 공간과 이미 이어져 있는 빈칸으로 넓히는 것은 새로 뚫는 것이 아니다.
-        Set<BlockPoint> inside = Enclosure.around(terrain, ai.getPosition()).cells();
-        for (BlockPoint opening : Enclosure.openings(terrain, inside, List.of(blocks))) {
-            for (LivingEntity hostile : hostiles) {
-                if (Positions.of(hostile.getLocation()).distance(opening) <= COVER_RANGE) return true;
-            }
         }
         return false;
     }

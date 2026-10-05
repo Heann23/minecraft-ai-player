@@ -18,6 +18,7 @@ public final class CombatMemory {
     private static final long UNREACHABLE_TICKS = 300L;
     // 숨은 뒤 이 시간(2분) 동안은 몬스터가 있는 쪽으로 굴을 뚫지 않는다.
     private static final long REFUGE_CAUTION_TICKS = 2400L;
+    private static final int MAX_HITS = 8;
 
     private final Map<UUID, Long> lastSeen = new HashMap<>();
     private final Map<UUID, Long> unreachableAt = new HashMap<>();
@@ -26,6 +27,10 @@ public final class CombatMemory {
     private long standGroundUntil = NEVER;
     private long retreatBlockedTick = NEVER;
     private long refugeTick = NEVER;
+    // 최근에 맞은 시각들. 달아나는 중에도 계속 맞고 있는지 볼 때 쓴다.
+    private final long[] hitTicks = new long[MAX_HITS];
+    private int hitCount;
+    private long fleeingSince = NEVER;
     private CombatSystem.Decision lastDecision = CombatSystem.Decision.NONE;
     private boolean sealedIn;
 
@@ -89,6 +94,31 @@ public final class CombatMemory {
         return now - retreatBlockedTick <= window;
     }
 
+    // 몬스터에게 맞았을 때 호출한다.
+    public void onHit(long now) {
+        hitTicks[hitCount % MAX_HITS] = now;
+        hitCount++;
+    }
+
+    // 판단할 때마다 호출해서 달아나기 시작한 시각을 적어 둔다. 달아나는 동안 맞은 횟수를 세는 기준이다.
+    public void trackFleeing(boolean fleeing, long now) {
+        if (!fleeing) fleeingSince = NEVER;
+        else if (fleeingSince == NEVER) fleeingSince = now;
+    }
+
+    /**
+     * 달아나기 시작한 뒤로 그 시간 안에 맞은 횟수 (최근 8번까지만 센다). 달아나는 중이 아니면 0.
+     * 싸우다가 맞은 것은 세지 않는다. 싸우다 밀려서 달아나기로 한 순간에 "이미 많이 맞았다"고 보면 달아나지 못한다.
+     */
+    public int hitsWhileFleeing(long now, long window) {
+        if (fleeingSince == NEVER) return 0;
+        int hits = 0;
+        for (int i = 0; i < Math.min(hitCount, MAX_HITS); i++) {
+            if (hitTicks[i] >= fleeingSince && now - hitTicks[i] <= window) hits++;
+        }
+        return hits;
+    }
+
     // 감당할 수 없는 몬스터를 피해 파고 들어가 숨었을 때 호출한다.
     public void onRefuge(long now) {
         refugeTick = now;
@@ -131,5 +161,7 @@ public final class CombatMemory {
         standGroundUntil = NEVER;
         retreatBlockedTick = NEVER;
         refugeTick = NEVER;
+        hitCount = 0;
+        fleeingSince = NEVER;
     }
 }

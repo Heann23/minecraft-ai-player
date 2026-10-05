@@ -144,4 +144,17 @@ class RefugeSearchTest {
         // 이미 이어져 있는 내 굴 쪽은 새로 뚫리는 곳이 아니다.
         assertTrue(Enclosure.openings(dugOut, space.cells(), List.of(new BlockPoint(2, 19, 0))).isEmpty());
     }
+
+    // 회귀: 숨은 자리에서 계단을 파 올라가려고 꼽은 세 칸 가운데 하나가 이미 비어 있는 바깥(좀비가 있는 동굴)이었다.
+    // "함께 캐는 칸"이라며 바깥으로 치지 않아서 그대로 뚫었고, 두 칸 앞에 있던 좀비에게 맞기 시작했다.
+    @Test
+    void anOpenCellAmongTheBlocksToDigIsStillAnotherSpace() {
+        // 숨은 자리 (1,17,0) 의 동쪽 위로 다른 동굴이 지나간다.
+        Rock hidden = new Rock().open(1, 17, 0, 1, 18, 0).open(2, 19, 0, 6, 21, 0);
+        Set<BlockPoint> inside = Enclosure.around(hidden, new BlockPoint(1, 17, 0)).cells();
+        assertEquals(2, inside.size());
+        // 동쪽으로 올라가는 계단 한 단: 새 발 칸, 새 머리 칸(이미 비어 있는 동굴), 지금 머리 위의 천장
+        List<BlockPoint> step = List.of(new BlockPoint(2, 18, 0), new BlockPoint(2, 19, 0), new BlockPoint(1, 19, 0));
+        assertEquals(List.of(new BlockPoint(2, 19, 0)), Enclosure.openings(hidden, inside, step));
+    }
 }

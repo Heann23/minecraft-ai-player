@@ -50,6 +50,18 @@ public enum GoalType {
     FIND_DIAMOND,
     // 보이는 다이아몬드 광석을 캔다 (철 곡괭이 이상 필요)
     MINE_DIAMOND,
+    // 자갈을 캐서 부싯돌을 얻는다. 아는 자갈이 없으면 가진 자갈을 놓고 다시 캐고, 그것도 없으면 찾으러 다닌다
+    GATHER_FLINT,
+    // 빈 양동이로 물을 뜬다. 아는 물이 없으면 지상에서 찾는다
+    FILL_BUCKET,
+    // 용암 호수에 물을 부어 흑요석을 만들고 캔다. 아는 호수가 없으면 깊은 땅속에서 찾는다
+    GATHER_OBSIDIAN,
+    // 집 근처에 네더 포탈의 틀을 짓고 부싯돌과 부시로 불을 붙인다
+    BUILD_PORTAL,
+    // 아는 네더 포탈로 걸어 들어가서 네더로 넘어간다
+    ENTER_NETHER,
+    // 네더에서 할 수 있는 일이 없으면 포탈로 오버월드에 돌아온다
+    LEAVE_NETHER,
     SMELT_IRON,
     // 날고기를 화로에 구워서 더 배부른 음식으로 만든다
     COOK_FOOD,

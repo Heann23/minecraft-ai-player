@@ -20,9 +20,9 @@ public final class StorageItems {
     private static final int STORAGE_SIZE = 36;
     private static final Map<Material, StoragePolicy.Kind> CACHE = new EnumMap<>(Material.class);
     private static final Set<Material> KIT = Set.of(Material.BUCKET, Material.WATER_BUCKET, Material.LAVA_BUCKET,
-            Material.FLINT_AND_STEEL, Material.BOW, Material.ARROW, Material.SHIELD);
+            Material.FLINT_AND_STEEL, Material.BOW, Material.ARROW, Material.SHIELD, Material.OBSIDIAN);
     private static final Set<Material> VALUABLE = Set.of(Material.EMERALD, Material.GOLD_INGOT, Material.RAW_GOLD, Material.RAW_COPPER,
-            Material.COPPER_INGOT, Material.REDSTONE, Material.LAPIS_LAZULI, Material.OBSIDIAN, Material.FLINT, Material.STRING,
+            Material.COPPER_INGOT, Material.REDSTONE, Material.LAPIS_LAZULI, Material.FLINT, Material.STRING,
             Material.LEATHER, Material.GUNPOWDER, Material.BONE, Material.GOLD_NUGGET, Material.IRON_NUGGET, Material.QUARTZ);
     private static final Set<Material> NETHER = Set.of(Material.BLAZE_ROD, Material.BLAZE_POWDER);
     private static final Set<Material> END = Set.of(Material.ENDER_PEARL, Material.ENDER_EYE);

@@ -1,12 +1,15 @@
 package me.herry.minecraftAI.ai.action;
 
 import me.herry.minecraftAI.ai.AIPlayer;
+import me.herry.minecraftAI.ai.primitive.PrimitiveAction;
+import me.herry.minecraftAI.ai.primitive.PrimitiveTarget;
+import me.herry.minecraftAI.ai.primitive.PrimitiveType;
 import me.herry.minecraftAI.ai.util.BlockPoint;
 
 /**
  * 지정한 지점을 바라본다.
  */
-public final class LookAtAction extends AbstractAction {
+public final class LookAtAction extends AbstractAction implements PrimitiveAction {
     private static final int TIMEOUT = 40;
     private static final float TOLERANCE = 8.0F;
 
@@ -34,5 +37,15 @@ public final class LookAtAction extends AbstractAction {
     protected void onTick(AIPlayer ai) {
         ai.getBody().lookAt(x, y, z);
         if (ai.getBody().isFacing(x, y, z, TOLERANCE)) succeed();
+    }
+
+    @Override
+    public PrimitiveType getPrimitiveType() {
+        return PrimitiveType.LOOK_AT;
+    }
+
+    @Override
+    public PrimitiveTarget getTarget() {
+        return new PrimitiveTarget.Point(x, y, z);
     }
 }

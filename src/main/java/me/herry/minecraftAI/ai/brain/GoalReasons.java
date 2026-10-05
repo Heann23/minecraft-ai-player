@@ -34,8 +34,11 @@ public final class GoalReasons {
             case STORE_ITEMS -> "가방 빈칸이 " + s.emptySlots + "칸이고 당장 안 쓰는 것이 " + s.storableSlots + "칸 있어서 집 상자에 넣어 두려고요";
             case PICKUP_ITEMS -> "근처에 떨어진 아이템이 있어서요";
             case FETCH_ITEMS -> target + "에 필요한 재료가 집 상자에 있어서, 새로 구하는 대신 꺼내 오려고요";
-            case FIND_WOOD -> target + "에 나무가 필요한데 아는 나무가 없어서 찾아야 해요";
-            case COLLECT_WOOD -> s.treeUnfinished ? "베던 나무를 끝까지 베려고요" : target + "에 쓸 나무가 부족해서요";
+            case FIND_WOOD -> GoalSystem.packsWoodForTrip(s) ? "땅속에는 나무가 없어서, 내려가기 전에 챙길 나무를 찾고 있어요"
+                    : target + "에 나무가 필요한데 아는 나무가 없어서 찾아야 해요";
+            case COLLECT_WOOD -> s.treeUnfinished ? "베던 나무를 끝까지 베려고요"
+                    : GoalSystem.packsWoodForTrip(s) ? "땅속에는 나무가 없어서, 내려가기 전에 곡괭이 자루와 연료로 쓸 나무를 챙기려고요"
+                    : target + "에 쓸 나무가 부족해서요";
             // 작업대가 필요할 때는 다음에 이룰 것이 작업대 자체로 잡혀 있어서, 무엇을 만들려는지는 따로 알 수 없다.
             case CRAFT_WORKBENCH -> "도구와 장비를 만들려면 가까이에 작업대가 있어야 해서요";
             case CRAFT_TOOL -> target + " 재료가 다 모여서 만들 차례예요";
@@ -48,6 +51,16 @@ public final class GoalReasons {
             case MINE_IRON -> s.ironVeinNearby ? "눈앞에 철 광맥이 있어서 다 캐려고요" : ironReason(s, target);
             case FIND_DIAMOND -> diamondReason(s, target) + " 다이아몬드가 나오는 깊이까지 내려가서 찾아야 해요";
             case MINE_DIAMOND -> "캘 수 있는 다이아몬드 광석을 발견해서요";
+            case GATHER_FLINT -> s.knowsGravel || s.gravel > 0 ? target + "에 부싯돌이 필요해서 자갈을 캐고 있어요. 자갈을 캐면 가끔 부싯돌이 나와요"
+                    : target + "에 부싯돌이 필요한데 자갈이 없어서 찾고 있어요";
+            case FILL_BUCKET -> s.knowsWater ? "흑요석을 만들려면 물이 필요해서 양동이에 물을 뜨러 가요"
+                    : "흑요석을 만들려면 물이 필요한데 아는 물이 없어서 찾고 있어요";
+            case GATHER_OBSIDIAN -> s.obsidianWork ? "용암 호수에 물을 부어 굳힌 흑요석을 캐고 있어요. 네더 포탈에 10개가 필요해요"
+                    : s.knowsLava ? "네더 포탈에 쓸 흑요석을 만들려고 용암 호수로 가고 있어요"
+                    : "네더 포탈에 쓸 흑요석을 만들 용암 호수를 깊은 땅속에서 찾고 있어요";
+            case ENTER_NETHER -> "네더에서 할 일이 있어서 포탈로 들어가려고요";
+            case LEAVE_NETHER -> "네더에서는 아직 제가 할 수 있는 일이 없어서 포탈로 돌아가려고요";
+            case BUILD_PORTAL -> "흑요석과 부싯돌과 부시가 모여서, 집 근처에 네더 포탈을 짓고 불을 붙이려고요";
             case SMELT_IRON -> "철 원석이 " + s.rawIron + "개 모여서 주괴로 구울 차례예요";
             case COOK_FOOD -> "날고기 " + s.rawFood + "개를 구워서 더 든든한 음식으로 만들려고요";
             case TEND_FURNACE -> tendReason(s);
