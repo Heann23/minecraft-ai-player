@@ -15,6 +15,7 @@ public final class OllamaDialogue implements ResponsePipeline.Model, AutoCloseab
             너는 Herry(해리), 사용자와 마인크래프트를 함께 즐기는 능청스럽고 활발한 친구다.
             돌에도 이름 붙이는 엉뚱한 수집가처럼 가볍게 비유하되 같은 농담을 반복하지 않는다.
             한국어로 보통 1~3문장만 말한다. 상대가 진지하거나 장난이 불편하다고 하면 사과하고 멈춘다.
+            humourStyle이 NO_JOKES이면 장난·농담·놀림·돌 이름 비유 없이 담백하게 답한다. 허용 설정이어도 불편함을 표현하면 즉시 멈춘다.
             currentUtterance가 지금 답할 말이다. history의 이전 질문에 다시 답하지 않는다.
             continuingConversation이 true이면 이전 답변에서 이어서 말한다. 다시 인사하거나 자기소개하지 않는다.
             상대가 해리의 정체나 이름을 직접 물을 때만 자기소개한다. 매번 돌 이름 짓기를 제안하지 않는다.
@@ -134,7 +135,7 @@ public final class OllamaDialogue implements ResponsePipeline.Model, AutoCloseab
         JsonObject data = new JsonObject(); data.addProperty("respondTo", request.turn().userId());
         data.addProperty("currentUtterance", DialogueContext.currentInput(request));
         data.addProperty("continuingConversation", continuation(request));
-        JsonArray facts = new JsonArray(); boolean allowed = false, refused = false;
+        JsonArray facts = new JsonArray(); boolean allowed = false, refused = false, avoidJokes = false;
         for (var fact : request.memory()) {
             if (!fact.key().subject().userId().equals(request.turn().userId()) || fact.expired(clock.getAsLong())) continue;
             JsonObject value = new JsonObject(); value.addProperty("kind", fact.key().kind().name()); value.addProperty("value", fact.value());
@@ -143,8 +144,11 @@ public final class OllamaDialogue implements ResponsePipeline.Model, AutoCloseab
             if (fact.key().kind() == DiscordMemory.Kind.SPEECH_AGREEMENT && fact.evidence() == DiscordMemory.Evidence.EXPLICIT) {
                 allowed |= fact.value().equals("ALLOWED"); refused |= fact.value().equals("REFUSED");
             }
+            if (fact.key().kind() == DiscordMemory.Kind.AVOID_JOKE && fact.key().label().equals("all")
+                    && fact.evidence() == DiscordMemory.Evidence.EXPLICIT && fact.value().equals("AVOID")) avoidJokes = true;
         }
         data.addProperty("speechStyle", allowed && !refused ? "허락받은 자연스러운 반말" : "자연스러운 존댓말"); data.add("memory", facts);
+        data.addProperty("humourStyle", avoidJokes ? "NO_JOKES" : "GENTLE");
         JsonArray history = new JsonArray();
         for (var line : request.context()) {
             JsonObject value = new JsonObject(); value.addProperty("speaker", line.speaker()); value.addProperty("target", line.target());

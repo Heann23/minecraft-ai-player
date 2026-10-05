@@ -142,6 +142,15 @@ public final class DiscordMemoryStore implements AutoCloseable {
             if (!path.getParent().equals(backups) || !MemoryFiles.backups(backups).contains(path)) throw new IOException("unknown backup");
             Snapshot candidate = MemoryFiles.read(path);
             Snapshot next = merge(candidate, state, Math.addExact(Math.max(candidate.revision(), state.revision()), 1));
+            // Manual rollback must not clear the user's current, explicitly corrected joke boundary.
+            Map<Key, Fact> facts = new HashMap<>(next.facts());
+            for (Fact fact : state.facts().values()) {
+                if (fact.key().kind() != Kind.AVOID_JOKE || fact.evidence() != Evidence.EXPLICIT
+                        || fact.expired(clock.getAsLong()) || next.erased(fact)) continue;
+                Fact older = facts.get(fact.key());
+                if (older == null || fact.revision() > older.revision()) facts.put(fact.key(), fact);
+            }
+            next = snapshot(next.revision(), facts, next.deleted(), next.erasedKeys());
             commit(next);
             return state;
         });

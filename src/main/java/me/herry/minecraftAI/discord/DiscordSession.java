@@ -193,6 +193,9 @@ public final class DiscordSession implements AutoCloseable {
     public CompletableFuture<Void> confirmedSpeechStyle(String userId, boolean allowed, String interactionId) {
         return confirmedFact(userId, DiscordMemory.Kind.SPEECH_AGREEMENT, "casual", allowed ? "ALLOWED" : "REFUSED", interactionId);
     }
+    public CompletableFuture<Void> confirmedJokes(String userId, boolean allowed, String interactionId) {
+        return confirmedFact(userId, DiscordMemory.Kind.AVOID_JOKE, "all", allowed ? "ALLOWED" : "AVOID", interactionId);
+    }
     private CompletableFuture<Void> confirmedFact(String userId, DiscordMemory.Kind kind, String label, String value, String interactionId) {
         var subject = new DiscordMemory.Subject(settings.guildId(), settings.characterId(), userId);
         var key = new DiscordMemory.Key(subject, kind, "", label);

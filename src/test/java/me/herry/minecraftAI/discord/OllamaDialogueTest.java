@@ -181,6 +181,26 @@ class OllamaDialogueTest {
             assertEquals("자연스러운 존댓말", fixture.data().get("speechStyle").getAsString());
         }
     }
+    @Test void personalJokePreferenceIsIndependentOfCasualSpeechAndCannotComeFromOtherUser() throws Exception {
+        var subject = new DiscordMemory.Subject("guild", "herry", "A");
+        var key = new DiscordMemory.Key(subject, DiscordMemory.Kind.AVOID_JOKE, "", "all");
+        var avoid = new DiscordMemory.Fact(key, "AVOID", DiscordMemory.Evidence.EXPLICIT, "slash-joke", 1000, 0, 1);
+        var allow = new DiscordMemory.Fact(key, "ALLOWED", DiscordMemory.Evidence.EXPLICIT, "slash-joke", 1000, 0, 2);
+        var other = new DiscordMemory.Fact(new DiscordMemory.Key(new DiscordMemory.Subject("guild", "herry", "B"),
+                DiscordMemory.Kind.AVOID_JOKE, "", "all"), "AVOID", DiscordMemory.Evidence.EXPLICIT, "slash-joke", 1000, 0, 1);
+        var expired = new DiscordMemory.Fact(key, "AVOID", DiscordMemory.Evidence.EXPLICIT, "slash-joke", 1000, 1500, 1);
+        try (var fixture = new Fixture()) {
+            fixture.model.respond(request(List.of(other, expired)));
+            assertEquals("GENTLE", fixture.data().get("humourStyle").getAsString());
+            assertTrue(fixture.data().getAsJsonArray("memory").isEmpty());
+            fixture.model.respond(request(List.of(avoid, agreement("A", "ALLOWED", 0))));
+            assertEquals("NO_JOKES", fixture.data().get("humourStyle").getAsString());
+            assertEquals("허락받은 자연스러운 반말", fixture.data().get("speechStyle").getAsString());
+            fixture.model.respond(request(List.of(allow)));
+            assertEquals("GENTLE", fixture.data().get("humourStyle").getAsString());
+            assertEquals("자연스러운 존댓말", fixture.data().get("speechStyle").getAsString());
+        }
+    }
     @Test void dataCannotCreateAnotherSystemMessage() throws Exception {
         try (var fixture = new Fixture()) {
             var token = request(List.of()).turn(); fixture.model.respond(new ResponsePipeline.Request(token,

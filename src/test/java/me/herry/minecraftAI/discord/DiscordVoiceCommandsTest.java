@@ -10,7 +10,7 @@ class DiscordVoiceCommandsTest {
             assertFalse(DiscordVoiceCommands.allowed("guild", "guild", action, false));
             assertTrue(DiscordVoiceCommands.allowed("guild", "guild", action, true));
         }
-        for (String action : Set.of("status", "name", "speech", "forget", "chat", "game")) assertTrue(DiscordVoiceCommands.allowed("guild", "guild", action, false));
+        for (String action : Set.of("status", "name", "speech", "joke", "forget", "chat", "game")) assertTrue(DiscordVoiceCommands.allowed("guild", "guild", action, false));
     }
     @Test void wrongGuildUnknownCommandAndMissingScopeCannotBeAuthorized() {
         assertFalse(DiscordVoiceCommands.allowed("guild", "other", "leave", true));
@@ -20,11 +20,16 @@ class DiscordVoiceCommandsTest {
     }
     @Test void personalCommandsExposeNoTargetUserOrGameExecutionOption() {
         var definition = DiscordVoiceCommands.definition();
-        assertEquals("herry", definition.getName()); assertEquals(13, definition.getSubcommands().size());
+        assertEquals("herry", definition.getName()); assertEquals(14, definition.getSubcommands().size());
         for (var command : definition.getSubcommands()) {
             assertTrue(command.getOptions().stream().noneMatch(option -> option.getName().equals("user") || option.getName().equals("target") || option.getName().equals("ai")));
             if (command.getName().equals("name")) assertEquals(20, command.getOptions().getFirst().getMaxLength());
             if (command.getName().equals("speech")) assertTrue(command.getOptions().getFirst().isRequired());
+            if (command.getName().equals("joke")) {
+                assertEquals(1, command.getOptions().size()); assertTrue(command.getOptions().getFirst().isRequired());
+                assertEquals("allowed", command.getOptions().getFirst().getName());
+                assertEquals(net.dv8tion.jda.api.interactions.commands.OptionType.BOOLEAN, command.getOptions().getFirst().getType());
+            }
             if (command.getName().equals("restore")) {
                 assertEquals(2, command.getOptions().size()); assertTrue(command.getOptions().stream().allMatch(option -> option.isRequired()));
                 assertEquals(72, command.getOptions().getFirst().getMaxLength());

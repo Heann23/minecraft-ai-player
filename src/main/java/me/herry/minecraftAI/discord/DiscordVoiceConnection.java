@@ -220,6 +220,12 @@ public final class DiscordVoiceConnection extends ListenerAdapter implements Dis
             case "forget" -> session.forget(user).thenApply(ignored -> "내 기억과 대화 문맥을 지웠어요. 삭제된 정보는 과거 백업에서도 다시 불러오지 않아요.");
             case "name" -> session.confirmedName(user, java.util.Objects.requireNonNull(event.getOption("name")).getAsString(), source).thenApply(ignored -> "내 호칭을 저장했어요.");
             case "speech" -> session.confirmedSpeechStyle(user, java.util.Objects.requireNonNull(event.getOption("allowed")).getAsBoolean(), source).thenApply(ignored -> "나에게 쓸 말투의 허락·거절을 저장했어요.");
+            case "joke" -> {
+                boolean allowed = java.util.Objects.requireNonNull(event.getOption("allowed")).getAsBoolean();
+                yield session.confirmedJokes(user, allowed, source).thenApply(ignored -> allowed
+                        ? "가벼운 장난을 허용하는 설정을 저장했어요. 진지한 대화에서는 장난을 줄일게요."
+                        : "장난 없이 담백하게 이야기하는 설정을 저장했어요. /herry joke allowed:true로 바꿀 수 있어요.");
+            }
             case "backup" -> session.backup().thenApply(id -> id == null ? "마지막 백업 이후 기억이 바뀌지 않았어요." : "확정 기억을 백업했어요: " + id);
             case "backups" -> session.backupIds().thenApply(ids -> ids.isEmpty() ? "아직 기억 백업이 없어요." : "최근 백업 식별자:\n" + String.join("\n", ids));
             case "restore" -> {
