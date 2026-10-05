@@ -40,6 +40,7 @@ public final class ResponsePipeline implements AutoCloseable {
     private final Playback playback;
     private final Consumer<String> diagnostic;
     private final ThreadPoolExecutor worker;
+    private final ThreadPoolExecutor synthesis;
     private Future<?> pending;
     private ConversationTurns.Token admitted;
     private boolean closed;
@@ -50,6 +51,9 @@ public final class ResponsePipeline implements AutoCloseable {
         this.diagnostic = Objects.requireNonNull(diagnostic);
         worker = new ThreadPoolExecutor(1, 1, 0, TimeUnit.MILLISECONDS, new ArrayBlockingQueue<>(1), r -> {
             Thread thread = new Thread(r, "MinecraftAI-discord-response"); thread.setDaemon(true); return thread;
+        });
+        synthesis = new ThreadPoolExecutor(1, 1, 0, TimeUnit.MILLISECONDS, new ArrayBlockingQueue<>(1), r -> {
+            Thread thread = new Thread(r, "MinecraftAI-discord-synthesis"); thread.setDaemon(true); return thread;
         });
     }
 
@@ -78,18 +82,27 @@ public final class ResponsePipeline implements AutoCloseable {
     public synchronized void cancel() { cancelPending(); worker.purge(); }
 
     private void run(Request request, String greeting) {
+        java.util.concurrent.Future<byte[]> prepared = null;
         try {
             if (!valid(request)) return;
             String response = greeting != null ? greeting : request.permissionQuestion ? "말 편하게 해도 될까요?" : model.respond(request);
             if (!valid(request) || !turns.generated(request.turn, response)) return;
             int completedCharacters = 0;
-            for (String sentence : SentenceChunks.split(response)) {
+            var sentences = SentenceChunks.split(response);
+            for (int index = 0; index < sentences.size(); index++) {
+                String sentence = sentences.get(index);
                 if (!valid(request)) return;
                 if (sentence.isBlank()) { completedCharacters += sentence.length(); continue; }
-                byte[] pcm = voice.synthesize(sentence);
+                if (prepared == null) prepared = prepare(request, sentence);
+                byte[] pcm = prepared.get(); prepared = null;
                 if (pcm == null || pcm.length == 0 || pcm.length > 48_000 * 4 * 60 || pcm.length % 4 != 0)
                     throw new IllegalArgumentException("voice PCM bounds");
                 if (!valid(request)) return;
+                // Exactly one next sentence, synthesized while this sentence is being submitted.
+                // All voice calls share one worker; canceled output never reaches playback/history.
+                for (int next = index + 1; next < sentences.size(); next++) {
+                    if (!sentences.get(next).isBlank()) { prepared = prepare(request, sentences.get(next)); break; }
+                }
                 int prefix = completedCharacters;
                 java.util.concurrent.atomic.AtomicInteger heard = new java.util.concurrent.atomic.AtomicInteger();
                 playback.play(request.turn, sentence, pcm, () -> valid(request), characters -> {
@@ -114,6 +127,16 @@ public final class ResponsePipeline implements AutoCloseable {
             Thread.currentThread().interrupt();
         }
         catch (Exception e) { if (valid(request)) { turns.finish(request.turn); diagnostic.accept("response-provider-failed"); } }
+        finally { if (prepared != null) prepared.cancel(true); synthesis.purge(); }
+    }
+    private java.util.concurrent.Future<byte[]> prepare(Request request, String sentence) {
+        synthesis.purge();
+        return synthesis.submit(() -> {
+            if (!valid(request)) throw new java.util.concurrent.CancellationException("retired voice turn");
+            byte[] pcm = voice.synthesize(sentence);
+            if (!valid(request)) throw new java.util.concurrent.CancellationException("retired voice turn");
+            return pcm;
+        });
     }
     private boolean valid(Request request) { return !Thread.currentThread().isInterrupted() && turns.isCurrent(request.turn); }
     private void cancelPending() {
@@ -123,6 +146,6 @@ public final class ResponsePipeline implements AutoCloseable {
     @Override public synchronized void close() {
         if (closed) return;
         closed = true; turns.close();
-        try { cancelPending(); } finally { worker.shutdownNow(); }
+        try { cancelPending(); } finally { worker.shutdownNow(); synthesis.shutdownNow(); }
     }
 }

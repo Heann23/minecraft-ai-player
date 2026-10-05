@@ -27,6 +27,47 @@ class ResponsePipelineTest {
         }
         assertEquals(1, player.plays.get());
     }
+    @Test void nextSentenceIsReadyDuringPlaybackWithoutConcurrentSynthesis() throws Exception {
+        var turns = turns(); var token = call(turns, "lookahead");
+        var nextReady = new CountDownLatch(1); var finished = new CountDownLatch(1);
+        var active = new AtomicInteger(); var maximum = new AtomicInteger(); var plays = new AtomicInteger();
+        var playback = new ResponsePipeline.Playback() {
+            public void stop() {}
+            public void play(Token turn, String text, byte[] pcm, java.util.function.BooleanSupplier valid, java.util.function.IntConsumer heard) throws Exception {
+                if (plays.incrementAndGet() == 1) await(nextReady);
+                assertTrue(valid.getAsBoolean()); heard.accept(text.length());
+                if (plays.get() == 2) finished.countDown();
+            }
+        };
+        try (var pipeline = new ResponsePipeline(turns, request -> "첫 문장이에요. 다음 문장이에요.", text -> {
+            maximum.accumulateAndGet(active.incrementAndGet(), Math::max);
+            try { if (text.contains("다음")) nextReady.countDown(); return new byte[3840]; }
+            finally { active.decrementAndGet(); }
+        }, playback, code -> fail(code))) {
+            assertTrue(pipeline.respond(request(turns, token))); await(finished);
+            assertEquals(2, plays.get()); assertEquals(1, maximum.get());
+        }
+    }
+    @Test void canceledLookaheadCannotBecomePlayedOrHeardContext() throws Exception {
+        var turns = turns(); var token = call(turns, "cancel-lookahead");
+        var nextEntered = new CountDownLatch(1); var nextEnded = new CountDownLatch(1);
+        var playbackEnded = new CountDownLatch(1); var plays = new AtomicInteger();
+        var playback = new ResponsePipeline.Playback() {
+            public void stop() {}
+            public void play(Token turn, String text, byte[] pcm, java.util.function.BooleanSupplier valid, java.util.function.IntConsumer heard) throws Exception {
+                plays.incrementAndGet(); await(nextEntered);
+                try { new CountDownLatch(1).await(); } finally { playbackEnded.countDown(); }
+            }
+        };
+        try (var pipeline = new ResponsePipeline(turns, request -> "첫 문장이에요. 취소할 문장이에요.", text -> {
+            if (text.contains("취소")) { nextEntered.countDown(); try { new CountDownLatch(1).await(); } finally { nextEnded.countDown(); } }
+            return new byte[3840];
+        }, playback, code -> fail(code))) {
+            pipeline.respond(request(turns, token)); await(nextEntered); pipeline.interrupt("A");
+            await(nextEnded); await(playbackEnded); assertEquals(1, plays.get());
+            assertTrue(turns.context().stream().noneMatch(Line::assistant));
+        }
+    }
     @Test void lateModelThatIgnoresCancellationCannotPlayAndOnlyOneInferenceRuns() throws Exception {
         var turns = turns(); Token old = call(turns, "1"); var player = new Player();
         var entered = new CountDownLatch(1); var release = new CountDownLatch(1);
@@ -90,7 +131,7 @@ class ResponsePipelineTest {
         try { assertTrue(pipeline.respond(request(turns, token))); await(entered); assertDoesNotThrow(pipeline::close); await(ended); assertEquals(2, stopFailures.get()); }
         finally { pipeline.close(); }
     }
-    @Test void eachSentenceIsSynthesizedAfterPreviousPlaybackAndFailedLaterSentenceIsNotRemembered() throws Exception {
+    @Test void sentenceSynthesisStaysOrderedAndFailedLaterSentenceIsNotRemembered() throws Exception {
         var turns = turns(); Token token = call(turns, "1"); var player = new Player(); var diagnosed = new CountDownLatch(1);
         var synthesized = new java.util.ArrayList<String>(); var captured = new java.util.concurrent.atomic.AtomicReference<List<Line>>();
         try (var pipeline = new ResponsePipeline(turns, request -> "첫 문장. 둘째 문장.", text -> {

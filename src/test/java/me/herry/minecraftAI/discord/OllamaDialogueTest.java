@@ -56,7 +56,42 @@ class OllamaDialogueTest {
             assertEquals(1024, body.getAsJsonObject("options").get("num_ctx").getAsInt());
             assertTrue(body.getAsJsonArray("messages").get(0).getAsJsonObject().get("content").getAsString().contains("Herry"));
             assertEquals("A", fixture.data().get("respondTo").getAsString());
+            assertEquals("해리야 왜 그래?", fixture.data().get("currentUtterance").getAsString());
+            assertFalse(fixture.data().get("continuingConversation").getAsBoolean());
             assertEquals("해리야 왜 그래?", fixture.data().getAsJsonArray("history").get(0).getAsJsonObject().get("text").getAsString());
+        }
+    }
+    private ResponsePipeline.Request followup(String input) {
+        return new ResponsePipeline.Request(request(List.of()).turn(), List.of(
+                new ConversationTurns.Line("A", "Herry", "해리님, 안녕하세요", false, 1000),
+                new ConversationTurns.Line("Herry", "A", "안녕하세요. 해리예요.", true, 1100),
+                new ConversationTurns.Line("B", "Herry", "제 이름은 다른 사람이에요", false, 1200),
+                new ConversationTurns.Line("A", "Herry", input, false, 1300)), List.of());
+    }
+    @Test void heardFollowupUsesLatestTargetUtteranceAndDropsRepeatedIntroduction() throws Exception {
+        try (var fixture = new Fixture()) {
+            fixture.output("{\"done\":true,\"message\":{\"role\":\"assistant\",\"content\":\"안녕하세요. 해리예요! 나무부터 모아 볼까요?\"}}");
+            assertEquals("나무부터 모아 볼까요?", fixture.model.respond(followup("오늘 뭐 할까요?")));
+            assertEquals("오늘 뭐 할까요?", fixture.data().get("currentUtterance").getAsString());
+            assertTrue(fixture.data().get("continuingConversation").getAsBoolean());
+        }
+    }
+    @Test void identityQuestionAndQuotedGreetingExplanationArePreserved() throws Exception {
+        try (var fixture = new Fixture()) {
+            fixture.output("{\"done\":true,\"message\":{\"role\":\"assistant\",\"content\":\"저는 해리예요. 함께 게임하는 친구예요.\"}}");
+            assertEquals("저는 해리예요. 함께 게임하는 친구예요.", fixture.model.respond(followup("너는 누구야?")));
+            fixture.output("{\"done\":true,\"message\":{\"role\":\"assistant\",\"content\":\"안녕하세요라는 말은 인사예요.\"}}");
+            assertEquals("안녕하세요라는 말은 인사예요.", fixture.model.respond(followup("그 말이 무슨 뜻이야?")));
+        }
+    }
+    @Test void anotherPersonsGreetingCannotSuppressFirstGreetingToCurrentSpeaker() throws Exception {
+        try (var fixture = new Fixture()) {
+            fixture.output("{\"done\":true,\"message\":{\"role\":\"assistant\",\"content\":\"안녕하세요. 해리예요.\"}}");
+            var token = request(List.of()).turn();
+            assertEquals("안녕하세요. 해리예요.", fixture.model.respond(new ResponsePipeline.Request(token, List.of(
+                    new ConversationTurns.Line("Herry", "B", "반가워요.", true, 1000),
+                    new ConversationTurns.Line("A", "Herry", "해리님, 안녕하세요", false, 1300)), List.of())));
+            assertFalse(fixture.data().get("continuingConversation").getAsBoolean());
         }
     }
     @Test void anotherUsersAgreementAndExpiredAgreementCannotGrantCasualSpeech() throws Exception {
