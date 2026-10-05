@@ -5,6 +5,9 @@ import me.herry.minecraftAI.ai.comm.CommunicationHub;
 import me.herry.minecraftAI.ai.comm.IncomingMessage;
 import me.herry.minecraftAI.ai.comm.MessageSource;
 import me.herry.minecraftAI.ai.crafting.CraftingSystem;
+import me.herry.minecraftAI.ai.experience.Experience;
+import me.herry.minecraftAI.ai.experience.ExperienceSink;
+import me.herry.minecraftAI.ai.experience.JsonlExperienceWriter;
 import me.herry.minecraftAI.ai.memory.MemoryType;
 import me.herry.minecraftAI.ai.perf.WorkBudget;
 import me.herry.minecraftAI.ai.plan.Planner;
@@ -69,6 +72,8 @@ public final class AIController {
     private final SkinFetcher skins;
     private final InventoryViews views = new InventoryViews();
     private final @Nullable AIStateStore store;
+    // 학습용 기록을 파일로 쓰는 곳. 기록을 꺼 두었으면 null.
+    private final @Nullable JsonlExperienceWriter experience;
 
     private final Map<String, Entry> entries = new LinkedHashMap<>();
     // 틱을 도는 중에 목록이 바뀌어도 안전하도록, 생성/제거 때마다 새로 만드는 복사본을 순회한다.
@@ -87,10 +92,13 @@ public final class AIController {
         this.store = store;
         this.team = new TeamChat(this::getAll, hub);
         this.budget = new WorkBudget(config.tickBudgetNanos);
+        this.experience = !config.recordExperience ? null : new JsonlExperienceWriter(
+                plugin.getDataFolder().toPath().resolve("training-data"), config.experienceMaxBytes, plugin.getLogger()::warning);
         this.services = new AIServices(config, debugger, crafting,
                 new CombatSystem(config.engageRange, config.criticalHealth),
                 new SurvivalSystem(config.lowHealth, config.criticalHealth, config.eatBelow),
-                new Planner(), team, budget);
+                new Planner(), team, budget, experience == null ? ExperienceSink.NONE : experience,
+                plugin.getPluginMeta().getVersion(), plugin.getLogger()::warning);
         this.skins = new SkinFetcher(plugin.getLogger());
         crafting.warmUp();
     }
@@ -193,6 +201,11 @@ public final class AIController {
 
     public int count() {
         return entries.size();
+    }
+
+    // 학습용 기록을 쓰는 곳. 기록을 꺼 두었으면 null.
+    public @Nullable JsonlExperienceWriter getExperienceWriter() {
+        return experience;
     }
 
     public WorkBudget getBudget() {
@@ -352,8 +365,14 @@ public final class AIController {
         List<Entry> all = new ArrayList<>(entries.values());
         entries.clear();
         views.closeEverything();
-        for (Entry entry : all) discard(entry);
+        for (Entry entry : all) {
+            // 서버가 꺼져서 끊긴 것은 제거된 것이나 죽은 것과 구분해서 남긴다.
+            entry.ai.getJournal().endEpisode(Experience.EndReason.SHUTDOWN);
+            discard(entry);
+        }
         refreshTickList();
+        // 남은 기록을 다 쓰고 파일을 닫는다. 오래 걸리면 기다리지 않는다 (서버 종료를 붙잡지 않는다).
+        if (experience != null) experience.close();
     }
 
     private void respawn(Entry entry) {
@@ -403,6 +422,7 @@ public final class AIController {
                 // 예외가 매 틱 반복되어 콘솔을 뒤덮지 않도록 해당 AI 의 자율 행동을 멈춘다.
                 plugin.getLogger().log(Level.SEVERE, "AI player " + entry.ai.getName() + " stopped because of an error", e);
                 try {
+                    entry.ai.getJournal().endEpisode(Experience.EndReason.ERROR);
                     entry.ai.shutdown();
                 } catch (RuntimeException cleanupError) {
                     plugin.getLogger().log(Level.SEVERE, "Failed to clean up AI player " + entry.ai.getName(), cleanupError);

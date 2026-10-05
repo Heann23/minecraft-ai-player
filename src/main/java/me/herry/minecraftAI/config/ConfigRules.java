@@ -1,5 +1,7 @@
 package me.herry.minecraftAI.config;
 
+import java.util.List;
+import java.util.Locale;
 import java.util.function.Consumer;
 
 /**
@@ -15,6 +17,19 @@ public final class ConfigRules {
     public static final double MAX_FLEE_DISTANCE = 48.0;
 
     private ConfigRules() {
+    }
+
+    /**
+     * 정해진 이름 중 하나여야 하는 값. 대소문자는 가리지 않는다. 목록에 없는 값이면 기본값으로 바꾸고 알린다.
+     * (오타를 낸 채로 "켜 둔 줄 알고" 지내는 일을 막는다.)
+     *
+     * @param key 경고에 적을 설정 이름
+     */
+    public static String oneOf(String key, String value, List<String> allowed, String fallback, Consumer<String> warn) {
+        String wanted = value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
+        if (allowed.contains(wanted)) return wanted;
+        warn.accept(key + " (" + value + ") is not one of " + allowed + ". Using " + fallback + ".");
+        return fallback;
     }
 
     /**

@@ -7,15 +7,16 @@ import me.herry.minecraftAI.ai.build.BuildJob;
 import me.herry.minecraftAI.ai.combat.CombatMemory;
 import me.herry.minecraftAI.ai.combat.CombatSystem;
 import me.herry.minecraftAI.ai.crafting.CraftingSystem;
+import me.herry.minecraftAI.ai.experience.Experience;
 import me.herry.minecraftAI.ai.crafting.FurnaceJob;
 import me.herry.minecraftAI.ai.goal.GoalType;
 import me.herry.minecraftAI.ai.goal.Milestone;
 import me.herry.minecraftAI.ai.goal.Situation;
-import me.herry.minecraftAI.ai.goal.model.Goal;
+
 import me.herry.minecraftAI.ai.inventory.InventorySystem;
 import me.herry.minecraftAI.ai.memory.MemorySystem;
 import me.herry.minecraftAI.ai.navigation.NavigationSystem;
-import me.herry.minecraftAI.ai.observation.Observation;
+
 import me.herry.minecraftAI.ai.perception.Perception;
 import me.herry.minecraftAI.ai.perception.PerceptionSystem;
 import me.herry.minecraftAI.ai.perf.TickProfiler;
@@ -88,7 +89,7 @@ public final class AIPlayer {
         this.perception = new PerceptionSystem(body, services.config(), services.budget());
         this.inventory = new InventorySystem(body);
         this.navigation = new NavigationSystem(body, services.config(), this::debug, services.budget(), profiler, inventory);
-        this.brain = new AIBrain(this, services.planner());
+        this.brain = new AIBrain(this, services);
     }
 
     /**
@@ -129,6 +130,7 @@ public final class AIPlayer {
         if (state != AIState.STOPPED) return false;
         state = AIState.RUNNING;
         debug("Autonomous behavior started");
+        brain.getJournal().beginEpisode(Experience.StartReason.START);
         getTeam().say(this, Phrases.hello(getTeam().teamSize()), true);
         return true;
     }
@@ -140,6 +142,7 @@ public final class AIPlayer {
             return true;
         }
         if (state != AIState.RUNNING) return false;
+        brain.getJournal().endEpisode(Experience.EndReason.STOPPED);
         brain.reset();
         // 멈춰 있는 동안 주변 엔티티나 월드에 대한 참조를 들고 있지 않는다.
         perception.reset();
@@ -158,6 +161,7 @@ public final class AIPlayer {
         resumeAfterRespawn = state == AIState.RUNNING;
         // 죽은 자리는 오래 기억한다. 떨어뜨린 아이템을 찾으러 가거나 위험한 곳을 피하는 데 쓴다.
         worldModel.recordDeath(getWorldId(), getPosition());
+        brain.getJournal().endEpisode(Experience.EndReason.DEATH);
         brain.reset();
         treeJob = null;
         state = AIState.DEAD;
@@ -171,7 +175,9 @@ public final class AIPlayer {
         combatMemory.reset();
         state = resumeAfterRespawn ? AIState.RUNNING : AIState.STOPPED;
         debug("Respawned");
-        if (state == AIState.RUNNING) getTeam().say(this, Phrases.respawned(), true);
+        if (state != AIState.RUNNING) return;
+        brain.getJournal().beginEpisode(Experience.StartReason.RESPAWN);
+        getTeam().say(this, Phrases.respawned(), true);
     }
 
     public void onAttacked(Entity attacker) {
@@ -285,6 +291,8 @@ public final class AIPlayer {
     // 제거되기 전에 진행 중인 행동과 이동 입력을 정리한다.
     public void shutdown() {
         try {
+            // 서버가 꺼지는 것이면 AIController 가 먼저 그 까닭으로 닫아 두었다. 그 밖에는 제거된 것이다.
+            brain.getJournal().endEpisode(Experience.EndReason.REMOVED);
             brain.reset();
         } finally {
             state = AIState.STOPPED;
@@ -411,19 +419,9 @@ public final class AIPlayer {
         return brain.isEscaping();
     }
 
-    // 지금 목표를 "무엇을 얼마나"로 적은 것
-    public Goal getGoalSpec() {
-        return brain.getGoalSpec();
-    }
-
-    // 지금 계획을 세운 스킬의 이름. 계획이 없으면 빈 문자열.
-    public String getCurrentSkill() {
-        return brain.getCurrentSkill();
-    }
-
-    // 마지막으로 판단할 때의 관측. 아직 한 번도 판단하지 않았으면 null.
-    public @Nullable Observation getObservation() {
-        return brain.getObservation();
+    // 목표 명세, 계획을 세운 스킬, 마지막 관측, 학습용 기록
+    public DecisionJournal getJournal() {
+        return brain.getJournal();
     }
 
     // 지금 하고 있는 일과 그 이유. 아직 한 번도 판단하지 않았으면 null.
