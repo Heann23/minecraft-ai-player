@@ -186,6 +186,25 @@ public final class DiscordSession implements AutoCloseable {
             return memory.forget(subject);
         });
     }
+    /** Scope is a fixed personal command choice, never another user's identity or arbitrary memory label. */
+    public CompletableFuture<Void> forgetPreference(String userId, String scope) {
+        var target = switch (java.util.Objects.requireNonNull(scope)) {
+            case "all" -> ConfirmedTextForget.Target.ALL;
+            case "name" -> ConfirmedTextForget.Target.NAME;
+            case "speech" -> ConfirmedTextForget.Target.SPEECH;
+            case "joke" -> ConfirmedTextForget.Target.JOKE;
+            default -> throw new IllegalArgumentException("personal deletion scope");
+        };
+        if (target == ConfirmedTextForget.Target.ALL) return forget(userId);
+        var subject = new DiscordMemory.Subject(settings.guildId(), settings.characterId(), userId);
+        var key = target.key(subject);
+        return post(() -> {
+            if (memoryMaintenance) throw new IllegalStateException("memory restore in progress");
+            greetings.clearPending(); textConversation.forget(userId);
+            ingress.reset(); speech.refreshRoutes(); responses.cancel();
+            return memory.forget(key);
+        });
+    }
     /** Explicit personal slash input, independent of uncertain voice recognition or generated text. */
     public CompletableFuture<Void> confirmedName(String userId, String name, String interactionId) {
         if (name == null || !name.matches("[가-힣A-Za-z]{1,20}")) throw new IllegalArgumentException("confirmed name");

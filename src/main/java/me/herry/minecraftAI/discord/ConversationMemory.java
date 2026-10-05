@@ -40,4 +40,19 @@ public final class ConversationMemory {
             return store.forget(person).thenApply(snapshot -> null);
         }
     }
+    /** Exact personal setting only; the same turn lock prevents pre-deletion speech from being enqueued later. */
+    public CompletableFuture<Void> forget(Key key) {
+        Objects.requireNonNull(key);
+        String expected = switch (key.kind()) {
+            case NAME -> "preferred";
+            case SPEECH_AGREEMENT -> "casual";
+            case AVOID_JOKE -> "all";
+            default -> throw new IllegalArgumentException("personal setting deletion kind");
+        };
+        if (!key.otherUserId().isEmpty() || !key.label().equals(expected)) throw new IllegalArgumentException("personal setting deletion key");
+        synchronized (turns) {
+            turns.forget(key.subject().userId());
+            return store.forget(key).thenApply(snapshot -> null);
+        }
+    }
 }

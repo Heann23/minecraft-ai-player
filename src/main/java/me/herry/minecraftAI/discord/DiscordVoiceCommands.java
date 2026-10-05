@@ -23,7 +23,10 @@ public final class DiscordVoiceCommands {
                 new SubcommandData("game", "설정한 게임 AI의 현재 상태만 확인해요"),
                 new SubcommandData("chat", "해리와 나에게만 보이는 텍스트 대화를 해요")
                         .addOptions(new OptionData(OptionType.STRING, "message", "해리에게 할 말", true).setMinLength(1).setMaxLength(1000)),
-                new SubcommandData("forget", "해리가 기억한 내 정보를 지워요"),
+                new SubcommandData("forget", "해리가 기억한 내 정보를 지워요")
+                        .addOptions(new OptionData(OptionType.STRING, "scope", "지울 범위, 생략하면 내 기억 전체", false)
+                                .addChoice("내 기억 전체", "all").addChoice("이름·호칭만", "name")
+                                .addChoice("말투 합의만", "speech").addChoice("장난 설정만", "joke")),
                 new SubcommandData("name", "내가 불릴 이름을 직접 확정해요").addOptions(new OptionData(OptionType.STRING, "name", "저장할 내 호칭", true).setMinLength(1).setMaxLength(20)),
                 new SubcommandData("speech", "해리가 나에게 쓸 말투를 직접 허락하거나 거절해요").addOption(OptionType.BOOLEAN, "allowed", "반말을 허락할까요?", true),
                 new SubcommandData("joke", "나에게 가벼운 장난을 해도 되는지 직접 정해요").addOption(OptionType.BOOLEAN, "allowed", "가벼운 장난을 허용할까요?", true),
