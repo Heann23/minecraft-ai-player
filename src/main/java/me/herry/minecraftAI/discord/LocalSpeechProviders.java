@@ -20,6 +20,9 @@ public final class LocalSpeechProviders implements SpeechRecognitionWorker.Recog
         ByteArrayOutputStream body = new ByteArrayOutputStream();
         field(body, boundary, "language", "ko"); field(body, boundary, "response_format", "json");
         field(body, boundary, "temperature", "0.0"); field(body, boundary, "temperature_inc", "0.0");
+        // Fixed public vocabulary only; no participant names, memory, or expected answer.
+        // Recognition still remains uncalibrated and cannot grant persistent consent.
+        field(body, boundary, "prompt", "해리, Herry, 마인크래프트.");
         write(body, "--" + boundary + "\r\nContent-Disposition: form-data; name=\"file\"; filename=\"utterance.wav\"\r\nContent-Type: audio/wav\r\n\r\n");
         body.writeBytes(wave); write(body, "\r\n--" + boundary + "--\r\n");
         var response = http.post(settings.recognitionEndpoint(), "multipart/form-data; boundary=" + boundary, body.toByteArray(), settings.recognitionTimeout(), 65_536);

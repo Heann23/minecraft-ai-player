@@ -48,6 +48,9 @@ class LocalSpeechProvidersTest {
             String multipart = new String(fixture.request.get(), StandardCharsets.ISO_8859_1);
             for (String field : new String[]{"language\"\r\n\r\nko", "response_format\"\r\n\r\njson",
                     "temperature\"\r\n\r\n0.0", "temperature_inc\"\r\n\r\n0.0"}) assertTrue(multipart.contains(field));
+            String utf8Multipart = new String(fixture.request.get(), StandardCharsets.UTF_8);
+            assertTrue(utf8Multipart.contains("name=\"prompt\"\r\n\r\n해리, Herry, 마인크래프트.\r\n"));
+            assertFalse(utf8Multipart.contains("민수"));
             assertTrue(multipart.endsWith("\r\n--" + boundary + "--\r\n"));
             int waveStart = multipart.indexOf("RIFF"); assertTrue(waveStart > 0);
             assertArrayEquals(WaveAudio.mono16k(pcm), Arrays.copyOfRange(fixture.request.get(), waveStart, waveStart + 48));
