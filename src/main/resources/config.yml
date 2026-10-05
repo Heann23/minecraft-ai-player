@@ -63,5 +63,16 @@ chat:
   # 급하지 않은 말을 다시 하기까지의 최소 간격 (틱)
   min-interval: 100
 
+learning:
+  # AI 의 판단과 그 결과를 학습용 데이터로 남길지. 켜면 plugins/MinecraftAI/training-data/<AI 이름>/ 에
+  # 에피소드(자율 행동을 켠 때부터 죽거나 멈출 때까지)마다 파일 하나가 생긴다. AI 의 행동은 달라지지 않는다.
+  record: false
+  # 남길 수 있는 총 크기 (MB). 넘으면 더 남기지 않는다.
+  max-megabytes: 512
+  # 실제 행동은 지금의 규칙대로 하면서, 후보 정책이라면 무엇을 골랐을지 같이 계산해서 견주어 보기만 한다.
+  # none: 하지 않는다. repeat-last: "하던 일을 계속한다"고만 답하는 기준용 정책.
+  # 견준 결과는 /ai learn 으로 본다.
+  shadow-policy: none
+
 debug:
   enabled: false

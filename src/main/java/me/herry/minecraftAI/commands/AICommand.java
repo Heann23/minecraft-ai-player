@@ -31,7 +31,7 @@ import java.util.function.Function;
 public class AICommand implements TabExecutor {
     public static final String PERMISSION = "minecraftai.admin";
     private static final List<String> SUB_COMMANDS = List.of("spawn", "remove", "start", "stop", "status", "inv", "goal", "debug",
-            "why", "brain", "plan", "observe", "memory", "perf", "home", "say", "save");
+            "why", "brain", "plan", "observe", "learn", "memory", "perf", "home", "say", "save");
     // 디버그를 켜고 끄는 말. "/ai debug start" 처럼 입력해도 알아듣게 한다.
     private static final List<String> SWITCH_ON = List.of("on", "start", "true", "enable", "켜기");
     private static final List<String> SWITCH_OFF = List.of("off", "stop", "false", "disable", "끄기");
@@ -69,6 +69,7 @@ public class AICommand implements TabExecutor {
             case "brain" -> inspect(sender, args, "판단 기록", AIInspector::brain);
             case "plan" -> inspect(sender, args, "현재 계획", AIInspector::plan);
             case "observe" -> inspect(sender, args, "관측", AIInspector::observe);
+            case "learn" -> inspect(sender, args, "학습용 기록", ai -> AIInspector.learn(ai, controller.getExperienceWriter()));
             case "memory" -> inspect(sender, args, "기억", AIInspector::memory);
             case "perf" -> inspect(sender, args, "성능", ai -> AIInspector.perf(ai, controller.getBudget()));
             case "home" -> home(sender, args);
@@ -311,7 +312,7 @@ public class AICommand implements TabExecutor {
         String sub = args[0].toLowerCase(Locale.ROOT);
         if (args.length == 2) {
             return switch (sub) {
-                case "remove", "start", "stop", "status", "inv", "inventory", "why", "brain", "plan", "observe", "memory", "perf", "say" ->
+                case "remove", "start", "stop", "status", "inv", "inventory", "why", "brain", "plan", "observe", "learn", "memory", "perf", "say" ->
                         filter(names(), args[1]);
                 case "goal" -> filter(goalNames(), args[1]);
                 case "debug" -> filter(List.of("on", "off"), args[1]);

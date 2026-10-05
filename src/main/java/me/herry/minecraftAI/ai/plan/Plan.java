@@ -33,6 +33,11 @@ public final class Plan {
         index++;
     }
 
+    // 지금 실행 중인 행동이 계획에서 몇 번째인지 (0 부터). 끝난 계획이면 행동의 수와 같다.
+    public int position() {
+        return index;
+    }
+
     public boolean isFinished() {
         return index >= actions.size();
     }

@@ -1,5 +1,6 @@
 package me.herry.minecraftAI.ai.observation;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -14,6 +15,8 @@ public final class ObservationFixture {
     public int stone;
     public int coal;
     public int food;
+
+    public long tick;
 
     public double x;
     public double y = 64.0;
@@ -30,6 +33,8 @@ public final class ObservationFixture {
     public String combat = EnvironmentState.NO_COMBAT;
     public boolean allyNeedsHelp;
 
+    public String stage = "EARLY_SURVIVAL";
+    public final List<String> achieved = new ArrayList<>();
     public boolean tableAvailable;
     public boolean furnaceAvailable;
     public boolean shelterBuilt;
@@ -54,11 +59,11 @@ public final class ObservationFixture {
                 "NONE", "NONE", "NONE");
         EnvironmentState environment = new EnvironmentState(1000L, night, false, thundering, "plains", 15, false, false, false,
                 false, hostileNearby, combat, allyNeedsHelp, 0, 0, 0, List.of());
-        ProgressState progress = new ProgressState("EARLY_SURVIVAL", "CRAFTING_TABLE", "WOOD", List.of(), tableAvailable,
+        ProgressState progress = new ProgressState(stage, "CRAFTING_TABLE", "WOOD", achieved, tableAvailable,
                 furnaceAvailable, shelterBuilt, netherPortalBuilt, false, false, dragonDefeated);
         MemoryState memory = new MemoryState(homeKnown, homeDistance, insideHome, shelterBuilt, false, canSleep, false, false,
                 false, false, knowsLootChest, false, Map.of(), 0, "");
         CurrentTaskState task = new CurrentTaskState("IDLE", "Legacy(IDLE)", "", "None", "(계획 없음)", false, 0);
-        return new Observation(Observation.SCHEMA_VERSION, 0L, player, inventory, environment, progress, memory, task);
+        return new Observation(Observation.SCHEMA_VERSION, tick, player, inventory, environment, progress, memory, task);
     }
 }
