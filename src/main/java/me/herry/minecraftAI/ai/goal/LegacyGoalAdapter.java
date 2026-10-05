@@ -69,6 +69,8 @@ public final class LegacyGoalAdapter {
             }
             case BUILD_SHELTER -> new BuildGoal(BuildGoal.Structure.SHELTER, origin);
             case BUILD_PORTAL -> new BuildGoal(BuildGoal.Structure.NETHER_PORTAL, origin);
+            case ENTER_NETHER -> new ReachGoal(ReachGoal.Place.NETHER, null, 0.0, origin);
+            case LEAVE_NETHER -> new ReachGoal(ReachGoal.Place.OVERWORLD, null, 0.0, origin);
             case EXPLORE -> new ExploreGoal(origin);
             case IDLE, SHARE_FOOD, CLEAN_INVENTORY, STORE_ITEMS, FETCH_ITEMS, PICKUP_ITEMS, PACK_UP_TABLE, COOK_FOOD,
                  TEND_FURNACE, PACK_UP_FURNACE -> new LegacyGoalWrapper(type, origin);
