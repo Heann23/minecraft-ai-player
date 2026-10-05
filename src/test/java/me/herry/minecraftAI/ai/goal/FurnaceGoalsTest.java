@@ -20,6 +20,8 @@ class FurnaceGoalsTest {
         situation.foodCount = GoalSystem.TRIP_FOOD;
         situation.nextMilestone = Milestone.IRON_PICKAXE;
         situation.need = Situation.Need.IRON;
+        // 내려갈 때 챙길 나무는 이미 있다 (없으면 나무부터 구한다).
+        situation.plankEquivalent = GoalSystem.TRIP_WOOD;
         situation.ironNeeded = 3;
         situation.hasPickaxe = true;
         situation.canMineIron = true;
@@ -182,6 +184,8 @@ class FurnaceGoalsTest {
         situation.furnaceBusy = false;
         situation.nextMilestone = Milestone.IRON_PICKAXE;
         situation.need = Situation.Need.IRON;
+        // 내려갈 때 챙길 나무는 이미 있다 (없으면 나무부터 구한다).
+        situation.plankEquivalent = GoalSystem.TRIP_WOOD;
         situation.ironNeeded = 3;
         situation.rawIron = 3;
         situation.hasFuel = true;

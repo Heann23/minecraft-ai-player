@@ -34,8 +34,11 @@ public final class GoalReasons {
             case STORE_ITEMS -> "가방 빈칸이 " + s.emptySlots + "칸이고 당장 안 쓰는 것이 " + s.storableSlots + "칸 있어서 집 상자에 넣어 두려고요";
             case PICKUP_ITEMS -> "근처에 떨어진 아이템이 있어서요";
             case FETCH_ITEMS -> target + "에 필요한 재료가 집 상자에 있어서, 새로 구하는 대신 꺼내 오려고요";
-            case FIND_WOOD -> target + "에 나무가 필요한데 아는 나무가 없어서 찾아야 해요";
-            case COLLECT_WOOD -> s.treeUnfinished ? "베던 나무를 끝까지 베려고요" : target + "에 쓸 나무가 부족해서요";
+            case FIND_WOOD -> GoalSystem.packsWoodForTrip(s) ? "땅속에는 나무가 없어서, 내려가기 전에 챙길 나무를 찾고 있어요"
+                    : target + "에 나무가 필요한데 아는 나무가 없어서 찾아야 해요";
+            case COLLECT_WOOD -> s.treeUnfinished ? "베던 나무를 끝까지 베려고요"
+                    : GoalSystem.packsWoodForTrip(s) ? "땅속에는 나무가 없어서, 내려가기 전에 곡괭이 자루와 연료로 쓸 나무를 챙기려고요"
+                    : target + "에 쓸 나무가 부족해서요";
             // 작업대가 필요할 때는 다음에 이룰 것이 작업대 자체로 잡혀 있어서, 무엇을 만들려는지는 따로 알 수 없다.
             case CRAFT_WORKBENCH -> "도구와 장비를 만들려면 가까이에 작업대가 있어야 해서요";
             case CRAFT_TOOL -> target + " 재료가 다 모여서 만들 차례예요";
