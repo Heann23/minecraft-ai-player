@@ -31,7 +31,7 @@ final class ConfirmedTextPreference {
     private ConfirmedTextPreference() {}
     static Change read(String input) {
         String personal = input.strip().replaceFirst("(?iu)^(?:해리|Herry)(?:님|씨|야|아)?(?:\\s*[,，:]\\s*|\\s+)", "");
-        var name = ConfirmedMemoryInput.introducedName(personal, true);
+        var name = ConfirmedTextName.read(personal);
         if (name.isPresent()) return new Change(DiscordMemory.Kind.NAME, name.get());
         boolean question = java.util.regex.Pattern.compile("[?？][.!?。！？]*$").matcher(personal).find();
         String text = input.strip().replaceAll("\\s+", "").replaceFirst("[.!?。！？]+$", "")
