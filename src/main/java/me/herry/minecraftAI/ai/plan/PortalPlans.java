@@ -5,6 +5,7 @@ import me.herry.minecraftAI.ai.action.Action;
 import me.herry.minecraftAI.ai.action.BreakBlockAction;
 import me.herry.minecraftAI.ai.action.BuildBlockAction;
 import me.herry.minecraftAI.ai.action.CenterOnBlockAction;
+import me.herry.minecraftAI.ai.action.EnterPortalAction;
 import me.herry.minecraftAI.ai.action.IgniteAction;
 import me.herry.minecraftAI.ai.action.MoveToAction;
 import me.herry.minecraftAI.ai.build.BlockRole;
@@ -15,6 +16,8 @@ import me.herry.minecraftAI.ai.build.BuildMaterials;
 import me.herry.minecraftAI.ai.build.SiteFinder;
 import me.herry.minecraftAI.ai.memory.MemoryEntry;
 import me.herry.minecraftAI.ai.memory.MemoryType;
+import me.herry.minecraftAI.ai.navigation.BlockClass;
+import me.herry.minecraftAI.ai.navigation.BukkitTerrainView;
 import me.herry.minecraftAI.ai.navigation.PathGoal;
 import me.herry.minecraftAI.ai.team.Phrases;
 import me.herry.minecraftAI.ai.util.BlockPoint;
@@ -140,6 +143,57 @@ public final class PortalPlans {
             steps++;
         }
         return steps == 0 ? List.of() : actions;
+    }
+
+    // 지금 있는 차원에 아는 네더 포탈이 있는지. 포탈 칸 안에 서 있는 것(방금 도착함)도 아는 것으로 친다.
+    public static boolean knowsPortalHere(AIPlayer ai) {
+        World world = ai.getPlayer().getWorld();
+        return isPortal(world, ai.getPosition())
+                || ai.getWorldModel().nearestPortal(WorldModel.PortalKind.NETHER, world.getUID(), ai.getPosition()) != null;
+    }
+
+    /**
+     * 가장 가까운 포탈로 가서 들어간다. 오버월드에서는 네더로, 네더에서는 오버월드로 넘어간다.
+     */
+    static List<Action> usePortal(AIPlayer ai) {
+        World world = ai.getPlayer().getWorld();
+        BlockPoint feet = ai.getPosition();
+        // 방금 도착해서 포탈 안에 서 있다. 한 번 나갔다가 다시 들어가는 것까지 그 행동이 한다.
+        if (isPortal(world, feet)) return List.of(new EnterPortalAction(feet));
+        WorldModel.Portal known = ai.getWorldModel().nearestPortal(WorldModel.PortalKind.NETHER, world.getUID(), feet);
+        if (known == null) return List.of();
+        BlockPoint portal = known.pos();
+        if (!Positions.isLoaded(world, portal)) return List.of(new MoveToAction(PathGoal.arrive(portal, 3.0), false));
+        BlockPoint front = isPortal(world, portal) ? frontOf(world, portal, feet) : null;
+        if (front == null) {
+            ai.debug("The portal at " + portal + " cannot be entered");
+            return List.of();
+        }
+        List<Action> actions = new ArrayList<>();
+        if (!feet.equals(front)) actions.add(new MoveToAction(PathGoal.arrive(front, 0.3), false));
+        actions.add(new EnterPortalAction(portal));
+        return actions;
+    }
+
+    // 포탈 칸 바로 앞의 설 자리. 포탈 칸은 틀의 아랫줄 위에 있어서 한 칸 낮은 자리에서 올라서기도 한다.
+    private static @Nullable BlockPoint frontOf(World world, BlockPoint portal, BlockPoint from) {
+        BukkitTerrainView terrain = new BukkitTerrainView(world);
+        BlockPoint best = null;
+        for (int[] side : new int[][]{{1, 0}, {-1, 0}, {0, 1}, {0, -1}}) {
+            for (int dy = 0; dy >= -1; dy--) {
+                BlockPoint cell = portal.offset(side[0], dy, side[1]);
+                boolean standable = terrain.classify(cell.x(), cell.y(), cell.z()) == BlockClass.OPEN
+                        && terrain.classify(cell.x(), cell.y() + 1, cell.z()) == BlockClass.OPEN
+                        && terrain.classify(cell.x(), cell.y() - 1, cell.z()) == BlockClass.SOLID;
+                if (standable && (best == null || cell.distance(from) < best.distance(from))) best = cell;
+            }
+        }
+        return best;
+    }
+
+    private static boolean isPortal(World world, BlockPoint cell) {
+        return Positions.isLoaded(world, cell) && cell.y() >= world.getMinHeight() && cell.y() < world.getMaxHeight()
+                && Positions.block(world, cell).getType() == Material.NETHER_PORTAL;
     }
 
     // 포탈 안쪽의 아래 칸. 불을 붙이는 칸이고, 포탈의 위치로 기억하는 칸이다.

@@ -216,6 +216,9 @@ public final class AIPlayer {
     // 월드가 바뀌면 진행 중이던 경로와 계획의 좌표가 의미를 잃는다.
     public void onWorldChanged() {
         if (state == AIState.RUNNING) brain.reset();
+        // 차원을 넘으라고 시킨 일은 넘어온 것으로 끝났다. 그대로 두면 넘어온 자리에서 같은 목표를 계속 붙들고 있는다.
+        GoalType forced = brain.getForcedGoal();
+        if (forced == GoalType.ENTER_NETHER || forced == GoalType.LEAVE_NETHER) brain.setForcedGoal(null);
         perception.reset();
         digDirection = null;
         treeJob = null;

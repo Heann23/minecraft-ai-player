@@ -36,6 +36,7 @@ import me.herry.minecraftAI.ai.util.BlockPoint;
 import me.herry.minecraftAI.ai.util.Positions;
 import org.bukkit.Material;
 import org.bukkit.Tag;
+import org.bukkit.World;
 import org.bukkit.attribute.Attribute;
 import org.bukkit.attribute.AttributeInstance;
 import org.bukkit.entity.Item;
@@ -269,6 +270,8 @@ final class SituationBuilder {
                 && ResourceLocator.locate(ai, MemoryType.WATER_SOURCE, GatherPlans.ORE_WALK_RANGE) != null;
         situation.waterBucket = inventory.has(Material.WATER_BUCKET);
         situation.flintAndSteel = inventory.has(Material.FLINT_AND_STEEL);
+        situation.inNether = ai.getPlayer().getWorld().getEnvironment() == World.Environment.NETHER;
+        situation.knowsPortal = PortalPlans.knowsPortalHere(ai);
         situation.canMineObsidian = inventory.bestTier(Tag.ITEMS_PICKAXES).isAtLeast(ToolTier.DIAMOND);
         situation.obsidianWork = situation.canMineObsidian && ObsidianPlans.isWorking(ai);
         situation.knowsLava = situation.waterBucket && situation.canMineObsidian && ObsidianPlans.knowsLake(ai);

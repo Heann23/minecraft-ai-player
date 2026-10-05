@@ -58,6 +58,10 @@ public enum GoalType {
     GATHER_OBSIDIAN,
     // 집 근처에 네더 포탈의 틀을 짓고 부싯돌과 부시로 불을 붙인다
     BUILD_PORTAL,
+    // 아는 네더 포탈로 걸어 들어가서 네더로 넘어간다
+    ENTER_NETHER,
+    // 네더에서 할 수 있는 일이 없으면 포탈로 오버월드에 돌아온다
+    LEAVE_NETHER,
     SMELT_IRON,
     // 날고기를 화로에 구워서 더 배부른 음식으로 만든다
     COOK_FOOD,

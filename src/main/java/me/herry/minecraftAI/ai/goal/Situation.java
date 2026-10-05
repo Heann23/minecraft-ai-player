@@ -95,6 +95,14 @@ public final class Situation {
     public boolean obsidianWork;
     // 부싯돌과 부시가 있는지. 포탈 틀에 불을 붙일 때 쓴다.
     public boolean flintAndSteel;
+    // 네더에 있는지와, 지금 있는 차원에서 들어갈 네더 포탈을 아는지
+    public boolean inNether;
+    public boolean knowsPortal;
+
+    // 다음에 이룰 것이 네더에서 하는 일이고, 그것을 스스로 할 수 있는지. 할 수 없으면 네더에 들어가 있을 까닭이 없다.
+    public boolean netherWorkReady() {
+        return nextMilestone != null && nextMilestone.stage() == Stage.NETHER && nextMilestone.isAutomated();
+    }
     // 화로에 넣을 연료(석탄, 숯, 나무)가 있는지
     public boolean hasFuel;
     // 석탄과 숯의 개수, 횃불의 개수

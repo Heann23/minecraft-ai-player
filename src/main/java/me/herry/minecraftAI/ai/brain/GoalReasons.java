@@ -58,6 +58,8 @@ public final class GoalReasons {
             case GATHER_OBSIDIAN -> s.obsidianWork ? "용암 호수에 물을 부어 굳힌 흑요석을 캐고 있어요. 네더 포탈에 10개가 필요해요"
                     : s.knowsLava ? "네더 포탈에 쓸 흑요석을 만들려고 용암 호수로 가고 있어요"
                     : "네더 포탈에 쓸 흑요석을 만들 용암 호수를 깊은 땅속에서 찾고 있어요";
+            case ENTER_NETHER -> "네더에서 할 일이 있어서 포탈로 들어가려고요";
+            case LEAVE_NETHER -> "네더에서는 아직 제가 할 수 있는 일이 없어서 포탈로 돌아가려고요";
             case BUILD_PORTAL -> "흑요석과 부싯돌과 부시가 모여서, 집 근처에 네더 포탈을 짓고 불을 붙이려고요";
             case SMELT_IRON -> "철 원석이 " + s.rawIron + "개 모여서 주괴로 구울 차례예요";
             case COOK_FOOD -> "날고기 " + s.rawFood + "개를 구워서 더 든든한 음식으로 만들려고요";

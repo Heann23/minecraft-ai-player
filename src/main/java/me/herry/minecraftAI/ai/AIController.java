@@ -14,6 +14,7 @@ import me.herry.minecraftAI.ai.plan.Planner;
 import me.herry.minecraftAI.ai.survival.SurvivalSystem;
 import me.herry.minecraftAI.ai.team.TeamChat;
 import me.herry.minecraftAI.ai.util.Positions;
+import me.herry.minecraftAI.ai.world.PortalTracker;
 import me.herry.minecraftAI.config.AIConfig;
 import me.herry.minecraftAI.nms.FakePlayerBody;
 import me.herry.minecraftAI.persist.AISnapshot;
@@ -270,7 +271,9 @@ public final class AIController {
 
     public void handleWorldChange(Player player) {
         Entry entry = entryOf(player);
-        if (entry != null) entry.ai.onWorldChanged();
+        if (entry == null) return;
+        entry.ai.onWorldChanged();
+        PortalTracker.onArrival(entry.ai);
     }
 
     /**

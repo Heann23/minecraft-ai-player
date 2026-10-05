@@ -64,12 +64,12 @@ public final class TerrainPlans {
 
     // 머리 위로 땅이 두껍게 덮여 있는지. 나뭇잎은 지붕으로 치지 않아서 숲속은 지하로 보지 않는다.
     public static boolean isDeepUnderground(World world, BlockPoint feet) {
-        return surfaceY(world, feet.x(), feet.z()) - feet.y() >= CAVE_DEPTH;
+        return SurfaceRules.isDeepUnderground(hasCeiling(world), surfaceY(world, feet.x(), feet.z()), feet.y(), CAVE_DEPTH);
     }
 
     // 머리 위로 하늘이 열려 있는지 (나뭇잎은 가린 것으로 치지 않는다). 굴이나 동굴 안이면 false.
     public static boolean isUnderOpenSky(World world, BlockPoint feet) {
-        return surfaceY(world, feet.x(), feet.z()) <= feet.y();
+        return SurfaceRules.isUnderOpenSky(hasCeiling(world), surfaceY(world, feet.x(), feet.z()), feet.y());
     }
 
     // 협곡이나 깊은 구덩이 바닥처럼 주변 지면이 대부분 훨씬 높은 곳인지.
@@ -99,9 +99,14 @@ public final class TerrainPlans {
             int x = feet.x() + (int) Math.round(Math.cos(angle) * radius);
             int z = feet.z() + (int) Math.round(Math.sin(angle) * radius);
             if (!world.isChunkLoaded(x >> 4, z >> 4)) continue;
-            if (surfaceY(world, x, z) - feet.y() >= minDiff) higher++;
+            if (SurfaceRules.isHigherGround(hasCeiling(world), surfaceY(world, x, z), feet.y(), minDiff)) higher++;
         }
         return higher;
+    }
+
+    // 네더는 천장(기반암)이 가장 높은 블록이라 "지표면"이 없다.
+    private static boolean hasCeiling(World world) {
+        return world.getEnvironment() == World.Environment.NETHER;
     }
 
     // 그 위치의 지면에 섰을 때 발이 놓이는 높이. 가장 높은 블록의 바로 위 칸이다.
