@@ -62,9 +62,14 @@ public final class TerrainPlans {
     private TerrainPlans() {
     }
 
-    // 머리 위로 땅이 두껍게 덮여 있는지. 나뭇잎은 지붕으로 치지 않아서 숲속은 지하로 보지 않는다.
+    // 머리 위와 주변 대부분이 땅으로 덮여 있는지. 산의 국소적인 바위 지붕과 나뭇잎은 지하로 보지 않는다.
     public static boolean isDeepUnderground(World world, BlockPoint feet) {
-        return SurfaceRules.isDeepUnderground(hasCeiling(world), surfaceY(world, feet.x(), feet.z()), feet.y(), CAVE_DEPTH);
+        boolean ceiling = hasCeiling(world);
+        int surface = surfaceY(world, feet.x(), feet.z());
+        if (!SurfaceRules.isDeepUnderground(ceiling, surface, feet.y(), CAVE_DEPTH)) return false;
+        // 읽지 못하는 청크를 지상의 출구로 가정하지 않는다. 높이맵 8곳만 읽고 청크를 새로 불러오지 않는다.
+        return SurfaceRules.isDeepUnderground(ceiling, surface, feet.y(), CAVE_DEPTH,
+                countHigherSamples(world, feet, PIT_RADIUS, CAVE_DEPTH, true));
     }
 
     // 머리 위로 하늘이 열려 있는지 (나뭇잎은 가린 것으로 치지 않는다). 굴이나 동굴 안이면 false.
@@ -93,12 +98,19 @@ public final class TerrainPlans {
     }
 
     private static int countHigherSamples(World world, BlockPoint feet, int radius, int minDiff) {
+        return countHigherSamples(world, feet, radius, minDiff, false);
+    }
+
+    private static int countHigherSamples(World world, BlockPoint feet, int radius, int minDiff, boolean unknownIsHigher) {
         int higher = 0;
         for (int i = 0; i < 8; i++) {
             double angle = Math.PI * i / 4.0;
             int x = feet.x() + (int) Math.round(Math.cos(angle) * radius);
             int z = feet.z() + (int) Math.round(Math.sin(angle) * radius);
-            if (!world.isChunkLoaded(x >> 4, z >> 4)) continue;
+            if (!world.isChunkLoaded(x >> 4, z >> 4)) {
+                if (unknownIsHigher) higher++;
+                continue;
+            }
             if (SurfaceRules.isHigherGround(hasCeiling(world), surfaceY(world, x, z), feet.y(), minDiff)) higher++;
         }
         return higher;

@@ -21,6 +21,11 @@ public final class SurfaceRules {
         return !ceiling && surfaceY - feetY >= depth;
     }
 
+    // 국소적인 바위 지붕만으로 산의 얕은 홈을 지하로 보지 않는다. 주변 8방향의 과반도 덮여 있어야 한다.
+    public static boolean isDeepUnderground(boolean ceiling, int surfaceY, int feetY, int depth, int coveredSamples) {
+        return isDeepUnderground(ceiling, surfaceY, feetY, depth) && coveredSamples >= 5;
+    }
+
     // 머리 위로 하늘이 열려 있는지. 천장이 있는 차원에서는 어디든 "더 올라갈 곳이 없는 바깥"으로 친다.
     public static boolean isUnderOpenSky(boolean ceiling, int surfaceY, int feetY) {
         return ceiling || surfaceY <= feetY;
