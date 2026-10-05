@@ -107,6 +107,18 @@ class OllamaDialogueTest {
             assertNull(fixture.input.get()); fixture.model.close(); assertThrows(java.io.IOException.class, () -> fixture.model.respond(normal));
         }
     }
+    @Test void voiceReplyDropsEmojiTrailersButPreservesKoreanAndNumbers() throws Exception {
+        try (var fixture = new Fixture()) {
+            fixture.output("{\"done\":true,\"message\":{\"role\":\"assistant\",\"content\":\"안녕하세요! 나무 3개가 있나요? 🌲👩🏾‍🌾❤️\"}}");
+            assertEquals("안녕하세요! 나무 3개가 있나요?", fixture.model.respond(request(List.of())));
+            fixture.output("{\"done\":true,\"message\":{\"role\":\"assistant\",\"content\":\"안녕하세요! \\n!!! \\n다시 봐요. ...\"}}");
+            assertEquals("안녕하세요! \n다시 봐요.", fixture.model.respond(request(List.of())));
+            for (String content : List.of("🌲", "👩‍🌾❤️", "...!?")) {
+                fixture.output("{\"done\":true,\"message\":{\"role\":\"assistant\",\"content\":\"" + content + "\"}}");
+                assertThrows(java.io.IOException.class, () -> fixture.model.respond(request(List.of())));
+            }
+        }
+    }
     @Test void modelSettingsRejectWrongTypesRemoteEndpointsAndExcessiveBounds() {
         var defaults = OllamaSettings.read(key -> null); assertEquals(160, defaults.outputTokens()); assertTrue(defaults.model().isEmpty());
         for (var entry : Map.<String,Object>of("providers.llm.model", 4, "providers.llm.endpoint", "http://example.com:11434/api/chat",
