@@ -11,7 +11,7 @@ public record BuildGoal(Structure structure, GoalMetadata metadata) implements G
     public enum Structure {
         // 벽과 지붕이 다 지어진 집이 거점에 있다
         SHELTER,
-        // 불이 붙은 네더 포탈이 있다 (짓는 행동은 아직 없다)
+        // 불이 붙은 네더 포탈이 있다
         NETHER_PORTAL
     }
 

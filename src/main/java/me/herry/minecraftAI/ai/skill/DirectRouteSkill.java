@@ -30,7 +30,7 @@ public final class DirectRouteSkill extends RoutedSkill {
     protected boolean handles(Goal goal) {
         return switch (goal) {
             case ReachGoal reach -> reach.place() == ReachGoal.Place.HOME;
-            case BuildGoal build -> build.structure() == BuildGoal.Structure.SHELTER;
+            case BuildGoal ignored -> true;
             case DefeatGoal defeat -> defeat.target().equals(DefeatGoal.HOSTILE) || defeat.target().equals(DefeatGoal.ALLY_THREAT);
             case InteractGoal ignored -> true;
             case ExploreGoal ignored -> true;
@@ -45,8 +45,10 @@ public final class DirectRouteSkill extends RoutedSkill {
     public @Nullable GoalType route(Goal goal, Situation s) {
         return switch (goal) {
             case ReachGoal reach -> reach.place() == ReachGoal.Place.HOME && s.homeKnown ? GoalType.RETURN_HOME : null;
-            case BuildGoal build -> build.structure() == BuildGoal.Structure.SHELTER && (s.canBuildHere || s.shelterInProgress)
-                    ? GoalType.BUILD_SHELTER : null;
+            case BuildGoal build -> switch (build.structure()) {
+                case SHELTER -> s.canBuildHere || s.shelterInProgress ? GoalType.BUILD_SHELTER : null;
+                case NETHER_PORTAL -> s.flintAndSteel ? GoalType.BUILD_PORTAL : null;
+            };
             case DefeatGoal defeat -> switch (defeat.target()) {
                 case DefeatGoal.HOSTILE -> s.combat == CombatSystem.Decision.FIGHT ? GoalType.FIGHT_HOSTILE : null;
                 case DefeatGoal.ALLY_THREAT -> s.allyNeedsHelp ? GoalType.ASSIST_ALLY : null;

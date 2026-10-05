@@ -77,6 +77,10 @@ public final class BukkitTerrainView implements TerrainView {
             case COBWEB -> {
                 return BlockClass.WEB;
             }
+            // 포탈 칸은 걸어서 지나가지 않는다. 들어서면 다른 차원으로 넘어간다. 들어가는 것은 그 일을 하는 행동이 따로 한다.
+            case NETHER_PORTAL, END_PORTAL, END_GATEWAY -> {
+                return BlockClass.FENCE;
+            }
             default -> {
             }
         }

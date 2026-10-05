@@ -93,6 +93,8 @@ public final class Situation {
     public boolean canMineObsidian;
     public boolean knowsLava;
     public boolean obsidianWork;
+    // 부싯돌과 부시가 있는지. 포탈 틀에 불을 붙일 때 쓴다.
+    public boolean flintAndSteel;
     // 화로에 넣을 연료(석탄, 숯, 나무)가 있는지
     public boolean hasFuel;
     // 석탄과 숯의 개수, 횃불의 개수

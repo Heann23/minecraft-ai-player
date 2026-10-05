@@ -244,7 +244,7 @@ class ProgressionTest {
         assertTrue(Milestone.SHELTER.isAutomated());
         assertTrue(Milestone.FLINT_AND_STEEL.isAutomated());
         assertTrue(Milestone.WATER_BUCKET.isAutomated());        assertTrue(Milestone.OBSIDIAN.isAutomated());
-        assertFalse(Milestone.NETHER_PORTAL.isAutomated());
+        assertFalse(Milestone.BLAZE_RODS.isAutomated());
         assertFalse(Milestone.ENDER_DRAGON.isAutomated());
     }
 }

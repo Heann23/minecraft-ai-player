@@ -10,6 +10,8 @@ public enum BlockRole {
     FLOOR(true, true),
     WALL(true, true),
     ROOF(true, true),
+    // 네더 포탈의 틀. 흑요석으로만 채운다.
+    FRAME(false, true),
     DOOR(false, true),
     WORKBENCH(false, true),
     CHEST(false, true),

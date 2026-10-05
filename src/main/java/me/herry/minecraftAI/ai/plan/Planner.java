@@ -85,6 +85,7 @@ public final class Planner {
         register(GoalType.GATHER_FLINT, GatherPlans::gatherFlint);
         register(GoalType.FILL_BUCKET, BucketPlans::fillBucket);
         register(GoalType.GATHER_OBSIDIAN, ObsidianPlans::gatherObsidian);
+        register(GoalType.BUILD_PORTAL, PortalPlans::buildPortal);
         register(GoalType.EXPLORE, GatherPlans::explore);
         register(GoalType.CRAFT_WORKBENCH, CraftPlans::craftWorkbench);
         register(GoalType.CRAFT_TOOL, CraftPlans::craftTool);

@@ -258,8 +258,7 @@ class SkillAndPlannerTest {
     void unsupportedGoalsHaveNoSkill() {
         SkillRegistry skills = new Planner().getSkills();
         assertTrue(skills.candidates(ReachGoal.dimension(ReachGoal.Place.NETHER)).isEmpty());
-        assertTrue(skills.candidates(new BuildGoal(BuildGoal.Structure.NETHER_PORTAL)).isEmpty());
-        assertTrue(skills.candidates(new DefeatGoal("BLAZE", 6)).isEmpty());
+                assertTrue(skills.candidates(new DefeatGoal("BLAZE", 6)).isEmpty());
         assertTrue(skills.candidates(new AcquireGoal("ENDER_PEARL", 12)).isEmpty());
     }
 

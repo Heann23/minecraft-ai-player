@@ -94,7 +94,7 @@ class ObsidianGoalsTest {
     @Test
     void automationReachesObsidian() {
         assertTrue(Milestone.OBSIDIAN.isAutomated());
-        assertFalse(Milestone.NETHER_PORTAL.isAutomated());
+        assertFalse(Milestone.BLAZE_RODS.isAutomated());
     }
 
     @Test
