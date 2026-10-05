@@ -131,7 +131,13 @@ public final class PillarUpAction extends AbstractAction {
             if (onPlaced != null) onPlaced.accept(start);
             return;
         }
-        if (++jumpTicks > MAX_JUMP_TICKS) fail("could not jump");
+        if (++jumpTicks > MAX_JUMP_TICKS) {
+            // 왜 못 뛰었는지 알 수 있게 서 있던 자리를 남긴다 (기본 시드의 물가에서 43번 되풀이됐지만 원인을 알 수 없었다).
+            ai.debug("Could not jump at " + String.format("%.2f %.2f %.2f", player.getLocation().getX(), player.getLocation().getY(),
+                    player.getLocation().getZ()) + ": feet in " + Positions.block(world, start).getType() + ", standing on "
+                    + Positions.block(world, start.offset(0, -1, 0)).getType() + ", in water " + player.isInWater());
+            fail("could not jump");
+        }
     }
 
     @Override

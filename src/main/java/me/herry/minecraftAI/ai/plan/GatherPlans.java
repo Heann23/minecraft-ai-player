@@ -112,9 +112,11 @@ public final class GatherPlans {
         List<Action> leaveWater = TerrainPlans.leaveWater(ai);
         if (!leaveWater.isEmpty()) return leaveWater;
         if (!ai.getBody().isGrounded()) return List.of();
+        List<Action> offTree = PerchPlans.climbDown(ai);
+        if (!offTree.isEmpty()) return offTree;
         World world = ai.getPlayer().getWorld();
         BlockPoint feet = ai.getPosition();
-        boolean low = TerrainPlans.isDeepUnderground(world, feet) || TerrainPlans.isLowerThanSurroundings(world, feet);
+        boolean low =TerrainPlans.isDeepUnderground(world, feet) || TerrainPlans.isLowerThanSurroundings(world, feet);
         return low ? TerrainPlans.climbOut(ai) : TerrainPlans.digStairDown(ai, true, false);
     }
 
@@ -328,6 +330,10 @@ public final class GatherPlans {
             ai.debug("Target stone found at " + stone);
             return mineBlock(ai, stone);
         }
+
+        // 나무 위에서는 계단을 파지 않는다. 잎과 줄기를 파 내려가다가 공중에서 끊기고, 그 자리가 굴로 기록되어 빠져나오지도 못한다.
+        List<Action> down = PerchPlans.climbDown(ai);
+        if (!down.isEmpty()) return down;
 
         // 이미 파 둔 굴이 있으면 그 굴로 내려가서 벽의 돌을 캔다.
         List<Action> shaft = ShaftPlans.followShaftDown(ai);
