@@ -1,6 +1,6 @@
-# Goal 선택 학습용 경험 준비
+# Goal 선택 경험 준비와 개발용 모델 후보
 
-개발자용 Python 표준 라이브러리 도구다. 사용자 서버에 Python 설치나 학습을 요구하지 않는다. 모델을 훈련하거나 플러그인의 판단을 바꾸지 않는다.
+개발자용 경험 준비·오프라인 후보 학습·내보내기 도구다. 사용자 서버에 Python 설치나 학습을 요구하지 않는다. 플러그인의 실제 판단과 실행권을 바꾸지 않는다. 경험 준비와 첫 후보 학습은 표준 라이브러리만 쓰고 ONNX 내보내기는 선택적 개발 의존성을 사용한다.
 
 ```powershell
 python export_experience.py <training-data-folder> --goals <matching-source>/GoalType.java --output <new-output-folder>
@@ -38,4 +38,17 @@ python train_goal_bc.py <feature-folder> --output <new-candidate-folder>
 
 `candidate.json`은 실제 학습한 가중치·bias·지원 Goal ID·입출력 계약·학습 방법을 담는다. `evaluation.json`은 파일/계약/가중치 해시, 훈련 seed·표본·지원/미지원 Goal과 각 분할의 Teacher 일치율을 담는다. 다수 클래스와 직전 Goal 반복 기준선도 비교한다. Teacher 일치율은 게임 생존 성공률이나 드래곤 처치 능력이 아니다. 평가에서 훈련되지 않은 Goal도 오답으로 계산한다. 이 후보는 항상 `deployable: false`이며 자동 배포하지 않는다.
 
-현재 도구에는 ONNX export·Java 추론·Shadow 연결이 없다. 다음 단계에서 계약을 보존한 export·모델 누락/불일치 fallback·지연/안전·미사용 월드 실제 평가를 구현해야 한다. 게임 서버의 Teacher 실행권과 기본 설정은 이 도구로 바뀌지 않는다. raw 경험·숫자 데이터·가중치 산출물은 공개 Git에 포함하지 않는다.
+현재 Java 추론·Shadow 연결은 없다. 모델 누락/불일치 fallback·지연/안전·미사용 월드 실제 평가를 구현해야 한다. 게임 서버의 Teacher 실행권과 기본 설정은 이 도구로 바뀌지 않는다. raw 경험·숫자 데이터·가중치 산출물은 공개 Git에 포함하지 않는다.
+
+ONNX 후보 내보내기와 실제 CPU 추론 비교:
+
+```powershell
+python -m pip install -r requirements-onnx.txt
+python export_goal_onnx.py <candidate-folder> --features <frozen-feature-folder> --output <new-model-folder>
+```
+
+`export_goal_onnx.py`는 같은 후보/입출력 계약/훈련·평가 파일 해시를 확인하고 ONNX opset13·IR8의 MatMul/Add/ArgMax 그래프를 만든다. 입력은 float32 `[batch, featureCount]`, 출력은 float32 logits와 int64 Goal ID다. 미학습 Goal은 가중치를 0으로 하고 bias -1e9로 마스킹해 지원 Goal만 고른다. 실제 CPU 추론에서 고정 자료의 Goal ID와 지원 Goal logit을 원본 후보와 비교하며, 불일치가 있거나 절대 오차가 1e-4를 넘으면 실패 종료한다.
+
+모델·원본 후보·feature/Goal·분할·도구 해시, 런타임 버전·OS·CPU provider·입출력·지원 ID·오차와 단일 입력 지연을 `model-manifest.json`에 남긴다. 산출물은 `goal-candidate.onnx`와 계약/manifest다. 수치 동등성은 후보 품질 개선이나 Java/Paper 호환성을 증명하지 않는다. 이 단계도 `deployable: false`, `executionAuthority: none`이며 JAR에 모델을 넣거나 자동 승격하지 않는다. Java 추론·Shadow·fallback·지원 환경 검증은 후속이다.
+
+API 근거: [ONNX 공식 Python 문서](https://onnx.ai/onnx/intro/python.html), [ONNX Runtime 공식 Python API](https://onnxruntime.ai/docs/api/python/api_summary.html).
