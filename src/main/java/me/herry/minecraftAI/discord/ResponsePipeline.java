@@ -65,14 +65,19 @@ public final class ResponsePipeline implements AutoCloseable {
     }
     /** Literal code-owned greeting, using the same cancellable voice lane without model inference. */
     synchronized boolean greet(ConversationTurns.Token token, String text) {
-        if (text == null || text.isBlank() || text.length() > 240) throw new IllegalArgumentException("greeting text");
-        return admit(new Request(token, List.of(), List.of()), text);
+        return greet(token, text, null);
     }
-    private boolean admit(Request request, String greeting) {
+    /** Literal text whose follow-up registration runs only after the whole text was heard, still under the current turn. */
+    synchronized boolean greet(ConversationTurns.Token token, String text, Runnable afterHeard) {
+        if (text == null || text.isBlank() || text.length() > 240) throw new IllegalArgumentException("greeting text");
+        return admit(new Request(token, List.of(), List.of()), text, afterHeard);
+    }
+    private boolean admit(Request request, String greeting) { return admit(request, greeting, null); }
+    private boolean admit(Request request, String greeting, Runnable afterHeard) {
         if (closed || !turns.isCurrent(request.turn) || request.turn.equals(admitted)) return false;
         cancelPending();
         worker.purge();
-        try { pending = worker.submit(() -> run(request, greeting)); admitted = request.turn; return true; }
+        try { pending = worker.submit(() -> run(request, greeting, afterHeard)); admitted = request.turn; return true; }
         catch (java.util.concurrent.RejectedExecutionException e) { diagnostic.accept("response-capacity"); return false; }
     }
 
@@ -84,7 +89,7 @@ public final class ResponsePipeline implements AutoCloseable {
     /** Caller invalidates the current turn first, then stops inference and queued playback. */
     public synchronized void cancel() { cancelPending(); worker.purge(); }
 
-    private void run(Request request, String greeting) {
+    private void run(Request request, String greeting, Runnable afterHeard) {
         java.util.concurrent.Future<byte[]> prepared = null;
         try {
             if (!valid(request)) return;
@@ -124,6 +129,7 @@ public final class ResponsePipeline implements AutoCloseable {
             }
             if (valid(request)) {
                 if (request.permissionQuestion) turns.askCasualPermission(request.turn, 30_000);
+                if (afterHeard != null) afterHeard.run();
                 turns.finish(request.turn);
             }
         } catch (InterruptedException e) {

@@ -53,6 +53,37 @@ public final class ConversationMemory {
         }
     }
 
+    enum NameAnswer { CONFIRMED, DECLINED }
+    /** The asked user's answer to an echoed name. {@code saved} completes once a confirmed name is stored. */
+    record NameReply(NameAnswer answer, String name, CompletableFuture<Void> saved) {}
+
+    /**
+     * A strict spoken self-introduction of this turn. Unreliable STT may mishear a name, so it is never stored from the
+     * introduction itself: the candidate is echoed back and stored only after the same user answers yes. Null if not one.
+     */
+    String nameCandidate(ConversationTurns.Token token, Subject speaker, String text, String utteranceId) {
+        if (text == null || text.length() > 100) return null;
+        String body = text.strip().replaceFirst("(?iu)^(?:해리|Herry)(?:야|아|님|씨)?(?:\\s*[,，:!]\\s*|\\s+)", "");
+        var name = ConfirmedMemoryInput.introducedName(body, true);
+        if (name.isEmpty() || name.get().replaceFirst("(?:님|씨)$", "").matches("(?iu)해리|Herry")) return null;
+        synchronized (turns) {
+            return token != null && token.userId().equals(speaker.userId()) && turns.matchesInput(token, text, utteranceId) ? name.get() : null;
+        }
+    }
+    /** The asked user's exact yes or no on their very next turn. Anything else leaves the question to lapse. Null if not an answer. */
+    NameReply answerNameConfirmation(ConversationTurns.Token token, Subject speaker, String text, String utteranceId) {
+        Boolean yes = ConfirmedYesNo.read(text);
+        if (yes == null) return null;
+        synchronized (turns) {
+            if (token == null || !token.userId().equals(speaker.userId()) || !turns.matchesInput(token, text, utteranceId)) return null;
+            String candidate = turns.answerNameConfirmation(token);
+            if (candidate == null) return null;
+            if (!yes) return new NameReply(NameAnswer.DECLINED, candidate, CompletableFuture.completedFuture(null));
+            return new NameReply(NameAnswer.CONFIRMED, candidate, store.remember(new Key(speaker, Kind.NAME, "", "preferred"),
+                    candidate, Evidence.EXPLICIT, utteranceId, 0).<Void>thenApply(snapshot -> null));
+        }
+    }
+
     /** Clear live model/playback routes and shared context before erasing durable memories. */
     public CompletableFuture<Void> forget(Subject person) {
         synchronized (turns) {
