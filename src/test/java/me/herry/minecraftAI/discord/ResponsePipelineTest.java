@@ -20,6 +20,36 @@ class ResponsePipelineTest {
         }
         @Override public void stop() { }
     }
+    private static final String HEARD = "오늘은 나무를 모으러 갈게요.";
+    /** A conversation in which the user already heard HEARD, ready for the next turn. */
+    private Token afterHeardAnswer(ConversationTurns turns) {
+        var first = call(turns, "1"); turns.generated(first, HEARD); turns.played(first, HEARD.length()); turns.finish(first);
+        return call(turns, "2");
+    }
+    @Test void anAnswerRepeatingARecentHeardOneIsCountedButStillSpoken() throws Exception {
+        var turns = turns(); Token token = afterHeardAnswer(turns);
+        var codes = new java.util.concurrent.CopyOnWriteArrayList<String>(); var player = new Player();
+        try (var pipeline = new ResponsePipeline(turns, request -> "오늘은 나무를 모으러 갈게요!", text -> new byte[3840], player, codes::add)) {
+            assertTrue(pipeline.respond(request(turns, token))); await(player.done);
+        }
+        assertEquals(1, player.plays.get()); assertEquals(List.of("dialogue-answer-repeated"), codes);
+    }
+    @Test void aDifferentAnswerIsNotCounted() throws Exception {
+        var turns = turns(); Token token = afterHeardAnswer(turns);
+        var codes = new java.util.concurrent.CopyOnWriteArrayList<String>(); var player = new Player();
+        try (var pipeline = new ResponsePipeline(turns, request -> "철은 곡괭이를 만든 다음에 구울게요.", text -> new byte[3840], player, codes::add)) {
+            assertTrue(pipeline.respond(request(turns, token))); await(player.done);
+        }
+        assertEquals(1, player.plays.get()); assertEquals(List.of(), codes);
+    }
+    @Test void fixedCodeOwnedTextIsNeverCountedAsRepetition() throws Exception {
+        var turns = turns(); Token token = afterHeardAnswer(turns);
+        var codes = new java.util.concurrent.CopyOnWriteArrayList<String>(); var player = new Player();
+        try (var pipeline = new ResponsePipeline(turns, request -> "쓰이지 않는 모델 응답이에요", text -> new byte[3840], player, codes::add)) {
+            assertTrue(pipeline.greet(token, HEARD)); await(player.done);
+        }
+        assertEquals(1, player.plays.get()); assertEquals(List.of(), codes);
+    }
     @Test void fullFakeRoundTripPlaysAnswer() throws Exception {
         var turns = turns(); Token token = call(turns, "1"); var player = new Player();
         try (var pipeline = new ResponsePipeline(turns, request -> "안녕하세요.", text -> new byte[3840], player, code -> fail(code))) {

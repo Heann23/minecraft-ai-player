@@ -96,6 +96,9 @@ public final class ResponsePipeline implements AutoCloseable {
             String response = greeting != null ? greeting : request.permissionQuestion ? "말 편하게 해도 될까요?"
                     : model.respond(new Request(request.turn, request.context, request.memory, false, () -> valid(request)));
             if (!valid(request) || !turns.generated(request.turn, response)) return;
+            // Measured only for model answers; fixed code-owned sentences are repeated on purpose. The text of the answer is never reported.
+            if (greeting == null && !request.permissionQuestion && AnswerRepetition.repeated(response, request.context, request.turn.userId()))
+                diagnostic.accept("dialogue-answer-repeated");
             int completedCharacters = 0;
             var sentences = SentenceChunks.split(response);
             for (int index = 0; index < sentences.size(); index++) {
