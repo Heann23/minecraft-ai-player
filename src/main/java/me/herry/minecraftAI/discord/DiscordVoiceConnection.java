@@ -36,6 +36,8 @@ public final class DiscordVoiceConnection extends ListenerAdapter implements Dis
         Thread thread = new Thread(task, "MinecraftAI-discord-config"); thread.setDaemon(true); return thread; });
     private final Consumer<String> diagnostic;
     private final DiagnosticCounters counters = new DiagnosticCounters();
+    private final DiagnosticThrottle gatewayThrottle = new DiagnosticThrottle(30_000);
+    private final Consumer<String> downstream;
     private final LocalSpeechProviders speech;
     private final OllamaDialogue dialogue;
     private final DiscordSession session;
@@ -69,6 +71,7 @@ public final class DiscordVoiceConnection extends ListenerAdapter implements Dis
     }
     private DiscordVoiceConnection(Path directory, DiscordConfiguration configuration, Consumer<String> diagnostic, DiscordGameState game) throws Exception {
         Consumer<String> counted = code -> { counters.record(code); diagnostic.accept(code); };
+        this.downstream = diagnostic;
         this.configuration = configuration; this.directory = directory; this.diagnostic = counted; connectWanted = configuration.discord().autoConnect();
         this.game = game;
         dialogue = new OllamaDialogue(configuration.dialogue(), System::currentTimeMillis,
@@ -159,9 +162,15 @@ public final class DiscordVoiceConnection extends ListenerAdapter implements Dis
     }
     @Override public void onReady(ReadyEvent event) { ready.ready(); }
     @Override public void onShutdown(ShutdownEvent event) { ready.shutdown(); audio.connected(false); }
-    @Override public void onSessionDisconnect(SessionDisconnectEvent event) { audio.connected(false); }
-    @Override public void onSessionResume(SessionResumeEvent event) { resume(); }
-    @Override public void onSessionRecreate(SessionRecreateEvent event) { resume(); }
+    @Override public void onSessionDisconnect(SessionDisconnectEvent event) { audio.connected(false); gateway("discord-gateway-disconnected"); }
+    @Override public void onSessionResume(SessionResumeEvent event) { resume(); gateway("discord-gateway-resumed"); }
+    @Override public void onSessionRecreate(SessionRecreateEvent event) { resume(); gateway("discord-gateway-recreated"); }
+    /** Every event is counted for /herry diagnose, but a flapping connection reaches the console at most once per 30 seconds per code. */
+    private void gateway(String code) {
+        if (stopped.get()) return;
+        counters.record(code);
+        if (gatewayThrottle.allow(code, TimeUnit.NANOSECONDS.toMillis(System.nanoTime()))) downstream.accept(code);
+    }
     private void resume() {
         if (stopped.get() || jda == null) return;
         var guild = jda.getGuildById(configuration.discord().guildId());
