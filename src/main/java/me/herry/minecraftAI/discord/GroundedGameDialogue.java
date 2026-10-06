@@ -59,24 +59,42 @@ public final class GroundedGameDialogue implements ResponsePipeline.Model {
         if (question.kind == Kind.HISTORY) return casual
                 ? "최근 게임 상태만으로는 전에 발견한 돌이나 아이템의 이름·사연을 확인할 수 없어. 실제로 정한 이름이 있으면 알려 줘."
                 : "최근 게임 상태만으로는 전에 발견한 돌이나 아이템의 이름·사연을 확인할 수 없어요. 실제로 정한 이름이 있으면 알려 주세요.";
-        if (view.code() != DiscordGameState.Code.FRESH) return casual
-                ? "현재 게임 상태를 확인할 수 없어. 오래된 자료나 추측으로 지금 하는 일을 말하지 않을게."
-                : "현재 게임 상태를 확인할 수 없어요. 오래된 자료나 추측으로 지금 하는 일을 말하지 않을게요.";
-        var state = view.snapshot(); String end = casual ? "야." : "예요.";
+        if (view.code() != DiscordGameState.Code.FRESH) return switch (view.code()) {
+            case NOT_CONFIGURED -> casual ? "아직 내 게임 캐릭터가 연결되지 않아서 게임 상태를 확인할 수 없어."
+                    : "아직 제 게임 캐릭터가 연결되지 않아서 게임 상태를 확인할 수 없어요.";
+            case NOT_FOUND -> casual ? "지금은 내가 게임에 들어가 있지 않아서 게임 상태를 확인할 수 없어."
+                    : "지금은 제가 게임에 들어가 있지 않아서 게임 상태를 확인할 수 없어요.";
+            default -> casual ? "현재 게임 상태를 확인할 수 없어. 오래된 자료나 추측으로 지금 하는 일을 말하지 않을게."
+                    : "현재 게임 상태를 확인할 수 없어요. 오래된 자료나 추측으로 지금 하는 일을 말하지 않을게요.";
+        };
+        // The configured game AI is Herry's own body, so game facts are told in the first person like every other answer.
+        var state = view.snapshot(); String me = casual ? "나는" : "저는";
         return switch (question.kind) {
-            case STATUS -> "최근 확인한 게임 AI " + state.aiName() + "의 상태는 " + switch (state.state()) {
+            case STATUS -> me + " 지금 " + switch (state.state()) {
                 case "STOPPED" -> "자율 행동이 중지된 상태" + (casual ? "야." : "예요.");
                 case "DEAD" -> "리스폰을 기다리는 중" + (casual ? "이야." : "이에요.");
                 default -> state.activity() + (casual ? "이야." : "이에요.");
-            } + " 체력 " + Math.round(state.health() * 10) / 10.0 + ", 허기 " + state.food() + "로 확인됐" + (casual ? "어." : "어요.");
-            case COUNT -> "현재 인벤토리 칸에서 확인되는 " + question.label + " 개수는 " + state.items().getOrDefault(question.material, 0) + "개" + end;
-            case LOCATION -> "최근 확인한 게임 AI " + state.aiName() + " 위치는 " + switch (state.dimension()) {
+            } + " 체력은 " + number(state.health()) + ", 허기는 " + state.food() + (casual ? " 남았어." : " 남았어요.");
+            case COUNT -> {
+                int count = state.items().getOrDefault(question.material, 0);
+                yield "지금 " + topic(question.label) + (count == 0 ? casual ? " 하나도 없어." : " 하나도 없어요."
+                        : " " + count + "개 가지고 " + (casual ? "있어." : "있어요."));
+            }
+            case LOCATION -> me + " 지금 " + switch (state.dimension()) {
                 case "NORMAL" -> "오버월드"; case "NETHER" -> "네더"; case "THE_END" -> "엔드"; default -> "별도 차원";
-            } + "의 " + state.x() + ", " + state.y() + ", " + state.z() + (casual ? "이야." : "이에요.");
+            } + "의 " + state.x() + ", " + state.y() + ", " + state.z() + (casual ? "에 있어." : "에 있어요.");
             case REASON -> state.reason().isEmpty() || !state.state().equals("RUNNING")
-                    ? "게임 상태는 확인했지만 그 이유는 현재 자료에 " + (casual ? "없어." : "없어요.")
-                    : "최근 게임 판단에 기록된 이유" + (casual ? "야: " : "예요: ") + state.reason();
+                    ? "지금 하는 일의 이유는 현재 자료에 " + (casual ? "없어." : "없어요.")
+                    : (casual ? "내가 기록해 둔 이유는 이거야: " : "제가 기록해 둔 이유는 이래요: ") + state.reason();
             case HISTORY -> throw new IllegalStateException("history already handled");
         };
+    }
+    private static String number(double value) {
+        double rounded = Math.round(value * 10) / 10.0;
+        return rounded == Math.rint(rounded) ? String.valueOf((long) rounded) : String.valueOf(rounded);
+    }
+    private static String topic(String word) {
+        char last = word.charAt(word.length() - 1);
+        return word + (last >= '가' && last <= '힣' && (last - '가') % 28 != 0 ? "은" : "는");
     }
 }
