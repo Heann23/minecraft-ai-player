@@ -44,6 +44,14 @@ public final class DiscordSession implements AutoCloseable {
     private final Set<CompletableFuture<Void>> pendingEvents = java.util.concurrent.ConcurrentHashMap.newKeySet();
     private Set<String> participants = Set.of();
     private Map<String, String> names = Map.of();
+    /** Stored preferred names of present users, event lane only. Extra aliases for routing; refreshed in the background, never awaited. */
+    private Map<String, String> preferredNames = Map.of();
+    private long preferredNamesAt = Long.MIN_VALUE / 2;
+    private boolean preferredNamesBusy;
+    private static final long PREFERRED_NAME_REFRESH_MILLIS = 5_000;
+    /** Common words that must never route a sentence just because someone saved them as a name. */
+    private static final Set<String> RESERVED_ALIASES = Set.of("우리", "저희", "이제", "오늘", "지금", "그럼", "근데", "그리고", "아니", "진짜",
+            "이거", "그거", "저거", "여기", "거기", "저기", "안녕", "그래", "정말");
     private volatile int userCount;
     private boolean memoryMaintenance;
     private final JoinGreetings greetings;
@@ -98,7 +106,7 @@ public final class DiscordSession implements AutoCloseable {
                 for (String user : next) if (!participants.contains(user)) turns.join(user);
                 turns.cancelCurrent(); responses.cancel();
                 ingress.participants(next); speech.refreshRoutes();
-                participants = next; userCount = next.size();
+                participants = next; userCount = next.size(); staleNames();
                 greetings.participants(next, monotonicMillis.getAsLong());
             }
             names = aliases;
@@ -137,12 +145,53 @@ public final class DiscordSession implements AutoCloseable {
         }));
     }
 
+    private void staleNames() { preferredNames = Map.of(); preferredNamesAt = Long.MIN_VALUE / 2; }
+    /** Discord display names plus stored preferred names. A name that two people could answer to routes nobody. */
+    private Map<String, String> routingNames() {
+        if (preferredNames.isEmpty()) return names;
+        var merged = new java.util.HashMap<>(names);
+        preferredNames.forEach((alias, owner) -> {
+            String known = names.get(alias);
+            if (known == null) merged.put(alias, owner); else if (!known.equals(owner)) merged.remove(alias);
+        });
+        return merged;
+    }
+    /** Only matters when someone else could be addressed. Throttled, off the event lane, and the result applies to the same participants only. */
+    private void refreshPreferredNames() {
+        long now = monotonicMillis.getAsLong();
+        if (preferredNamesBusy || participants.size() < 2 || now - preferredNamesAt < PREFERRED_NAME_REFRESH_MILLIS) return;
+        preferredNamesBusy = true; preferredNamesAt = now; Set<String> members = participants;
+        store.snapshot().whenComplete((snapshot, error) -> post(() -> {
+            preferredNamesBusy = false;
+            if (error == null && members.equals(participants)) preferredNames = preferredAliases(settings, snapshot, members, wallClock.getAsLong());
+            return done();
+        }));
+    }
+    /** Confirmed, current, not erased names of present users; short, reserved and shared names are left out. */
+    static Map<String, String> preferredAliases(DiscordSettings settings, DiscordMemory.Snapshot snapshot, Set<String> members, long now) {
+        var owners = new java.util.HashMap<String, String>(); var ambiguous = new java.util.HashSet<String>();
+        for (var fact : snapshot.facts().values()) {
+            var key = fact.key();
+            if (key.kind() != DiscordMemory.Kind.NAME || !key.label().equals("preferred") || !key.otherUserId().isEmpty()
+                    || fact.evidence() != DiscordMemory.Evidence.EXPLICIT || fact.expired(now) || snapshot.erased(fact)
+                    || !key.subject().guildId().equals(settings.guildId()) || !key.subject().characterId().equals(settings.characterId())
+                    || !members.contains(key.subject().userId())) continue;
+            String alias = fact.value().replaceFirst("(?:님|씨)$", "");
+            if (alias.length() < 2 || RESERVED_ALIASES.contains(alias) || alias.matches("(?iu)해리|Herry")) continue;
+            String previous = owners.putIfAbsent(alias, key.subject().userId());
+            if (previous != null && !previous.equals(key.subject().userId())) ambiguous.add(alias);
+        }
+        ambiguous.forEach(owners::remove);
+        return owners.size() > 32 ? Map.of() : Map.copyOf(owners);
+    }
+
     /** Always called on the event lane; the earlier STT worker check is insufficient. */
     private CompletableFuture<Void> recognized(SpeechRecognitionWorker.Result result) {
         if (!ingress.valid(result.route())) return done();
         String user = result.route().userId(), text = result.recognition().text();
         String utterance = result.route().session() + "-" + result.route().generation() + "-" + result.route().utterance();
-        var address = AddresseeResolver.resolve(text, user, participants, names);
+        refreshPreferredNames();
+        var address = AddresseeResolver.resolve(text, user, participants, routingNames());
         boolean stop = ConversationStop.requested(text);
         var accepted = turns.accept(user, utterance, text, address.address(), stop);
         if (accepted.decision() == ConversationTurns.Decision.STOPPED) { responses.cancel(); return done(); }
@@ -220,7 +269,7 @@ public final class DiscordSession implements AutoCloseable {
         var subject = new DiscordMemory.Subject(settings.guildId(), settings.characterId(), userId);
         return post(() -> {
             if (memoryMaintenance) throw new IllegalStateException(DiscordCommandErrors.RESTORE_IN_PROGRESS);
-            greetings.clearPending();
+            greetings.clearPending(); staleNames();
             textConversation.forget(userId);
             ingress.reset(); speech.refreshRoutes(); turns.cancelCurrent(); responses.cancel();
             return memory.forget(subject);
@@ -240,7 +289,7 @@ public final class DiscordSession implements AutoCloseable {
         var key = target.key(subject);
         return post(() -> {
             if (memoryMaintenance) throw new IllegalStateException(DiscordCommandErrors.RESTORE_IN_PROGRESS);
-            greetings.clearPending(); textConversation.forget(userId);
+            greetings.clearPending(); textConversation.forget(userId); staleNames();
             ingress.reset(); speech.refreshRoutes(); responses.cancel();
             return memory.forget(key);
         });
@@ -279,7 +328,7 @@ public final class DiscordSession implements AutoCloseable {
         return post(() -> {
             if (!current.getAsBoolean()) return done();
             if (memoryMaintenance) throw new IllegalStateException(DiscordCommandErrors.RESTORE_IN_PROGRESS);
-            greetings.clearPending(); ingress.reset(); speech.refreshRoutes(); turns.forget(user); responses.cancel();
+            greetings.clearPending(); staleNames(); ingress.reset(); speech.refreshRoutes(); turns.forget(user); responses.cancel();
             return done();
         });
     }
@@ -300,7 +349,7 @@ public final class DiscordSession implements AutoCloseable {
         MemoryFiles.requireBackupName(identifier);
         return post(() -> {
             if (memoryMaintenance) throw new IllegalStateException(DiscordCommandErrors.RESTORE_IN_PROGRESS);
-            memoryMaintenance = true; textConversation.reset(); greetings.clearPending(); turns.quiet(true); turns.resetContext(); responses.cancel(); ingress.reset(); speech.refreshRoutes();
+            memoryMaintenance = true; textConversation.reset(); greetings.clearPending(); staleNames(); turns.quiet(true); turns.resetContext(); responses.cancel(); ingress.reset(); speech.refreshRoutes();
             CompletableFuture<Void> result = new CompletableFuture<>();
             store.restoreBackup(identifier).whenComplete((snapshot, error) -> post(() -> {
                 memoryMaintenance = false;

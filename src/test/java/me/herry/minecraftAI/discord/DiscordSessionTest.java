@@ -262,6 +262,52 @@ class DiscordSessionTest {
             assertEquals(1, models.get()); assertTrue(facts(store, "A").isEmpty());
         }
     }
+    private void rememberName(DiscordMemoryStore store, String user, String name, long expiresAt) {
+        store.remember(new DiscordMemory.Key(new DiscordMemory.Subject(GUILD, "herry", user), DiscordMemory.Kind.NAME, "", "preferred"), name,
+                DiscordMemory.Evidence.EXPLICIT, "confirmed", expiresAt).join();
+    }
+    @Test void preferredAliasesKeepOnlyConfirmedCurrentUnambiguousNamesOfPresentUsers() throws Exception {
+        var store = store();
+        rememberName(store, "A", "민수님", 0); rememberName(store, "B", "지수", 0); rememberName(store, "C", "철수", 0); rememberName(store, "D", "민수", 0);
+        rememberName(store, "E", "해리", 0); rememberName(store, "F", "나", 0); rememberName(store, "G", "우리", 0); rememberName(store, "H", "수진", now.get() + 100);
+        var snapshot = store.snapshot().join();
+        assertEquals(Map.of("지수", "B"), DiscordSession.preferredAliases(settings(), snapshot, Set.of("A", "B", "D"), now.get()));
+        assertEquals(Map.of("민수", "A", "지수", "B"), DiscordSession.preferredAliases(settings(), snapshot, Set.of("A", "B"), now.get()));
+        assertEquals(Map.of(), DiscordSession.preferredAliases(settings(), snapshot, Set.of("E", "F", "G"), now.get()));
+        assertEquals(Map.of("수진", "H"), DiscordSession.preferredAliases(settings(), snapshot, Set.of("H"), now.get()));
+        assertEquals(Map.of(), DiscordSession.preferredAliases(settings(), snapshot, Set.of("H"), now.get() + 200));
+        store.forget(new DiscordMemory.Subject(GUILD, "herry", "B")).join();
+        assertEquals(Map.of("민수", "A"), DiscordSession.preferredAliases(settings(), store.snapshot().join(), Set.of("A", "B"), now.get()));
+    }
+    @Test void storedPreferredNameRoutesAnotherSpeakersCallToThatUserNotToHerry() throws Exception {
+        var store = store(); rememberName(store, "A", "민수", 0);
+        try (var session = session(store)) {
+            session.participants(Set.of("A", "B"), Map.of()).get(3, TimeUnit.SECONDS);
+            speech(session, "B", "해리야 안녕"); request(); play(session); session.tick().get(3, TimeUnit.SECONDS);
+            speech(session, "B", "민수님 뭐 하세요");
+            assertEquals(1, models.get()); assertNull(session.nextFrame());
+            speech(session, "B", "해리야 다시 안녕"); request(); play(session); assertEquals(2, models.get());
+        }
+    }
+    @Test void withoutAStoredNameTheSameSentenceIsAnOrdinaryFollowup() throws Exception {
+        var store = store();
+        try (var session = session(store)) {
+            session.participants(Set.of("A", "B"), Map.of()).get(3, TimeUnit.SECONDS);
+            speech(session, "B", "해리야 안녕"); request(); play(session); session.tick().get(3, TimeUnit.SECONDS);
+            speech(session, "B", "민수님 뭐 하세요"); request(); play(session); assertEquals(2, models.get());
+        }
+    }
+    @Test void forgettingTheNameStopsTheAliasAtOnce() throws Exception {
+        var store = store(); rememberName(store, "A", "민수", 0);
+        try (var session = session(store)) {
+            session.participants(Set.of("A", "B"), Map.of()).get(3, TimeUnit.SECONDS);
+            speech(session, "B", "해리야 안녕"); request(); play(session); session.tick().get(3, TimeUnit.SECONDS);
+            speech(session, "B", "민수님 뭐 하세요"); assertEquals(1, models.get());
+            speech(session, "B", "해리야 다시 안녕"); request(); play(session); assertEquals(2, models.get());
+            session.forget("A").get(3, TimeUnit.SECONDS);
+            speech(session, "B", "민수님 어디예요"); request(); play(session); assertEquals(3, models.get());
+        }
+    }
     @Test void directTextJokeBoundaryInterruptsOldVoiceAndAcknowledgesWithoutAnotherModelCall() throws Exception {
         var entered = new CountDownLatch(1); var interrupted = new CountDownLatch(1); var store = store();
         try (var session = session(store, (pcm, language) -> new SpeechRecognitionWorker.Recognition(transcriptions.take(), true), request -> {
