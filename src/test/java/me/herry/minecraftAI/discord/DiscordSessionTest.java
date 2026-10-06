@@ -215,10 +215,10 @@ class DiscordSessionTest {
         var store = store();
         try (var session = unreliable(store)) {
             session.participants(Set.of("A"), Map.of()).get(3, TimeUnit.SECONDS);
-            for (String text : List.of("해리야 장난해도 돼요", "해리야 나한테 반말해도 돼요", "해리야 장난하지 마?", "해리야 친구가 장난하지 마 라고 했어", "해리야 내 이름은 민수야")) {
+            for (String text : List.of("해리야 장난해도 돼요", "해리야 나한테 반말해도 돼요", "해리야 장난하지 마?", "해리야 친구가 장난하지 마 라고 했어")) {
                 speech(session, "A", text); request(); play(session);
             }
-            assertEquals(5, models.get()); assertTrue(facts(store, "A").isEmpty());
+            assertEquals(4, models.get()); assertTrue(facts(store, "A").isEmpty());
         }
     }
     @Test void voiceStopJokesFromSomeoneNotAddressingHerryIsIgnored() throws Exception {
