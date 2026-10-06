@@ -6,12 +6,13 @@ import static org.junit.jupiter.api.Assertions.*;
 class DiscordDiagnosticsTest {
     private static DiscordDiagnostics.Snapshot snapshot(String gateway, boolean voice, boolean listening, boolean wanted, boolean failure,
                                                         long backup, long backupFailed, long now) {
-        return new DiscordDiagnostics.Snapshot(gateway, voice, listening, wanted, failure, backup, backupFailed, now, "discord-gateway-ready 1");
+        return new DiscordDiagnostics.Snapshot(gateway, voice, listening, wanted, 2, failure, backup, backupFailed, now, "discord-gateway-ready 1");
     }
     @Test void healthyStateIsShownWithAgesAndCounters() {
         long now = 10_000_000;
         String text = DiscordDiagnostics.describe(snapshot("CONNECTED", true, true, true, false, now - 12 * 60_000, 0, now));
         assertTrue(text.contains("게이트웨이: CONNECTED") && text.contains("음성: 연결됨") && text.contains("수신: 켜짐") && text.contains("자동 접속 의도: 예"), text);
+        assertTrue(text.contains("참가자: 2명"), text);
         assertTrue(text.contains("기억 저장: 정상") && text.contains("마지막 백업: 12분 전") && text.contains("마지막 백업 실패: 없음"), text);
         assertTrue(text.endsWith("재시작 이후 진단 횟수: discord-gateway-ready 1"), text);
     }
