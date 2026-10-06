@@ -58,4 +58,34 @@ class DiscordConfigurationTest {
         for (Object invalid : new Object[]{123, true, "해리", "@everyone", "a", "with spaces", "a".repeat(17)})
             assertThrows(IllegalArgumentException.class, () -> DiscordConfiguration.read(Map.of("game.target-ai", invalid)::get));
     }
+    private String loadFailure() {
+        return assertThrows(DiscordStartupFailure.class, () -> DiscordConfiguration.load(directory, () -> null)).diagnostic();
+    }
+    @Test void fileProblemsAreReportedByFixedCodesOnly() throws Exception {
+        Path file = directory.resolve("discord.yml");
+        Files.writeString(file, "enabled: [broken\n"); assertEquals("discord-config-syntax", loadFailure());
+        Files.writeString(file, " ".repeat(65_537)); assertEquals("discord-config-size", loadFailure());
+        Files.write(file, new byte[]{(byte) 0xff}); assertEquals("discord-config-unreadable", loadFailure());
+        Files.delete(file); Files.createDirectory(file); assertEquals("discord-config-unreadable", loadFailure());
+        Files.delete(file); assertEquals("discord-config-unreadable", loadFailure());
+    }
+    @Test void invalidValuesNameOnlyTheSectionWithAFixedCode() {
+        Object[][] cases = {
+                {"guild-id", 12345678901234567L, "discord-config-invalid-connection"}, {"token-env", "lowercase", "discord-config-invalid-connection"},
+                {"conversation.followup-seconds", 0, "discord-config-invalid-conversation"}, {"conversation.greet-on-join", "yes", "discord-config-invalid-conversation"},
+                {"backup.interval-seconds", "soon", "discord-config-invalid-backup"}, {"backup.max-megabytes", 1, "discord-config-invalid-backup"},
+                {"providers.llm.model", "bad model!", "discord-config-invalid-llm"}, {"providers.llm.timeout-seconds", 0, "discord-config-invalid-llm"},
+                {"providers.stt.timeout-seconds", 999, "discord-config-invalid-speech"}, {"providers.tts.voice", "bad voice!", "discord-config-invalid-speech"},
+                {"audio.minimum-rms", "loud", "discord-config-invalid-audio"}, {"audio.end-silence-millis", 5, "discord-config-invalid-audio"},
+                {"game.target-ai", "@everyone", "discord-config-invalid-game"}};
+        for (Object[] invalid : cases) {
+            var failure = assertThrows(DiscordConfiguration.Invalid.class, () -> DiscordConfiguration.read(Map.of((String) invalid[0], invalid[1])::get), (String) invalid[0]);
+            assertEquals(invalid[2], failure.diagnostic(), (String) invalid[0]);
+            assertEquals(invalid[2], failure.getMessage()); assertTrue(failure instanceof IllegalArgumentException);
+        }
+    }
+    @Test void unquotedSnowflakeFromAFileIsReportedAsConnection() throws Exception {
+        Files.writeString(directory.resolve("discord.yml"), "guild-id: 12345678901234567\n");
+        assertEquals("discord-config-invalid-connection", assertThrows(DiscordConfiguration.Invalid.class, () -> DiscordConfiguration.load(directory, () -> null)).diagnostic());
+    }
 }

@@ -22,15 +22,47 @@ public record DiscordConfiguration(DiscordSettings discord, OllamaSettings dialo
     public VoiceIngress.Policy capturePolicy() {
         return new VoiceIngress.Policy(8, 3, 2, 5, 1500, endSilenceMillis, endSilenceMillis + 500);
     }
+    /** An invalid value in one discord.yml section. Still an IllegalArgumentException; only the fixed code names the section. */
+    static final class Invalid extends IllegalArgumentException {
+        private final DiscordStartupFailure.Reason reason;
+        Invalid(DiscordStartupFailure.Reason reason, Throwable cause) { super(reason.code, cause); this.reason = reason; }
+        String diagnostic() { return reason.code; }
+    }
+    private static <T> T section(DiscordStartupFailure.Reason reason, Supplier<T> read) {
+        try { return read.get(); }
+        catch (Invalid known) { throw known; }
+        catch (IllegalArgumentException invalid) { throw new Invalid(reason, invalid); }
+    }
+    /** DiscordSettings mixes the connection, conversation and backup keys; each failure message starts with its key. */
+    private static DiscordStartupFailure.Reason settingsSection(String message) {
+        if (message != null && message.startsWith("conversation")) return DiscordStartupFailure.Reason.CONFIG_CONVERSATION;
+        if (message != null && message.startsWith("backup")) return DiscordStartupFailure.Reason.CONFIG_BACKUP;
+        return DiscordStartupFailure.Reason.CONFIG_CONNECTION;
+    }
     public static DiscordConfiguration read(Function<String, Object> values) {
         Object value = values.apply("audio.minimum-rms");
-        if (value != null && !(value instanceof Number)) throw new IllegalArgumentException("audio.minimum-rms must be numeric");
-        return new DiscordConfiguration(DiscordSettings.read(values), OllamaSettings.read(values), SpeechProviderSettings.read(values),
-                value == null ? 0.01 : ((Number) value).doubleValue(),
-                DiscordSettings.number(values, "audio.end-silence-millis", 1000, 100, 2500),
-                DiscordSettings.bool(values, "conversation.greet-on-join", true), DiscordSettings.string(values, "game.target-ai", ""));
+        if (value != null && !(value instanceof Number)) throw new Invalid(DiscordStartupFailure.Reason.CONFIG_AUDIO, new IllegalArgumentException("audio.minimum-rms must be numeric"));
+        DiscordSettings discord;
+        try { discord = DiscordSettings.read(values); }
+        catch (IllegalArgumentException invalid) { throw new Invalid(settingsSection(invalid.getMessage()), invalid); }
+        var dialogue = section(DiscordStartupFailure.Reason.CONFIG_LLM, () -> OllamaSettings.read(values));
+        var speech = section(DiscordStartupFailure.Reason.CONFIG_SPEECH, () -> SpeechProviderSettings.read(values));
+        long silence = section(DiscordStartupFailure.Reason.CONFIG_AUDIO, () -> DiscordSettings.number(values, "audio.end-silence-millis", 1000, 100, 2500));
+        boolean greet = section(DiscordStartupFailure.Reason.CONFIG_CONVERSATION, () -> DiscordSettings.bool(values, "conversation.greet-on-join", true));
+        String target = section(DiscordStartupFailure.Reason.CONFIG_GAME, () -> DiscordSettings.string(values, "game.target-ai", ""));
+        try { return new DiscordConfiguration(discord, dialogue, speech, value == null ? 0.01 : ((Number) value).doubleValue(), silence, greet, target); }
+        catch (IllegalArgumentException invalid) {
+            String message = invalid.getMessage();
+            throw new Invalid(message != null && message.startsWith("audio.") ? DiscordStartupFailure.Reason.CONFIG_AUDIO : DiscordStartupFailure.Reason.CONFIG_GAME, invalid);
+        }
     }
+    /** Any file problem is reported by a fixed code only: its text may hold paths. */
     public static DiscordConfiguration load(Path directory, Supplier<InputStream> defaults) throws IOException {
+        try { return loadFile(directory, defaults); }
+        catch (DiscordStartupFailure known) { throw known; }
+        catch (IOException unreadable) { throw new DiscordStartupFailure(DiscordStartupFailure.Reason.CONFIG_UNREADABLE); }
+    }
+    private static DiscordConfiguration loadFile(Path directory, Supplier<InputStream> defaults) throws IOException {
         Files.createDirectories(directory); Path file = directory.resolve("discord.yml");
         if (!Files.exists(file)) {
             try (InputStream input = defaults.get()) {
@@ -40,17 +72,18 @@ public record DiscordConfiguration(DiscordSettings discord, OllamaSettings dialo
                 if (!Files.isRegularFile(file)) throw new IOException("Discord configuration is not a file");
             }
         }
-        if (!Files.isRegularFile(file) || Files.size(file) > 65_536) throw new IOException("Discord configuration size");
+        if (!Files.isRegularFile(file)) throw new IOException("Discord configuration is not a file");
+        if (Files.size(file) > 65_536) throw new DiscordStartupFailure(DiscordStartupFailure.Reason.CONFIG_SIZE);
         byte[] bytes;
         try (InputStream input = Files.newInputStream(file)) { bytes = input.readNBytes(65_537); }
-        if (bytes.length > 65_536) throw new IOException("Discord configuration size");
+        if (bytes.length > 65_536) throw new DiscordStartupFailure(DiscordStartupFailure.Reason.CONFIG_SIZE);
         YamlConfiguration yaml = new YamlConfiguration();
         try {
             String text = StandardCharsets.UTF_8.newDecoder().onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
                     .decode(java.nio.ByteBuffer.wrap(bytes)).toString();
             yaml.loadFromString(text);
         }
-        catch (InvalidConfigurationException invalid) { throw new IOException("Discord configuration syntax"); }
+        catch (InvalidConfigurationException invalid) { throw new DiscordStartupFailure(DiscordStartupFailure.Reason.CONFIG_SYNTAX); }
         return read(yaml::get);
     }
 }
