@@ -110,6 +110,11 @@ final class ShaftPlans {
         List<BlockPoint> points = dead.points();
         BlockPoint back = points.get(Math.max(0, points.size() - 1 - DEAD_END_BACK_OFF));
         if (back.equals(feet)) return List.of();
+        BukkitTerrainView terrain = new BukkitTerrainView(ai.getPlayer().getWorld());
+        if (!ShaftAccess.canReach(terrain, feet, FollowPathAction.waypointGoal(back))) {
+            ai.debug("Known tunnel backtrack has no reachable access from " + feet + " to " + back);
+            return List.of();
+        }
         ai.debug("Nothing more to dig at the end of the tunnel at " + dead.end() + ", going back to " + back + " to dig another way");
         return List.of(new FollowPathAction(List.of(back)));
     }
