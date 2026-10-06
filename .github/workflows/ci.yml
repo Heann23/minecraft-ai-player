@@ -30,6 +30,9 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
+      - name: Check developer experience export contracts
+        run: python3 -m unittest discover -s training -p 'test_*.py'
+
       # pluginsDir 를 비워서 배포 단계(deployPlugin)가 돌지 않게 한다. build 는 단위 테스트까지 돈다.
       - name: Build and test
         run: bash ./gradlew build "-PpluginsDir=" --no-daemon
