@@ -20,6 +20,39 @@ class ConversationMemoryTest {
         var question = accept(turns, "A", "해리야", "q"); turns.generated(question, "반말해도 될까요?");
         turns.played(question, "반말해도 될까요?".length()); assertTrue(turns.askCasualPermission(question, 30_000)); turns.finish(question);
     }
+    @Test void unreliableSpeechStoresOnlyTighteningRequests() throws Exception {
+        var turns = turns();
+        try (var store = store()) {
+            var memory = new ConversationMemory(turns, store);
+            var stop = accept(turns, "A", "해리야 장난하지 마", "1");
+            assertEquals("AVOID", memory.captureTightening(stop, A, "해리야 장난하지 마", "1").join().value());
+            var polite = accept(turns, "A", "존댓말로 해주세요", "2");
+            assertEquals("REFUSED", memory.captureTightening(polite, A, "존댓말로 해주세요", "2").join().value());
+            var facts = store.visible(A, Set.of("A")).join();
+            assertTrue(facts.stream().anyMatch(fact -> fact.key().kind() == Kind.AVOID_JOKE && fact.value().equals("AVOID")));
+            assertTrue(facts.stream().anyMatch(fact -> fact.key().kind() == Kind.SPEECH_AGREEMENT && fact.value().equals("REFUSED")));
+            int id = 10;
+            for (String loosening : java.util.List.of("장난해도 돼요", "나한테 반말해도 돼요", "내 이름은 민수야", "해리야 안녕", "장난하지 마?", "친구가 장난하지 마 라고 했어")) {
+                String utterance = "x" + id++; var token = accept(turns, "A", loosening, utterance);
+                assertNotNull(token, loosening); assertNull(memory.captureTightening(token, A, loosening, utterance), loosening);
+            }
+            assertEquals(2, store.visible(A, Set.of("A")).join().size());
+        } finally { turns.close(); }
+    }
+    @Test void tighteningNeedsTheSpeakersOwnCurrentTurnAndExactText() throws Exception {
+        var turns = turns();
+        try (var store = store()) {
+            var memory = new ConversationMemory(turns, store); var token = accept(turns, "A", "장난하지 마", "1");
+            assertNull(memory.captureTightening(token, B, "장난하지 마", "1"));
+            assertNull(memory.captureTightening(token, A, "장난하지 마", "2"));
+            assertNull(memory.captureTightening(token, A, "장난하지 마세요", "1"));
+            assertNull(memory.captureTightening(null, A, "장난하지 마", "1"));
+            accept(turns, "A", "해리야 다음", "3"); assertNull(memory.captureTightening(token, A, "장난하지 마", "1"));
+            var again = accept(turns, "A", "장난하지 마", "9"); memory.forget(A).join();
+            assertNull(memory.captureTightening(again, A, "장난하지 마", "9"));
+            assertTrue(store.snapshot().join().facts().isEmpty());
+        } finally { turns.close(); }
+    }
     @Test void wrongSpeakerAndUnconfirmedSpeechCannotSaveName() throws Exception {
         var turns = turns();
         try (var store = store()) {
