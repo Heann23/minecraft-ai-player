@@ -31,6 +31,9 @@ import net.dv8tion.jda.api.utils.cache.CacheFlag;
 /** One explicitly configured guild/channel. JDA callbacks never access Bukkit or game world state. */
 public final class DiscordVoiceConnection extends ListenerAdapter implements DiscordRuntime.Connection {
     private final DiscordConfiguration configuration;
+    private final Path directory;
+    private final java.util.concurrent.ExecutorService configCheck = java.util.concurrent.Executors.newSingleThreadExecutor(task -> {
+        Thread thread = new Thread(task, "MinecraftAI-discord-config"); thread.setDaemon(true); return thread; });
     private final Consumer<String> diagnostic;
     private final LocalSpeechProviders speech;
     private final OllamaDialogue dialogue;
@@ -64,7 +67,7 @@ public final class DiscordVoiceConnection extends ListenerAdapter implements Dis
         } catch (Exception | LinkageError failed) { connection.close(); throw failed; }
     }
     private DiscordVoiceConnection(Path directory, DiscordConfiguration configuration, Consumer<String> diagnostic, DiscordGameState game) throws Exception {
-        this.configuration = configuration; this.diagnostic = diagnostic; connectWanted = configuration.discord().autoConnect();
+        this.configuration = configuration; this.directory = directory; this.diagnostic = diagnostic; connectWanted = configuration.discord().autoConnect();
         this.game = game;
         dialogue = new OllamaDialogue(configuration.dialogue(), System::currentTimeMillis,
                 game == null ? () -> new DiscordGameState.View(DiscordGameState.Code.NOT_CONFIGURED, null) : game::view);
@@ -259,6 +262,8 @@ public final class DiscordVoiceConnection extends ListenerAdapter implements Dis
                         ? "가벼운 장난을 허용하는 설정을 저장했어요. 진지한 대화에서는 장난을 줄일게요."
                         : "장난 없이 담백하게 이야기하는 설정을 저장했어요. /herry joke allowed:true로 바꿀 수 있어요.");
             }
+            case "config" -> java.util.concurrent.CompletableFuture.supplyAsync(() -> DiscordConfigurationDiff.check(configuration,
+                    () -> DiscordConfiguration.load(directory, () -> null)), configCheck);
             case "backup" -> session.backup().thenApply(id -> id == null ? "마지막 백업 이후 기억이 바뀌지 않았어요." : "확정 기억을 백업했어요: " + id);
             case "backups" -> session.backupIds().thenApply(ids -> ids.isEmpty() ? "아직 기억 백업이 없어요." : "최근 백업 식별자:\n" + String.join("\n", ids));
             case "restore" -> {
@@ -278,7 +283,7 @@ public final class DiscordVoiceConnection extends ListenerAdapter implements Dis
             default -> java.util.concurrent.CompletableFuture.completedFuture("지원하지 않는 명령이에요.");
         };
     }
-    @Override public void stop() { stopped.set(true); if (game != null) game.configure(""); audio.close(); }
+    @Override public void stop() { stopped.set(true); configCheck.shutdownNow(); if (game != null) game.configure(""); audio.close(); }
     @Override public void close() {
         if (!closed.compareAndSet(false, true)) return;
         stop();
