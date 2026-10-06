@@ -236,8 +236,8 @@ public final class PickupItemAction extends AbstractAction implements PrimitiveA
         List<Action> step = TerrainPlans.stepToward(ai, target, false);
         if (step.isEmpty()) return false;
         for (Action action : step) {
-            if (action instanceof BreakBlockAction breaking && breaking.getTarget() instanceof PrimitiveTarget.Block target
-                    && !canClear(ai, Positions.block(player.getWorld(), target.pos()))) return false;
+            if (action instanceof BreakBlockAction breaking && breaking.getTarget() instanceof PrimitiveTarget.Block breakTarget
+                    && !canClear(ai, Positions.block(player.getWorld(), breakTarget.pos()))) return false;
         }
         accessSteps++;
         ai.getNavigation().stop();
@@ -248,7 +248,7 @@ public final class PickupItemAction extends AbstractAction implements PrimitiveA
     }
 
     private static boolean canClear(AIPlayer ai, Block obstacle) {
-        Base home = ai.getTeam().getWorldModel().getHome();
+        Base home = ai.getWorldModel().getHome();
         if (home != null && home.isInsideBuilding(ai.getWorldId(), Positions.of(obstacle))) return false;
         // 부족한 도구로 돌을 맨손 채굴하거나 기반암을 계속 두드리지 않는다.
         return obstacle.getType().getHardness() >= 0.0F
@@ -256,7 +256,7 @@ public final class PickupItemAction extends AbstractAction implements PrimitiveA
     }
 
     private static boolean canMakeAccessStep(AIPlayer ai, BlockPoint target, BlockPoint drop) {
-        Base home = ai.getTeam().getWorldModel().getHome();
+        Base home = ai.getWorldModel().getHome();
         if (home == null) return true;
         // 건축을 시작할 때부터 경계가 등록된다. 완공 전의 빈 origin도 기둥으로 막지 않는다.
         if (home.isInsideBuilding(ai.getWorldId(), target) || home.isInsideBuilding(ai.getWorldId(), drop)) return false;
