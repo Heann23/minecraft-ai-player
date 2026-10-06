@@ -149,6 +149,8 @@ public final class DiscordSession implements AutoCloseable {
         if (accepted.decision() != ConversationTurns.Decision.RESPOND) return done();
         greetings.dismiss(user, monotonicMillis.getAsLong());
         var token = accepted.token(); var subject = new DiscordMemory.Subject(settings.guildId(), settings.characterId(), user);
+        var tightened = memory.captureTightening(token, subject, text, utterance);
+        if (tightened != null) return answerTightening(result, token, subject, tightened);
         var saved = memory.capture(token, subject, text, result.recognition().reliableFinal(), utterance);
         Set<String> members = participants;
         CompletableFuture<Void> completed = new CompletableFuture<>();
@@ -166,6 +168,21 @@ public final class DiscordSession implements AutoCloseable {
                 return done();
             }).whenComplete((ignored, failure) -> { if (failure == null) completed.complete(null); else completed.completeExceptionally(failure); });
         });
+        return completed;
+    }
+
+    /** A saved "no more jokes" or "polite speech" request is answered with the fixed code-owned text, never by the model. */
+    private CompletableFuture<Void> answerTightening(SpeechRecognitionWorker.Result result, ConversationTurns.Token token,
+                                                     DiscordMemory.Subject subject, CompletableFuture<ConfirmedTextPreference.Change> saved) {
+        Set<String> members = participants;
+        CompletableFuture<Void> completed = new CompletableFuture<>();
+        saved.thenCompose(change -> store.visible(subject, members)
+                        .thenApply(facts -> change.reply(DiscordPersonalSettings.casual(subject, facts, wallClock.getAsLong()))))
+                .whenComplete((reply, error) -> post(() -> {
+                    if (error != null) { if (turns.isCurrent(token)) turns.finish(token); diagnostic.accept("conversation-memory-failed"); }
+                    else if (ingress.valid(result.route()) && turns.isCurrent(token) && !responses.greet(token, reply)) turns.finish(token);
+                    return done();
+                }).whenComplete((ignored, failure) -> { if (failure == null) completed.complete(null); else completed.completeExceptionally(failure); }));
         return completed;
     }
 
