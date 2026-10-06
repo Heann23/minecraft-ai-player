@@ -12,13 +12,16 @@ import org.bukkit.configuration.file.YamlConfiguration;
 
 /** File I/O and pure YAML parsing only; the runtime loads this outside the server thread. */
 public record DiscordConfiguration(DiscordSettings discord, OllamaSettings dialogue, SpeechProviderSettings speech,
-                                   double minimumRms, long endSilenceMillis, boolean greetOnJoin, String targetAi) {
+                                   double minimumRms, long endSilenceMillis, boolean greetOnJoin, String targetAi, String token) {
     public DiscordConfiguration {
+        token = token == null ? "" : token;
         java.util.Objects.requireNonNull(discord); java.util.Objects.requireNonNull(dialogue); java.util.Objects.requireNonNull(speech);
         if (!Double.isFinite(minimumRms) || minimumRms <= 0 || minimumRms > 1) throw new IllegalArgumentException("audio.minimum-rms");
         if (endSilenceMillis < 100 || endSilenceMillis > 2500) throw new IllegalArgumentException("audio.end-silence-millis");
         DiscordGameState.target(targetAi);
     }
+    /** The bot token must never reach a log or an error message, so the generated text hides it. */
+    @Override public String toString() { return "DiscordConfiguration[token=" + (token.isEmpty() ? "from environment" : "in discord.yml") + "]"; }
     public VoiceIngress.Policy capturePolicy() {
         return new VoiceIngress.Policy(8, 3, 2, 5, 1500, endSilenceMillis, endSilenceMillis + 500);
     }
@@ -50,7 +53,13 @@ public record DiscordConfiguration(DiscordSettings discord, OllamaSettings dialo
         long silence = section(DiscordStartupFailure.Reason.CONFIG_AUDIO, () -> DiscordSettings.number(values, "audio.end-silence-millis", 1000, 100, 2500));
         boolean greet = section(DiscordStartupFailure.Reason.CONFIG_CONVERSATION, () -> DiscordSettings.bool(values, "conversation.greet-on-join", true));
         String target = section(DiscordStartupFailure.Reason.CONFIG_GAME, () -> DiscordSettings.string(values, "game.target-ai", ""));
-        try { return new DiscordConfiguration(discord, dialogue, speech, value == null ? 0.01 : ((Number) value).doubleValue(), silence, greet, target); }
+        // Written straight into discord.yml by the owner; empty means the environment variable named by token-env is used instead.
+        String token = section(DiscordStartupFailure.Reason.CONFIG_CONNECTION, () -> {
+            String written = DiscordSettings.string(values, "token", "").strip();
+            if (!written.isEmpty() && !written.matches("[A-Za-z0-9._-]{30,200}")) throw new IllegalArgumentException("token");
+            return written;
+        });
+        try { return new DiscordConfiguration(discord, dialogue, speech, value == null ? 0.01 : ((Number) value).doubleValue(), silence, greet, target, token); }
         catch (IllegalArgumentException invalid) {
             String message = invalid.getMessage();
             throw new Invalid(message != null && message.startsWith("audio.") ? DiscordStartupFailure.Reason.CONFIG_AUDIO : DiscordStartupFailure.Reason.CONFIG_GAME, invalid);

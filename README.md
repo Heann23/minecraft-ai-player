@@ -122,7 +122,8 @@ Discord 연결이나 로컬 제공자가 실패해도 게임 AI는 계속 실행
 반복 인사·끊김·지연 피드백을 반영했습니다. 추가 음성 시험은 사용자가 미뤘으며,
 원격 텍스트 개인 표시·음질·다인 대화·게임 동시 실행과 최종 자연스러움 평가는 남아 있습니다.
 
-1. 서버 실행 환경에 `MINECRAFTAI_DISCORD_TOKEN`을 설정합니다. 토큰은 설정 파일이나 저장소에 넣지 않습니다.
+1. `discord.yml`의 `token`에 봇 토큰을 그대로 붙여 넣습니다(따옴표는 있어도 없어도 됩니다). 이 파일은 다른 사람에게 보내거나 공개 저장소에 올리지 마세요.
+   토큰을 파일에 적고 싶지 않으면 `token`을 비워 두고 서버 환경 변수 `MINECRAFTAI_DISCORD_TOKEN`에 넣어도 됩니다. 둘 다 있으면 파일의 `token`을 씁니다.
 2. `discord.yml`의 `guild-id`, `voice-channel-id`를 따옴표로 감싼 ID로 지정합니다.
 3. 로컬 [Ollama](https://docs.ollama.com/api/chat) **0.35.1 이상**, [whisper.cpp 서버](https://github.com/ggml-org/whisper.cpp/tree/master/examples/server),
    [Piper HTTP 서버](https://github.com/OHF-Voice/piper1-gpl/blob/main/docs/API_HTTP.md)를 준비합니다.
@@ -130,20 +131,19 @@ Discord 연결이나 로컬 제공자가 실패해도 게임 AI는 계속 실행
    텍스트만 시험하려면 `auto-connect: false`로 두고 Ollama만 실행해도 됩니다.
 4. `enabled: true`로 설정하고 서버를 재시작합니다. Java 실행 옵션에 `--enable-native-access=ALL-UNNAMED`를 추가합니다.
 
-Windows에서는 시작 메뉴에서 **환경 변수**를 검색하고 **시스템 환경 변수 편집 → 환경 변수 → 사용자 변수 → 새로 만들기**로
-`MINECRAFTAI_DISCORD_TOKEN`을 추가합니다. 변수 값에는 봇 토큰만 입력하고 따옴표는 붙이지 않습니다.
-확인을 눌러 저장한 뒤 서버를 실행하는 터미널·런처를 다시 열어야 새 변수가 전달됩니다.
-다른 이름으로 이미 설정했다면 `discord.yml`의 `token-env`를 그 변수 이름으로 바꿔도 됩니다.
-Windows 서비스로 실행할 경우 서비스 실행 계정의 환경에 설정해야 합니다.
+토큰이 새어 나갔거나 의심되면 Discord 개발자 포털의 봇 메뉴에서 Reset Token으로 재발급하고 `token`을 새 값으로 바꾸세요. 토큰은 콘솔 로그, 진단, 명령 응답, `/herry config`에 나오지 않습니다.
+환경 변수를 쓸 때는 Windows 시작 메뉴에서 **환경 변수**를 검색하고 **시스템 환경 변수 편집 → 환경 변수 → 사용자 변수 → 새로 만들기**로
+`MINECRAFTAI_DISCORD_TOKEN`을 추가합니다(값에는 토큰만, 따옴표 없이). 저장한 뒤 서버를 실행하는 터미널·런처를 다시 열어야 전달되고,
+다른 이름을 쓰려면 `discord.yml`의 `token-env`를 그 변수 이름으로 바꿉니다. Windows 서비스로 실행할 경우 서비스 실행 계정의 환경에 설정해야 합니다.
 
-시작이 실패하면 콘솔의 `Discord:` 진단을 확인하세요. `discord-token-missing`은 서버 실행 환경에 변수 값이 없다는 뜻이고,
+시작이 실패하면 콘솔의 `Discord:` 진단을 확인하세요. `discord-token-missing`은 `token`이 비어 있고 환경 변수에도 값이 없다는 뜻, `discord-token-rejected`는 Discord가 토큰을 거부했다는 뜻(잘못 붙여 넣었거나 재발급됨), `discord-model-missing`은 `providers.llm.model`이 비어 있다는 뜻이고,
 `discord-gateway-not-ready`는 로그인 후 준비 완료를 기다리지 못했다는 뜻입니다.
 `discord-guild-unavailable`, `discord-voice-channel-unavailable`, `discord-voice-permissions-missing`은
 각각 봇이 들어간 서버, 일반 음성 채널 ID, 채널 보기·접속·발언 권한을 확인해야 한다는 뜻입니다.
 진단에는 토큰이나 대화 내용을 포함하지 않습니다.
 `discord.yml` 자체의 문제는 다음 코드로 알려 줍니다. `discord-config-syntax`는 YAML 문법, `discord-config-size`는 64KB 초과,
 `discord-config-unreadable`은 파일이 아니거나 읽을 수 없다는 뜻입니다. `discord-config-invalid-<섹션>`은 그 섹션의 값이 잘못됐다는 뜻이며
-섹션은 `connection`(`enabled`·`token-env`·서버/채널 ID·`character-id`·`auto-connect`), `conversation`, `backup`, `audio`, `game`,
+섹션은 `connection`(`enabled`·`token`·`token-env`·서버/채널 ID·`character-id`·`auto-connect`), `conversation`, `backup`, `audio`, `game`,
 `llm`(`providers.llm`), `speech`(`providers.stt`·`providers.tts`)입니다. 서버·채널 ID를 따옴표 없이 적으면 `connection`이 나옵니다.
 설정이 잘못돼도 게임은 그대로 실행되고 Discord만 시작하지 않으며, 진단에는 값이나 파일 내용을 넣지 않습니다.
 운영 중 게이트웨이 연결 변화는 `discord-gateway-disconnected`·`discord-gateway-resumed`·`discord-gateway-recreated`로 남깁니다.

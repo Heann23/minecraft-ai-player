@@ -15,7 +15,7 @@ class DiscordConfigurationDiffTest {
     @Test void everySectionChangeIsNamedWithoutShowingValues() {
         Object[][] cases = {
                 {"connection", Map.<String, Object>of("enabled", true, "guild-id", "12345678901234567", "voice-channel-id", "12345678901234568")},
-                {"connection", Map.<String, Object>of("character-id", "other")}, {"connection", Map.<String, Object>of("auto-connect", false)},
+                {"connection", Map.<String, Object>of("token", "TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT")}, {"connection", Map.<String, Object>of("character-id", "other")}, {"connection", Map.<String, Object>of("auto-connect", false)},
                 {"conversation", Map.<String, Object>of("conversation.followup-seconds", 30)}, {"conversation", Map.<String, Object>of("conversation.greet-on-join", false)},
                 {"backup", Map.<String, Object>of("backup.interval-seconds", 60)}, {"audio", Map.<String, Object>of("audio.end-silence-millis", 800)},
                 {"audio", Map.<String, Object>of("audio.minimum-rms", 0.05)}, {"game", Map.<String, Object>of("game.target-ai", "Bot")},
@@ -25,7 +25,7 @@ class DiscordConfigurationDiffTest {
             assertEquals(List.of(changed[0]), DiscordConfigurationDiff.changedSections(RUNNING, file), String.valueOf(changed[1]));
             String report = DiscordConfigurationDiff.check(RUNNING, () -> file);
             assertTrue(report.contains("바뀐 부분: " + changed[0]) && report.contains("재시작"), report);
-            assertFalse(report.contains("secret") || report.contains("Bot") || report.contains("12345678901234567"), report);
+            assertFalse(report.contains("TTTT") || report.contains("secret") || report.contains("Bot") || report.contains("12345678901234567"), report);
         }
     }
     @Test void severalChangedSectionsAreListedInAFixedOrder() {

@@ -57,6 +57,8 @@ public final class DiscordVoiceConnection extends ListenerAdapter implements Dis
     }
     public static DiscordVoiceConnection open(Path directory, DiscordConfiguration configuration, String token,
                                                Consumer<String> diagnostic, DiscordGameState game) throws Exception {
+        // The dialogue needs a model name; say so instead of failing later with a generic start failure.
+        if (configuration.dialogue().model().isEmpty()) throw new DiscordStartupFailure(DiscordStartupFailure.Reason.MODEL_MISSING);
         DiscordVoiceConnection connection = new DiscordVoiceConnection(directory, configuration, diagnostic, game);
         try {
             connection.jda = JDABuilder.createLight(token, GatewayIntent.GUILD_VOICE_STATES)
@@ -67,6 +69,8 @@ public final class DiscordVoiceConnection extends ListenerAdapter implements Dis
                 throw new DiscordStartupFailure(DiscordStartupFailure.Reason.GATEWAY_NOT_READY);
             connection.configure();
             return connection;
+        } catch (net.dv8tion.jda.api.exceptions.InvalidTokenException rejected) {
+            connection.close(); throw new DiscordStartupFailure(DiscordStartupFailure.Reason.TOKEN_REJECTED);
         } catch (Exception | LinkageError failed) { connection.close(); throw failed; }
     }
     private DiscordVoiceConnection(Path directory, DiscordConfiguration configuration, Consumer<String> diagnostic, DiscordGameState game) throws Exception {

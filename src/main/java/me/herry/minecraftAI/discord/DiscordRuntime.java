@@ -40,7 +40,7 @@ public final class DiscordRuntime implements AutoCloseable {
             DiscordConfiguration configuration = loader.load();
             if (!configuration.discord().enabled()) { publish(State.DISABLED); return; }
             if (isClosed()) return;
-            String token = environment.apply(configuration.discord().tokenEnvironment());
+            String token = configuration.token().isEmpty() ? environment.apply(configuration.discord().tokenEnvironment()) : configuration.token();
             if (token == null || token.isBlank()) { report("discord-token-missing"); publish(State.FAILED); return; }
             created = factory.open(configuration, token);
             java.util.Objects.requireNonNull(created);
