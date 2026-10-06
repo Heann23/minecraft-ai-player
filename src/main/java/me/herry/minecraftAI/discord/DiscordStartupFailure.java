@@ -9,6 +9,8 @@ final class DiscordStartupFailure extends IOException {
         GUILD_UNAVAILABLE("discord-guild-unavailable"),
         VOICE_CHANNEL_UNAVAILABLE("discord-voice-channel-unavailable"),
         VOICE_PERMISSIONS_MISSING("discord-voice-permissions-missing"),
+        TOKEN_REJECTED("discord-token-rejected"),
+        MODEL_MISSING("discord-model-missing"),
         // discord.yml problems: the section is named, the value and file text never are.
         CONFIG_SYNTAX("discord-config-syntax"),
         CONFIG_SIZE("discord-config-size"),

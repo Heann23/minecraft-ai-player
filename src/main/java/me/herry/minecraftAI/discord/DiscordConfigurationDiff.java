@@ -16,7 +16,8 @@ final class DiscordConfigurationDiff {
         var changed = new ArrayList<String>();
         DiscordSettings a = running.discord(), b = file.discord();
         if (a.enabled() != b.enabled() || !a.tokenEnvironment().equals(b.tokenEnvironment()) || !a.guildId().equals(b.guildId())
-                || !a.voiceChannelId().equals(b.voiceChannelId()) || !a.characterId().equals(b.characterId()) || a.autoConnect() != b.autoConnect())
+                || !a.voiceChannelId().equals(b.voiceChannelId()) || !a.characterId().equals(b.characterId()) || a.autoConnect() != b.autoConnect()
+                || !running.token().equals(file.token()))
             changed.add("connection");
         if (a.followupMillis() != b.followupMillis() || a.contextLines() != b.contextLines() || running.greetOnJoin() != file.greetOnJoin())
             changed.add("conversation");

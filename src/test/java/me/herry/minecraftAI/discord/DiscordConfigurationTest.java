@@ -84,6 +84,17 @@ class DiscordConfigurationTest {
             assertEquals(invalid[2], failure.getMessage()); assertTrue(failure instanceof IllegalArgumentException);
         }
     }
+    @Test void tokenInTheFileIsTrimmedValidatedAndNeverShownInText() {
+        String token = "A".repeat(24) + "." + "B".repeat(6) + "." + "C".repeat(27);
+        var config = read(Map.of("token", "  " + token + " "));
+        assertEquals(token, config.token()); assertFalse(config.toString().contains(token)); assertTrue(config.toString().contains("discord.yml"));
+        assertEquals("", read(Map.of()).token()); assertTrue(read(Map.of()).toString().contains("environment"));
+        for (Object bad : new Object[]{"short", "a".repeat(29), "a".repeat(201), token + " extra", "토큰".repeat(20), 12345678901234567L, true}) {
+            var failure = assertThrows(DiscordConfiguration.Invalid.class, () -> read(Map.of("token", bad)), String.valueOf(bad));
+            assertEquals("discord-config-invalid-connection", failure.diagnostic()); assertFalse(String.valueOf(failure.getMessage()).contains(String.valueOf(bad)));
+        }
+    }
+    private static DiscordConfiguration read(Map<String, Object> values) { return DiscordConfiguration.read(values::get); }
     @Test void unquotedSnowflakeFromAFileIsReportedAsConnection() throws Exception {
         Files.writeString(directory.resolve("discord.yml"), "guild-id: 12345678901234567\n");
         assertEquals("discord-config-invalid-connection", assertThrows(DiscordConfiguration.Invalid.class, () -> DiscordConfiguration.load(directory, () -> null)).diagnostic());

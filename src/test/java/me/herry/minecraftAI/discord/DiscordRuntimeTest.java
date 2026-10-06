@@ -37,6 +37,44 @@ class DiscordRuntimeTest {
             assertEquals(DiscordRuntime.State.FAILED, runtime.started().get(3, TimeUnit.SECONDS)); assertEquals(List.of("discord-start-failed"), codes);
         }
     }
+    private static final String FILE_TOKEN = "F".repeat(24) + "." + "G".repeat(6) + "." + "H".repeat(27);
+    private DiscordConfiguration withToken(String token) {
+        var values = new java.util.HashMap<String, Object>(Map.of("enabled", true, "guild-id", "12345678901234567", "voice-channel-id", "12345678901234568"));
+        if (token != null) values.put("token", token);
+        return DiscordConfiguration.read(values::get);
+    }
+    @Test void tokenWrittenInTheFileIsUsedWithoutTheEnvironmentAndWinsOverIt() throws Exception {
+        var used = new java.util.concurrent.atomic.AtomicReference<String>(); var codes = new CopyOnWriteArrayList<String>();
+        try (var runtime = new DiscordRuntime(() -> withToken(FILE_TOKEN), key -> { fail("environment read although the file has a token"); return null; },
+                (settings, token) -> { used.set(token); throw new DiscordStartupFailure(DiscordStartupFailure.Reason.GATEWAY_NOT_READY); }, codes::add)) {
+            assertEquals(DiscordRuntime.State.FAILED, runtime.started().get(3, TimeUnit.SECONDS));
+        }
+        assertEquals(FILE_TOKEN, used.get()); assertEquals(List.of("discord-gateway-not-ready"), codes);
+        var fallback = new java.util.concurrent.atomic.AtomicReference<String>();
+        try (var runtime = new DiscordRuntime(() -> withToken(null), key -> "env-" + "E".repeat(40),
+                (settings, token) -> { fallback.set(token); throw new DiscordStartupFailure(DiscordStartupFailure.Reason.GATEWAY_NOT_READY); }, code -> {})) {
+            assertEquals(DiscordRuntime.State.FAILED, runtime.started().get(3, TimeUnit.SECONDS));
+        }
+        assertEquals("env-" + "E".repeat(40), fallback.get());
+    }
+    @Test void anEmptyDialogueModelIsReportedBeforeAnyConnectionIsMade() {
+        var failure = assertThrows(DiscordStartupFailure.class, () -> DiscordVoiceConnection.open(java.nio.file.Path.of("unused"),
+                withToken(FILE_TOKEN), FILE_TOKEN, code -> fail("no diagnostic expected before the failure")));
+        assertEquals("discord-model-missing", failure.diagnostic());
+    }
+    @Test void noTokenAnywhereReportsTheMissingCodeAndARejectedTokenHasItsOwnCode() throws Exception {
+        var codes = new CopyOnWriteArrayList<String>();
+        try (var runtime = new DiscordRuntime(() -> withToken(null), key -> "  ", (settings, token) -> { fail("opened without a token"); return null; }, codes::add)) {
+            assertEquals(DiscordRuntime.State.FAILED, runtime.started().get(3, TimeUnit.SECONDS));
+        }
+        assertEquals(List.of("discord-token-missing"), codes);
+        var rejected = new CopyOnWriteArrayList<String>();
+        try (var runtime = new DiscordRuntime(() -> withToken(FILE_TOKEN), key -> null,
+                (settings, token) -> { throw new DiscordStartupFailure(DiscordStartupFailure.Reason.TOKEN_REJECTED); }, rejected::add)) {
+            assertEquals(DiscordRuntime.State.FAILED, runtime.started().get(3, TimeUnit.SECONDS));
+        }
+        assertEquals(List.of("discord-token-rejected"), rejected); assertFalse(rejected.getFirst().contains("FFFF"));
+    }
     @Test void configurationProblemsReportTheirFixedCodeAndNeverTheValue() throws Exception {
         List<DiscordConfiguration.Invalid> invalid = List.of(
                 new DiscordConfiguration.Invalid(DiscordStartupFailure.Reason.CONFIG_LLM, new IllegalArgumentException("secret-token model")));

@@ -1,7 +1,10 @@
 # Discord 설정만 관리한다. config.yml의 게임 설정과 독립적이다.
-# 실제 접속에는 봇 토큰 환경변수와 설치한 로컬 STT·Ollama·Piper 서버가 필요하다.
+# 실제 접속에는 봇 토큰과 설치한 로컬 STT·Ollama·Piper 서버가 필요하다.
 # 서버 JVM 옵션: --enable-native-access=ALL-UNNAMED (Java 25 DAVE/Opus).
 enabled: false
+# 봇 토큰을 아래 token 에 그대로 붙여 넣는다. 이 파일을 다른 사람에게 보내거나 공개 저장소에 올리지 않는다.
+token: ''
+# token 이 비어 있으면 이 이름의 환경 변수에서 읽는다 (파일에 적고 싶지 않을 때).
 token-env: MINECRAFTAI_DISCORD_TOKEN
 # Discord ID는 숫자가 아니라 따옴표로 감싼 문자열로 쓴다.
 guild-id: ''
