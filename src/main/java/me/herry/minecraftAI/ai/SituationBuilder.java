@@ -277,8 +277,11 @@ final class SituationBuilder {
         situation.obsidianWork = situation.canMineObsidian && ObsidianPlans.isWorking(ai);
         situation.knowsLava = situation.waterBucket && situation.canMineObsidian && ObsidianPlans.knowsLake(ai);
         // 좋은 곡괭이만 있고 막 쓸 돌 곡괭이가 없으면, 가진 재료로 만들 수 있을 때 하나 만든다.
-        situation.workPickaxeWanted = situation.canMineDiamond && !inventory.hasWorkPickaxe()
-                && ai.getCrafting().plan(Material.STONE_PICKAXE, 1, inventory.snapshot()).isFeasible();
+        if (situation.canMineDiamond && !inventory.hasWorkPickaxe()) {
+            CraftingSystem.CraftPlan workTool = ai.getCrafting().plan(Material.STONE_PICKAXE, 1, inventory.snapshot());
+            situation.workPickaxeWanted = workTool.isFeasible();
+            situation.workPickaxeNeedsWood = !workTool.isFeasible() && classifyNeed(workTool.missing()) == Situation.Need.WOOD;
+        }
 
         // 중기 목표(다음에 이룰 것)와 장기 목표(지금 속한 단계)를 정한다.
         BuildPlans.checkCompletion(ai);

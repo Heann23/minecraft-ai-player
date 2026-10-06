@@ -72,6 +72,8 @@ public final class Situation {
     public boolean hasPickaxe;
     // 철 이상의 곡괭이만 있고 막 쓸 돌 곡괭이가 없는데, 가진 재료로 하나 만들 수 있는지
     public boolean workPickaxeWanted;
+    // 작업용 곡괭이를 보충할 막대/나무가 부족하면 다른 광물을 찾기 전에 다시 구한다.
+    public boolean workPickaxeNeedsWood;
     public int plankEquivalent;
     public int cobblestone;
 

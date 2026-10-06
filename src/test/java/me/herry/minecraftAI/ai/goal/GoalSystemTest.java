@@ -337,6 +337,55 @@ class GoalSystemTest {
         assertEquals(GoalType.ESCAPE_DANGER, select(situation));
     }
 
+    @Test
+    void findsMissingWorkPickaxeSticksBeforeSearchingOrFinishingOrdinaryOre() {
+        Situation situation = new Situation();
+        situation.nextMilestone = Milestone.IRON_CHESTPLATE;
+        situation.need = Situation.Need.IRON;
+        situation.ironNeeded = 8;
+        situation.hasPickaxe = true;
+        situation.canMineIron = true;
+        situation.canMineDiamond = true;
+        situation.workPickaxeNeedsWood = true;
+        situation.coalVeinNearby = true;
+        situation.ironVeinNearby = true;
+        situation.foodCount = GoalSystem.TRIP_FOOD;
+        assertEquals(GoalType.FIND_WOOD, select(situation));
+        situation.knowsTree = true;
+        assertEquals(GoalType.COLLECT_WOOD, select(situation));
+    }
+
+    @Test
+    void waitsBelowAtNightInsteadOfWearingOutTheBackupWithoutSticks() {
+        Situation situation = new Situation();
+        situation.nextMilestone = Milestone.IRON_CHESTPLATE;
+        situation.need = Situation.Need.IRON;
+        situation.ironNeeded = 8;
+        situation.hasPickaxe = true;
+        situation.canMineIron = true;
+        situation.workPickaxeNeedsWood = true;
+        situation.coalVeinNearby = true;
+        situation.ironVeinNearby = true;
+        situation.underground = true;
+        situation.surfaceTooLate = true;
+        situation.foodCount = GoalSystem.TRIP_FOOD;
+        assertEquals(GoalType.EXPLORE, select(situation));
+        situation.surfaceTooLate = false;
+        assertEquals(GoalType.FIND_WOOD, select(situation));
+    }
+
+    @Test
+    void missingWorkToolWoodDoesNotBlockRareOreOrEmergencyEscape() {
+        Situation situation = new Situation();
+        situation.workPickaxeNeedsWood = true;
+        situation.hasPickaxe = true;
+        situation.canMineDiamond = true;
+        situation.knowsDiamond = true;
+        assertEquals(GoalType.MINE_DIAMOND, select(situation));
+        situation.inLava = true;
+        assertEquals(GoalType.ESCAPE_DANGER, select(situation));
+    }
+
     // 회귀: 깊은 굴에서 가방이 차자 넘치는 조약돌을 넣으러 집 상자까지 가려다, 길을 못 찾고 실패를 되풀이했다.
     @Test
     void dropsJunkUndergroundInsteadOfWalkingHomeToStoreIt() {
