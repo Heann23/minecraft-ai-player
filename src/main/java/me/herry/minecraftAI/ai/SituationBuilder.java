@@ -97,7 +97,7 @@ final class SituationBuilder {
 
         // 사방이 막힌 자리에 들어가 있으면 몬스터가 닿지 못한다.
         situation.sealedIn = RefugePlans.isHidden(ai);
-        if (ai.getCombatMemory().updateSealedIn(situation.sealedIn)) {
+        if (ai.getCombatMemory().updateSealedIn(situation.sealedIn, ai.getTicks())) {
             ai.debug(situation.sealedIn ? "Sealed in at " + ai.getPosition() : "No longer sealed in");
         }
         double weaponPower = inventory.weaponPower();

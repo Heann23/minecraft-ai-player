@@ -16,7 +16,7 @@ public final class CombatMemory {
     public static final long SEEN_TICKS = 100L;
     // 다가갈 길이 없었던 몬스터는 이 시간 동안 공격 대상으로 고르지 않는다.
     private static final long UNREACHABLE_TICKS = 300L;
-    // 숨은 뒤 이 시간(2분) 동안은 몬스터가 있는 쪽으로 굴을 뚫지 않는다.
+    // 보호된 피신처를 벗어난 뒤에도 이 시간(2분) 동안은 몬스터 쪽으로 굴을 뚫지 않는다.
     private static final long REFUGE_CAUTION_TICKS = 2400L;
     private static final int MAX_HITS = 8;
 
@@ -145,6 +145,12 @@ public final class CombatMemory {
     }
 
     // 숨은 상태가 이전과 달라졌으면 true. 달라질 때만 디버그 로그를 남기기 위한 것이다.
+    public boolean updateSealedIn(boolean sealed, long now) {
+        // 벽 밖의 적이 남아 있는 피신처에서는 시간이 지났다는 이유로 경계가 풀리지 않는다.
+        if (sealed) refugeTick = now;
+        return updateSealedIn(sealed);
+    }
+
     public boolean updateSealedIn(boolean sealed) {
         if (sealed == sealedIn) return false;
         sealedIn = sealed;

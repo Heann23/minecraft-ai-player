@@ -148,8 +148,9 @@ public final class TerrainPlans {
         World world = ai.getPlayer().getWorld();
         boolean underShaft = cutsShaft(ai, world, new BukkitTerrainView(world), ai.getPosition().offset(0, 2, 0));
         List<Action> aside = hidden || underShaft ? digTunnel(ai, false) : List.<Action>of();
-        // 캘 것 없이 숨은 자리 안에서 걷기만 하는 것은 자리를 옮기는 것이 아니다.
-        if (aside.stream().anyMatch(BreakBlockAction.class::isInstance)) return aside;
+        // 이미 파낸 안전한 옆 칸으로도 이동한다. 그 칸으로 옮겨야 다음 벽에 계단을 낼 수 있다.
+        // 이동 계획을 버리면 같은 벽 앞에서 기다리다가 몬스터 쪽 천장을 열게 된다.
+        if (!aside.isEmpty()) return aside;
 
         List<Action> pillar = pillarUp(ai, null);
         if (!pillar.isEmpty()) {
