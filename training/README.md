@@ -27,3 +27,15 @@ python prepare_features.py <export-output-folder> --output <new-feature-folder>
 없는 아이템 종류의 개수는 0이다. 거점을 모르면 거점 거리도 0으로 표현하고 별도 `homeKnown` 값으로 구분한다. 나머지 선택 필드가 없거나 숫자가 유한하지 않거나 범주가 지원 목록 밖이면 거부한다. 새 Observation 스키마나 Goal 순서가 나오면 기존 계약을 조용히 재사용하지 않는다.
 
 `feature-contract.json`에는 순서·정규화 상수·Goal 대응표·원본 Goal 소스 해시가 들어 있다. `feature-report.json`에는 계약 해시·입력 분할 파일 해시·표본/seed/Goal 개수·오류가 들어 있다. seed 분할이나 감사 계약이 맞지 않는 자료는 오류 종료하며 부분 학습 자료를 생성하지 않는다. 숫자 파일의 `x`만 입력이며 라벨·seed·원본 해시·결과는 분할/평가 메타데이터다. 변환 성공은 학습 완료나 모델의 성능을 뜻하지 않는다.
+
+첫 개발용 모방학습 후보:
+
+```powershell
+python train_goal_bc.py <feature-folder> --output <new-candidate-folder>
+```
+
+표준 라이브러리로 작은 선형 softmax 모델을 훈련한다. 고정된 난수 시드·80 epoch·학습률 0.05를 사용하고 성공한 train 표본만 가중치 갱신에 넣는다. 실패·중단·계획 없음의 제외 개수를 기록하며 이를 성공으로 바꾸지 않는다. 클래스 빈도의 제곱근 역수로 학습률을 가중한다. validation/test는 가중치 갱신·정규화·하이퍼파라미터 선택에 사용하지 않는다. 지원 Goal은 성공한 훈련 표본에 존재한 종류만이다.
+
+`candidate.json`은 실제 학습한 가중치·bias·지원 Goal ID·입출력 계약·학습 방법을 담는다. `evaluation.json`은 파일/계약/가중치 해시, 훈련 seed·표본·지원/미지원 Goal과 각 분할의 Teacher 일치율을 담는다. 다수 클래스와 직전 Goal 반복 기준선도 비교한다. Teacher 일치율은 게임 생존 성공률이나 드래곤 처치 능력이 아니다. 평가에서 훈련되지 않은 Goal도 오답으로 계산한다. 이 후보는 항상 `deployable: false`이며 자동 배포하지 않는다.
+
+현재 도구에는 ONNX export·Java 추론·Shadow 연결이 없다. 다음 단계에서 계약을 보존한 export·모델 누락/불일치 fallback·지연/안전·미사용 월드 실제 평가를 구현해야 한다. 게임 서버의 Teacher 실행권과 기본 설정은 이 도구로 바뀌지 않는다. raw 경험·숫자 데이터·가중치 산출물은 공개 Git에 포함하지 않는다.
