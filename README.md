@@ -146,6 +146,8 @@ Windows 서비스로 실행할 경우 서비스 실행 계정의 환경에 설�
 섹션은 `connection`(`enabled`·`token-env`·서버/채널 ID·`character-id`·`auto-connect`), `conversation`, `backup`, `audio`, `game`,
 `llm`(`providers.llm`), `speech`(`providers.stt`·`providers.tts`)입니다. 서버·채널 ID를 따옴표 없이 적으면 `connection`이 나옵니다.
 설정이 잘못돼도 게임은 그대로 실행되고 Discord만 시작하지 않으며, 진단에는 값이나 파일 내용을 넣지 않습니다.
+운영 중 게이트웨이 연결 변화는 `discord-gateway-disconnected`·`discord-gateway-resumed`·`discord-gateway-recreated`로 남깁니다.
+같은 코드는 콘솔에 30초에 한 번만 남기고 횟수는 모두 세어 `/herry diagnose`에서 볼 수 있습니다.
 
 봇에는 지정한 일반 음성 채널의 보기·접속·발언·메시지 보내기 권한과 `applications.commands`가 필요합니다.
 수신 안내와 관리 명령을 등록한 뒤 해당 채널에 접속하며, Stage 채널과 다른 서버·채널로 이동하지 않습니다.
