@@ -33,6 +33,26 @@ public final class ConversationMemory {
         }
     }
 
+    /**
+     * Only settings that remove jokes or casual speech. Misheard speech can at worst make Herry plainer, and a slash command or
+     * text undoes it, so unlike names or consent these may come from STT that is not reliable. Loosening stays text and slash only.
+     */
+    static boolean tightening(ConfirmedTextPreference.Change change) {
+        return change != null && ((change.kind() == Kind.AVOID_JOKE && change.value().equals("AVOID"))
+                || (change.kind() == Kind.SPEECH_AGREEMENT && change.value().equals("REFUSED")));
+    }
+    /** Whole-utterance tightening request of the speaker of this accepted turn, stored under the turn lock; null if it is not one. */
+    CompletableFuture<ConfirmedTextPreference.Change> captureTightening(ConversationTurns.Token token, Subject speaker, String text, String utteranceId) {
+        if (text == null || text.indexOf('?') >= 0 || text.indexOf('？') >= 0) return null;
+        var change = ConfirmedTextPreference.read(text);
+        if (!tightening(change)) return null;
+        synchronized (turns) {
+            if (token == null || !token.userId().equals(speaker.userId()) || !turns.matchesInput(token, text, utteranceId)) return null;
+            return store.remember(new Key(speaker, change.kind(), "", change.label()), change.value(), Evidence.EXPLICIT, utteranceId, 0)
+                    .thenApply(snapshot -> change);
+        }
+    }
+
     /** Clear live model/playback routes and shared context before erasing durable memories. */
     public CompletableFuture<Void> forget(Subject person) {
         synchronized (turns) {

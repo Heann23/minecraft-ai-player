@@ -181,6 +181,54 @@ class DiscordSessionTest {
             assertEquals(1, session.status().users()); speech(session, "A", "해리야 안녕"); assertEquals("A", request().turn().userId()); play(session);
         }
     }
+    /** Production STT never marks a result reliable (LocalSpeechProviders), so voice behavior is tested with the real value. */
+    private DiscordSession unreliable(DiscordMemoryStore store) {
+        return session(store, (pcm, language) -> new SpeechRecognitionWorker.Recognition(transcriptions.take(), false),
+                request -> { models.incrementAndGet(); requests.add(request); return "반가워요."; });
+    }
+    private List<DiscordMemory.Fact> facts(DiscordMemoryStore store, String user) {
+        return store.visible(new DiscordMemory.Subject(GUILD, "herry", user), Set.of(user)).join();
+    }
+    @Test void unreliableVoiceStopJokesIsStoredAndAnsweredWithFixedTextWithoutModel() throws Exception {
+        var store = store();
+        try (var session = unreliable(store)) {
+            session.participants(Set.of("A", "B"), Map.of()).get(3, TimeUnit.SECONDS);
+            speech(session, "A", "해리야 장난하지 마."); play(session);
+            assertEquals(0, models.get());
+            assertTrue(facts(store, "A").stream().anyMatch(fact -> fact.key().kind() == DiscordMemory.Kind.AVOID_JOKE && fact.value().equals("AVOID")));
+            assertTrue(facts(store, "B").isEmpty());
+        }
+    }
+    @Test void unreliableVoicePoliteRequestReplacesCasualConsentWithoutModel() throws Exception {
+        var store = store(); var subject = new DiscordMemory.Subject(GUILD, "herry", "A");
+        store.remember(new DiscordMemory.Key(subject, DiscordMemory.Kind.SPEECH_AGREEMENT, "", "casual"), "ALLOWED",
+                DiscordMemory.Evidence.EXPLICIT, "confirmed", 0).join();
+        assertTrue(DiscordPersonalSettings.casual(subject, facts(store, "A"), now.get()));
+        try (var session = unreliable(store)) {
+            session.participants(Set.of("A"), Map.of()).get(3, TimeUnit.SECONDS);
+            speech(session, "A", "해리야 존댓말로 해주세요"); play(session);
+            assertEquals(0, models.get());
+            assertFalse(DiscordPersonalSettings.casual(subject, facts(store, "A"), now.get()));
+        }
+    }
+    @Test void unreliableVoiceNeverLoosensAndOtherwiseStillReachesTheModel() throws Exception {
+        var store = store();
+        try (var session = unreliable(store)) {
+            session.participants(Set.of("A"), Map.of()).get(3, TimeUnit.SECONDS);
+            for (String text : List.of("해리야 장난해도 돼요", "해리야 나한테 반말해도 돼요", "해리야 장난하지 마?", "해리야 친구가 장난하지 마 라고 했어", "해리야 내 이름은 민수야")) {
+                speech(session, "A", text); request(); play(session);
+            }
+            assertEquals(5, models.get()); assertTrue(facts(store, "A").isEmpty());
+        }
+    }
+    @Test void voiceStopJokesFromSomeoneNotAddressingHerryIsIgnored() throws Exception {
+        var store = store();
+        try (var session = unreliable(store)) {
+            session.participants(Set.of("A"), Map.of()).get(3, TimeUnit.SECONDS);
+            speech(session, "A", "장난하지 마");
+            assertEquals(0, models.get()); assertNull(session.nextFrame()); assertTrue(facts(store, "A").isEmpty());
+        }
+    }
     @Test void directTextJokeBoundaryInterruptsOldVoiceAndAcknowledgesWithoutAnotherModelCall() throws Exception {
         var entered = new CountDownLatch(1); var interrupted = new CountDownLatch(1); var store = store();
         try (var session = session(store, (pcm, language) -> new SpeechRecognitionWorker.Recognition(transcriptions.take(), true), request -> {
