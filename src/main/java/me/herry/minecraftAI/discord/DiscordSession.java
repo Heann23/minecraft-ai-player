@@ -56,6 +56,8 @@ public final class DiscordSession implements AutoCloseable {
     private final JoinGreetings greetings;
     private final LongSupplier monotonicMillis, wallClock;
     private long lastHumanSpeech;
+    /** Set once before any input. Voice answers read the recent public Minecraft chat from it; it never reads voice. */
+    private volatile MinecraftChatConversation chat;
 
     /** Takes ownership of the memory store and providers' tasks. The owner closes the session on shutdown. */
     public DiscordSession(DiscordSettings settings, DiscordMemoryStore store, SpeechRecognitionWorker.Recognizer recognizer,
@@ -90,6 +92,15 @@ public final class DiscordSession implements AutoCloseable {
         }, this.diagnostic, monotonicMillis, 15_000);
         timer = Executors.newSingleThreadScheduledExecutor(r -> daemon(r, "MinecraftAI-discord-voice-tick"));
         if (automaticTick) timer.scheduleWithFixedDelay(this::tick, 50, 50, TimeUnit.MILLISECONDS);
+    }
+
+    void chat(MinecraftChatConversation lane) { chat = java.util.Objects.requireNonNull(lane); }
+    /** What was typed to Herry in Minecraft chat, before the voice transcript. Chat is public on the server, so it may be spoken about. */
+    private List<ConversationTurns.Line> withChat(List<ConversationTurns.Line> voice) {
+        var lane = chat; List<ConversationTurns.Line> typed = lane == null ? List.of() : lane.recent();
+        if (typed.isEmpty()) return voice;
+        var lines = new ArrayList<ConversationTurns.Line>(typed.size() + voice.size()); lines.addAll(typed); lines.addAll(voice);
+        return lines.size() > 128 ? lines.subList(lines.size() - 128, lines.size()) : lines;
     }
 
     /** Transport supplies humans only; display names are candidate aliases, never authority or persistent names. */
@@ -217,7 +228,7 @@ public final class DiscordSession implements AutoCloseable {
             }
             post(() -> {
                 if (ingress.valid(result.route()) && turns.isCurrent(token)) {
-                    var request = new ResponsePipeline.Request(token, boundedContext(turns.context()), boundedMemory(facts));
+                    var request = new ResponsePipeline.Request(token, boundedContext(withChat(turns.context())), boundedMemory(facts));
                     if (!responses.respond(request)) turns.finish(token);
                 }
                 return done();
@@ -360,9 +371,10 @@ public final class DiscordSession implements AutoCloseable {
         return post(() -> {
             if (memoryMaintenance) throw new IllegalStateException(DiscordCommandErrors.RESTORE_IN_PROGRESS);
             memoryMaintenance = true; greetings.clearPending(); staleNames(); turns.quiet(true); turns.resetContext(); responses.cancel(); ingress.reset(); speech.refreshRoutes();
+            var lane = chat; if (lane != null) lane.maintenance(true);
             CompletableFuture<Void> result = new CompletableFuture<>();
             store.restoreBackup(identifier).whenComplete((snapshot, error) -> post(() -> {
-                memoryMaintenance = false;
+                memoryMaintenance = false; if (lane != null) lane.maintenance(false);
                 if (error == null) result.complete(null); else result.completeExceptionally(error);
                 return done();
             }).whenComplete((ignored, failure) -> { if (failure != null) result.completeExceptionally(failure); }));
