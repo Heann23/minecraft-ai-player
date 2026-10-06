@@ -17,6 +17,17 @@ class MemorySystemTest {
     private final MemorySystem memory = new MemorySystem();
 
     @Test
+    void shaftProtectedMiningIsSeparateFromOrdinaryPathFailureAndExpiresInItsOwnWorld() {
+        memory.rememberUnreachable(NETHER, ORIGIN, 100L);
+        assertFalse(memory.contains(MemoryType.MINING_OBSTRUCTED, NETHER, ORIGIN, 100L));
+        memory.rememberMiningObstructed(OVERWORLD, ORIGIN, 100L);
+        assertTrue(memory.contains(MemoryType.MINING_OBSTRUCTED, OVERWORLD, ORIGIN, 1299L));
+        assertFalse(memory.contains(MemoryType.MINING_OBSTRUCTED, NETHER, ORIGIN, 1299L));
+        assertFalse(memory.contains(MemoryType.MINING_OBSTRUCTED, OVERWORLD, ORIGIN, 1300L));
+        assertFalse(MemoryType.MINING_OBSTRUCTED.isPersistent());
+    }
+
+    @Test
     void findsNearestEntry() {
         memory.rememberPermanent(MemoryType.TREE, OVERWORLD, new BlockPoint(20, 64, 0), 0L);
         memory.rememberPermanent(MemoryType.TREE, OVERWORLD, new BlockPoint(5, 64, 0), 0L);

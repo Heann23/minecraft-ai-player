@@ -224,7 +224,7 @@ public final class BreakBlockAction extends AbstractAction implements PrimitiveA
         }
         // 대상 자체가 광석 발판인 경우도 보호한다. 가리는 블록만 검사하면 발판의 석탄을 직접 캐 버린다.
         if (ai.getTeam().getShafts().isStep(world.getUID(), next.offset(0, 1, 0))) {
-            ai.getMemory().rememberUnreachable(world.getUID(), target, ai.getTicks());
+            ai.getMemory().rememberMiningObstructed(world.getUID(), target, ai.getTicks());
             fail("would cut the way out");
             return;
         }

@@ -169,6 +169,11 @@ public final class MemorySystem {
         return ttl;
     }
 
+    public void rememberMiningObstructed(UUID world, BlockPoint pos, long now) {
+        long ttl = rememberUnreachable(world, pos, now);
+        remember(MemoryType.MINING_OBSTRUCTED, world, pos, now, ttl);
+    }
+
     // 그곳에 실제로 도착했으면 "갈 수 없는 곳" 이력을 지운다.
     public void clearUnreachable(UUID world, BlockPoint pos) {
         unreachableStrikes.remove(new Visit(world, pos));
