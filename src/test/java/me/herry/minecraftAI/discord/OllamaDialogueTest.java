@@ -427,4 +427,18 @@ class OllamaDialogueTest {
             assertTrue(fixture.inputs.size() <= 3);
         }
     }
+    @Test void minecraftChatTurnsAreMarkedSoTheModelWritesAChatLineAndVoiceTurnsStayVoice() throws Exception {
+        try (var fixture = new Fixture()) {
+            fixture.model.respond(request(List.of()));
+            assertEquals("voice", fixture.data().get("channel").getAsString());
+            String user = "mc-" + "1".repeat(32);
+            fixture.model.respond(new ResponsePipeline.Request(new ConversationTurns.Token(java.util.UUID.randomUUID(), 1, 1, user),
+                    List.of(new ConversationTurns.Line("게임 채팅 Alex", "Herry", "Bot 뭐 해?", false, 900), new ConversationTurns.Line(user, "Herry", "안녕", false, 1000)), List.of()));
+            assertEquals("minecraft_chat", fixture.data().get("channel").getAsString());
+            assertEquals("안녕", fixture.data().get("currentUtterance").getAsString());
+            assertEquals("게임 채팅 Alex", fixture.data().getAsJsonArray("history").get(0).getAsJsonObject().get("speaker").getAsString());
+            String profile = fixture.input.get().getAsJsonArray("messages").get(0).getAsJsonObject().get("content").getAsString();
+            assertTrue(profile.contains("minecraft_chat") && profile.contains("게임 채팅") && profile.contains("1인칭"), profile);
+        }
+    }
 }

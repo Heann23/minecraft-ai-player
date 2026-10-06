@@ -95,6 +95,12 @@ class DiscordConfigurationTest {
         }
     }
     private static DiscordConfiguration read(Map<String, Object> values) { return DiscordConfiguration.read(values::get); }
+    @Test void minecraftChatTalkIsOnByDefaultAndItsTypeIsChecked() {
+        assertTrue(read(Map.of()).minecraftChat());
+        assertFalse(read(Map.<String, Object>of("conversation.minecraft-chat", false)).minecraftChat());
+        assertEquals("discord-config-invalid-conversation", assertThrows(DiscordConfiguration.Invalid.class,
+                () -> read(Map.<String, Object>of("conversation.minecraft-chat", "yes"))).diagnostic());
+    }
     @Test void unquotedSnowflakeFromAFileIsReportedAsConnection() throws Exception {
         Files.writeString(directory.resolve("discord.yml"), "guild-id: 12345678901234567\n");
         assertEquals("discord-config-invalid-connection", assertThrows(DiscordConfiguration.Invalid.class, () -> DiscordConfiguration.load(directory, () -> null)).diagnostic());

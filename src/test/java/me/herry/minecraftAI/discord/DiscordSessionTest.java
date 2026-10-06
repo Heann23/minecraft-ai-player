@@ -356,4 +356,19 @@ class DiscordSessionTest {
             speech(session, "B", "민수님 어디예요"); request(); play(session); assertEquals(3, models.get());
         }
     }
+    @Test void voiceAnswersKnowWhatWasTypedToHerryInMinecraftChatButStillAnswerTheSpokenLine() throws Exception {
+        var store = store(); var hub = new me.herry.minecraftAI.ai.comm.CommunicationHub(true, 100, () -> 0);
+        var relay = new MinecraftChatRelay(hub, () -> true, name -> null, () -> true);
+        try (var session = session(store); var chat = new MinecraftChatConversation(settings(), store, request -> "쓰이지 않음", "Bot", relay,
+                code -> fail(code), now::get, now::get)) {
+            session.chat(chat);
+            session.participants(Set.of("A"), Map.of()).get(3, TimeUnit.SECONDS);
+            chat.said("저는 지금 돌을 캐는 중이에요.", new MinecraftChatRelay.Speaker("mc-" + "1".repeat(32), "Steve", true), "Bot 뭐 해?");
+            speech(session, "A", "해리야 방금 채팅에 뭐라고 했어"); var request = request(); play(session);
+            assertEquals("A", request.turn().userId()); assertEquals("해리야 방금 채팅에 뭐라고 했어", DialogueContext.currentInput(request));
+            assertEquals(List.of("게임 채팅 Steve", "Herry", "A"), request.context().stream().map(ConversationTurns.Line::speaker).toList());
+            assertTrue(request.context().stream().anyMatch(line -> line.assistant() && line.target().equals("게임 채팅 Steve") && line.text().contains("돌을 캐는")));
+            assertEquals(1, models.get());
+        }
+    }
 }

@@ -12,7 +12,8 @@ import org.bukkit.configuration.file.YamlConfiguration;
 
 /** File I/O and pure YAML parsing only; the runtime loads this outside the server thread. */
 public record DiscordConfiguration(DiscordSettings discord, OllamaSettings dialogue, SpeechProviderSettings speech,
-                                   double minimumRms, long endSilenceMillis, boolean greetOnJoin, String targetAi, String token) {
+                                   double minimumRms, long endSilenceMillis, boolean greetOnJoin, String targetAi, String token,
+                                   boolean minecraftChat) {
     public DiscordConfiguration {
         token = token == null ? "" : token;
         java.util.Objects.requireNonNull(discord); java.util.Objects.requireNonNull(dialogue); java.util.Objects.requireNonNull(speech);
@@ -59,7 +60,9 @@ public record DiscordConfiguration(DiscordSettings discord, OllamaSettings dialo
             if (!written.isEmpty() && !written.matches("[A-Za-z0-9._-]{30,200}")) throw new IllegalArgumentException("token");
             return written;
         });
-        try { return new DiscordConfiguration(discord, dialogue, speech, value == null ? 0.01 : ((Number) value).doubleValue(), silence, greet, target, token); }
+        // Free talk in Minecraft chat needs game.target-ai too: Herry never guesses which AI player is its body.
+        boolean chat = section(DiscordStartupFailure.Reason.CONFIG_CONVERSATION, () -> DiscordSettings.bool(values, "conversation.minecraft-chat", true));
+        try { return new DiscordConfiguration(discord, dialogue, speech, value == null ? 0.01 : ((Number) value).doubleValue(), silence, greet, target, token, chat); }
         catch (IllegalArgumentException invalid) {
             String message = invalid.getMessage();
             throw new Invalid(message != null && message.startsWith("audio.") ? DiscordStartupFailure.Reason.CONFIG_AUDIO : DiscordStartupFailure.Reason.CONFIG_GAME, invalid);
