@@ -62,5 +62,23 @@ class ConversationTurnsTest {
     @Test void deletionInvalidatesAllPendingContext() { Token token = call("B", "1"); turns.forget("A"); assertFalse(turns.isCurrent(token)); assertTrue(turns.context().isEmpty()); }
     @Test void quietIgnoresFollowupsButAllowsDirectQuestion() { call("A", "1"); turns.quiet(true); assertNull(turns.accept("A", "2", "왜?", Address.UNKNOWN, false).token()); assertNotNull(call("A", "3")); }
     @Test void contextIsBoundedAndCloseIsFinal() { for (int i = 0; i < 10; i++) call("A", "" + i); assertEquals(4, turns.context().size()); turns.close(); assertNull(call("A", "last")); assertThrows(IllegalStateException.class, () -> turns.join("C")); }
+    @Test void controlAcknowledgementKeepsDeliveryButLeavesTranscriptUntouched() {
+        Token earlier = turns.accept("A", "q", "첫 질문", Address.CHARACTER, false).token();
+        Token control = turns.accept("A", "c", "답변 취소해줘", Address.CHARACTER, false).token();
+        assertFalse(turns.isCurrent(earlier)); assertTrue(turns.acknowledgeControl(control, "중단했어요."));
+        assertEquals(java.util.List.of("첫 질문"), turns.context().stream().map(Line::text).toList());
+        assertTrue(turns.played(control, "중단했어요.".length())); turns.finish(control);
+        assertEquals(java.util.List.of("첫 질문"), turns.context().stream().map(Line::text).toList()); assertFalse(turns.busy());
+    }
+    @Test void controlAcknowledgementRejectsRetiredTurnAndSecondAnswer() {
+        Token old = call("A", "1"); Token fresh = call("A", "2");
+        assertFalse(turns.acknowledgeControl(old, "늦은 응답")); assertTrue(turns.acknowledgeControl(fresh, "응답"));
+        assertFalse(turns.acknowledgeControl(fresh, "또 응답")); assertFalse(turns.generated(fresh, "또 응답"));
+    }
+    @Test void controlAcknowledgementDoesNotLeakIntoTheNextAnswer() {
+        Token control = call("A", "1"); turns.acknowledgeControl(control, "응답."); turns.played(control, 3); turns.finish(control);
+        Token next = call("A", "2"); turns.generated(next, "정상 답변"); turns.played(next, 5); turns.finish(next);
+        assertTrue(turns.context().stream().anyMatch(l -> l.assistant() && l.text().equals("정상 답변")));
+    }
     @Test void tokenFromDifferentSessionCannotReplay() { Token token = call("A", "1"); var other = new ConversationTurns(() -> now, 60_000, 4); other.join("A"); assertFalse(other.isCurrent(token)); other.close(); }
 }

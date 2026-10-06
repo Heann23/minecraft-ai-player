@@ -33,7 +33,7 @@ public final class ConversationTurns implements AutoCloseable {
     private String generated = "";
     private String currentInput = "", currentUtterance = "";
     private int heardCharacters;
-    private boolean closed, quiet, greeting;
+    private boolean closed, quiet, greeting, control;
 
     public ConversationTurns(LongSupplier clock, long followupMillis, int contextLimit) {
         if (followupMillis < 1 || contextLimit < 1 || contextLimit > 128) throw new IllegalArgumentException("turn limits");
@@ -124,6 +124,20 @@ public final class ConversationTurns implements AutoCloseable {
         return true;
     }
 
+    /**
+     * Fixed acknowledgement of a private control request. It keeps the delivery token, but neither the request nor the
+     * acknowledgement becomes transcript: the earlier conversation stays exactly as it was.
+     */
+    public synchronized boolean acknowledgeControl(Token token, String text) {
+        if (!isCurrent(token)) return false;
+        if (text == null || text.isBlank() || text.length() > 4000) throw new IllegalArgumentException("response text");
+        if (!generated.isEmpty()) return false;
+        Line last = context.peekLast();
+        if (last != null && !last.assistant() && last.speaker().equals(token.userId()) && last.text().equals(currentInput)) context.removeLast();
+        generated = text; control = true;
+        return true;
+    }
+
     /** Playback adapter reports only the prefix actually played, never the generated whole answer. */
     public synchronized boolean played(Token token, int characters) {
         if (!isCurrent(token) || characters < heardCharacters || characters > generated.length()) return false;
@@ -205,9 +219,9 @@ public final class ConversationTurns implements AutoCloseable {
     }
 
     private void invalidate() {
-        if (current != null && heardCharacters > 0) add(new Line("Herry", current.userId, generated.substring(0, heardCharacters), true, clock.getAsLong()));
+        if (current != null && heardCharacters > 0 && !control) add(new Line("Herry", current.userId, generated.substring(0, heardCharacters), true, clock.getAsLong()));
         current = null;
-        greeting = false;
+        greeting = false; control = false;
         generated = "";
         currentInput = ""; currentUtterance = "";
         heardCharacters = 0;

@@ -161,4 +161,52 @@ class DiscordTextConversationTest {
             release.countDown(); assertEquals("새 답변", fresh.get(3, TimeUnit.SECONDS).text());
         } finally { release.countDown(); }
     }
+    @Test void explicitCancelRequestInterruptsOldInferenceWithoutModelCallOrTranscript() throws Exception {
+        var entered = new CountDownLatch(1); var interrupted = new CountDownLatch(1);
+        var input = new AtomicReference<ResponsePipeline.Request>(); var calls = new java.util.concurrent.atomic.AtomicInteger();
+        try (var store = store(); var text = new DiscordTextConversation(settings(), store, request -> {
+            calls.incrementAndGet(); input.set(request);
+            if (DialogueContext.currentInput(request).equals("첫 질문")) {
+                entered.countDown();
+                try { new CountDownLatch(1).await(); }
+                catch (InterruptedException cancelled) { interrupted.countDown(); throw cancelled; }
+            }
+            return "답변이에요.";
+        }, () -> 1000)) {
+            var old = text.reply("A", "첫 질문", "one"); assertTrue(entered.await(3, TimeUnit.SECONDS));
+            var cancel = text.reply("A", "답변 취소해줘", "two").get(3, TimeUnit.SECONDS);
+            assertTrue(interrupted.await(3, TimeUnit.SECONDS)); assertTrue(old.isCancelled());
+            assertEquals(ConfirmedTextCancel.reply(true), cancel.text()); assertEquals(1, calls.get());
+            assertTrue(text.current(cancel)); text.submitted(cancel);
+            text.reply("A", "다음 질문", "three").get(3, TimeUnit.SECONDS);
+            assertEquals(java.util.List.of("첫 질문", "다음 질문"), input.get().context().stream().map(ConversationTurns.Line::text).toList());
+            assertFalse(input.get().context().stream().anyMatch(ConversationTurns.Line::assistant));
+        }
+    }
+    @Test void cancelRequestWithoutPendingAnswerSaysSoAndKeepsEarlierConversation() throws Exception {
+        var input = new AtomicReference<ResponsePipeline.Request>(); var calls = new java.util.concurrent.atomic.AtomicInteger();
+        try (var store = store(); var text = new DiscordTextConversation(settings(), store, request -> {
+            calls.incrementAndGet(); input.set(request); return "답변이에요.";
+        }, () -> 1000)) {
+            text.submitted(text.reply("A", "안녕하세요", "one").get(3, TimeUnit.SECONDS));
+            var none = text.reply("A", "해리, 답변 중단해줘.", "two").get(3, TimeUnit.SECONDS);
+            assertEquals(ConfirmedTextCancel.reply(false), none.text()); assertEquals(1, calls.get());
+            assertTrue(text.current(none)); text.submitted(none);
+            text.reply("A", "그다음은요", "three").get(3, TimeUnit.SECONDS);
+            assertEquals(java.util.List.of("안녕하세요", "답변이에요.", "그다음은요"), input.get().context().stream().map(ConversationTurns.Line::text).toList());
+            assertEquals(1, input.get().context().stream().filter(ConversationTurns.Line::assistant).count());
+        }
+    }
+    @Test void cancelRequestNeverTouchesAnotherUsersPendingAnswer() throws Exception {
+        var entered = new CountDownLatch(1); var release = new CountDownLatch(1);
+        try (var store = store(); var text = new DiscordTextConversation(settings(), store, request -> {
+            if (request.turn().userId().equals("A")) { entered.countDown(); release.await(); }
+            return "답변";
+        }, () -> 1000)) {
+            var pending = text.reply("A", "질문", "one"); assertTrue(entered.await(3, TimeUnit.SECONDS));
+            var cancel = text.reply("B", "답변 취소해줘", "one").get(3, TimeUnit.SECONDS);
+            assertEquals(ConfirmedTextCancel.reply(false), cancel.text()); assertFalse(pending.isDone());
+            release.countDown(); assertTrue(text.current(pending.get(3, TimeUnit.SECONDS)));
+        } finally { release.countDown(); }
+    }
 }
