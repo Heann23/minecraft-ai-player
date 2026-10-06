@@ -392,6 +392,8 @@ public final class DiscordSession implements AutoCloseable {
         });
         return result;
     }
+    public long lastBackupAt() { return store.lastBackupAt(); }
+    public long lastBackupFailedAt() { return store.lastBackupFailedAt(); }
     public boolean textCurrent(DiscordTextConversation.Reply reply) { return textConversation.current(reply); }
     public DiscordTextConversation.Status textStatus() { return textConversation.status(); }
     public void textSubmitted(DiscordTextConversation.Reply reply) { textConversation.submitted(reply); }

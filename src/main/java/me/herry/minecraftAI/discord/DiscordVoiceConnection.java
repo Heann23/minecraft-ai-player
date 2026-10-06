@@ -35,6 +35,7 @@ public final class DiscordVoiceConnection extends ListenerAdapter implements Dis
     private final java.util.concurrent.ExecutorService configCheck = java.util.concurrent.Executors.newSingleThreadExecutor(task -> {
         Thread thread = new Thread(task, "MinecraftAI-discord-config"); thread.setDaemon(true); return thread; });
     private final Consumer<String> diagnostic;
+    private final DiagnosticCounters counters = new DiagnosticCounters();
     private final LocalSpeechProviders speech;
     private final OllamaDialogue dialogue;
     private final DiscordSession session;
@@ -67,7 +68,8 @@ public final class DiscordVoiceConnection extends ListenerAdapter implements Dis
         } catch (Exception | LinkageError failed) { connection.close(); throw failed; }
     }
     private DiscordVoiceConnection(Path directory, DiscordConfiguration configuration, Consumer<String> diagnostic, DiscordGameState game) throws Exception {
-        this.configuration = configuration; this.directory = directory; this.diagnostic = diagnostic; connectWanted = configuration.discord().autoConnect();
+        Consumer<String> counted = code -> { counters.record(code); diagnostic.accept(code); };
+        this.configuration = configuration; this.directory = directory; this.diagnostic = counted; connectWanted = configuration.discord().autoConnect();
         this.game = game;
         dialogue = new OllamaDialogue(configuration.dialogue(), System::currentTimeMillis,
                 game == null ? () -> new DiscordGameState.View(DiscordGameState.Code.NOT_CONFIGURED, null) : game::view);
@@ -75,14 +77,14 @@ public final class DiscordVoiceConnection extends ListenerAdapter implements Dis
         try {
             createdSpeech = new LocalSpeechProviders(configuration.speech());
             store = new DiscordMemoryStore(directory.resolve("discord"), configuration.discord().backup(), System::currentTimeMillis);
-            if (store.status().recovered()) diagnostic.accept("discord-memory-recovered-from-backup");
+            if (store.status().recovered()) counted.accept("discord-memory-recovered-from-backup");
             var grounded = new GroundedGameDialogue(dialogue,
                     game == null ? () -> new DiscordGameState.View(DiscordGameState.Code.NOT_CONFIGURED, null) : game::view,
                     configuration.discord(), System::currentTimeMillis);
             var personal = new GroundedPersonalDialogue(grounded, configuration.discord(), System::currentTimeMillis);
-            session = new DiscordSession(configuration.discord(), store, createdSpeech, personal, createdSpeech, diagnostic,
+            session = new DiscordSession(configuration.discord(), store, createdSpeech, personal, createdSpeech, counted,
                     System::currentTimeMillis, () -> TimeUnit.NANOSECONDS.toMillis(System.nanoTime()), true, configuration.capturePolicy(), configuration.greetOnJoin());
-            speech = createdSpeech; audio = new JdaAudioAdapter(session, configuration.minimumRms(), diagnostic);
+            speech = createdSpeech; audio = new JdaAudioAdapter(session, configuration.minimumRms(), counted);
         } catch (Exception | LinkageError failed) {
             if (store != null) store.close(); if (createdSpeech != null) createdSpeech.close(); dialogue.close(); throw failed;
         }
@@ -261,6 +263,12 @@ public final class DiscordVoiceConnection extends ListenerAdapter implements Dis
                 yield session.confirmedJokes(user, allowed, source).thenApply(ignored -> allowed
                         ? "가벼운 장난을 허용하는 설정을 저장했어요. 진지한 대화에서는 장난을 줄일게요."
                         : "장난 없이 담백하게 이야기하는 설정을 저장했어요. /herry joke allowed:true로 바꿀 수 있어요.");
+            }
+            case "diagnose" -> {
+                var status = session.status(); var guild = event.getGuild();
+                yield java.util.concurrent.CompletableFuture.completedFuture(DiscordDiagnostics.describe(new DiscordDiagnostics.Snapshot(
+                        jda == null ? "없음" : jda.getStatus().name(), guild.getAudioManager().isConnected(), audio.listening(), connectWanted,
+                        status.memoryFailure(), session.lastBackupAt(), session.lastBackupFailedAt(), System.currentTimeMillis(), counters.describe())));
             }
             case "config" -> java.util.concurrent.CompletableFuture.supplyAsync(() -> DiscordConfigurationDiff.check(configuration,
                     () -> DiscordConfiguration.load(directory, () -> null)), configCheck);
