@@ -30,15 +30,17 @@ class GroundedGameDialogueTest {
             String answer = model.respond(request(input, List.of()));
             assertTrue(answer.contains("자율 행동이 중지")); assertTrue(answer.contains("19.5")); assertTrue(answer.contains("17"));
             assertFalse(answer.contains("돌을 캐")); assertTrue(answer.length() < 400);
+            assertTrue(answer.startsWith("저는 지금"), answer); assertFalse(answer.contains("게임 AI") || answer.contains("Bot"), answer);
         }
     }
     @Test void locationAndExactItemCountsUseOnlyConfiguredSnapshot() throws Exception {
         var model = grounded(state("RUNNING", "돌이 필요해서요"));
         String where = model.respond(request("해리님, 어디 계세요?", List.of()));
-        assertTrue(where.contains("오버월드")); assertTrue(where.contains("3, 64, -7"));
+        assertTrue(where.contains("오버월드")); assertTrue(where.contains("3, 64, -7")); assertTrue(where.startsWith("저는 지금") && where.endsWith("에 있어요."), where);
         assertTrue(model.respond(request("다이아몬드 몇 개 가지고 있나요?", List.of())).contains("2개"));
-        assertTrue(model.respond(request("현재 석탄 몇개 있어?", List.of())).contains("0개"));
-        assertTrue(model.respond(request("조약돌은 가지고 있어요?", List.of())).contains("12개"));
+        assertEquals("지금 석탄은 하나도 없어요.", model.respond(request("현재 석탄 몇개 있어?", List.of())));
+        assertEquals("저는 지금 돌을 캐는 중이에요. 체력은 19.5, 허기는 17 남았어요.", model.respond(request("해리야. 지금 뭐 해?", List.of())));
+        assertEquals("지금 조약돌은 12개 가지고 있어요.", model.respond(request("조약돌은 가지고 있어요?", List.of())));
         assertTrue(model.respond(request("왜 그 일 하고 계세요?", List.of())).contains("돌이 필요해서요"));
     }
     @Test void everyUnavailableStateHasAnExplicitUnknownReplyAndNoInferenceOrZeroItemClaim() throws Exception {
@@ -47,7 +49,7 @@ class GroundedGameDialogueTest {
             var model = new GroundedGameDialogue(request -> { fail("unknown game question reached model"); return ""; }, () -> new DiscordGameState.View(code, null), settings(), () -> 2000);
             for (String question : List.of("지금 뭐하고 있어요?", "다이아몬드 몇개 있어?", "어디야?")) {
                 String answer = model.respond(request(question, List.of()));
-                assertTrue(answer.contains("확인할 수 없어요")); assertFalse(answer.contains("0개"));
+                assertTrue(answer.contains("확인할 수 없어요")); assertFalse(answer.contains("0개") || answer.contains("없어요.") && answer.contains("하나도"));
             }
         }
     }
@@ -71,7 +73,8 @@ class GroundedGameDialogueTest {
     }
     @Test void confirmedStyleIsBoundToExactUserGuildCharacterAndExpiryAndRefusalWins() throws Exception {
         var model = grounded(state("STOPPED", "")); String guild = settings().guildId();
-        assertTrue(model.respond(request("지금 뭐해요?", List.of(style("A", guild, "ALLOWED", 0)))).contains("상태야."));
+        String casual = model.respond(request("지금 뭐해요?", List.of(style("A", guild, "ALLOWED", 0))));
+        assertTrue(casual.contains("상태야.")); assertTrue(casual.startsWith("나는 지금") && casual.endsWith("남았어."), casual);
         for (var facts : List.of(List.of(style("B", guild, "ALLOWED", 0)), List.of(style("A", "another-guild", "ALLOWED", 0)),
                 List.of(style("A", guild, "ALLOWED", 1500)), List.of(new DiscordMemory.Fact(new DiscordMemory.Key(new DiscordMemory.Subject(guild, "herry", "A"), DiscordMemory.Kind.SPEECH_AGREEMENT, "", "unrelated"), "ALLOWED", DiscordMemory.Evidence.EXPLICIT, "source", 1000, 0, 1)), List.of(style("A", guild, "ALLOWED", 0), style("A", guild, "REFUSED", 0))))
             assertTrue(model.respond(request("지금 뭐해요?", facts)).contains("상태예요."));
