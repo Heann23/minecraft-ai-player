@@ -171,6 +171,7 @@ Windows 서비스로 실행할 경우 서비스 실행 계정의 환경에 설�
 | `/herry forget [scope]` | 본인의 기억과 임시 대화 문맥 삭제. 범위를 고르지 않으면 전체, 호칭·말투·장난 설정 중 하나만 고를 수도 있음 |
 | `/herry quiet`, `/herry listen` | 서버 관리자: 음성 수신·답변 중단 또는 재개 |
 | `/herry leave`, `/herry resume` | 서버 관리자: 퇴장 또는 지정 채널 접속 재개 |
+| `/herry diagnose` | 서버 관리자: 게이트웨이·음성·수신 상태, 마지막 백업 시각, 재시작 이후 진단 코드별 횟수(본문·ID·경로 없음) |
 | `/herry config` | 서버 관리자: `discord.yml`이 유효한지, 실행 중인 설정과 달라 재시작이 필요한지만 확인(적용하지 않음) |
 | `/herry backup`, `/herry backups` | 서버 관리자: 확정 기억 수동 백업·최근 백업 식별자 확인 |
 | `/herry restore backup:<식별자> confirm:true` | 서버 관리자: 대화를 멈추고 선택한 기억 백업 복원 |

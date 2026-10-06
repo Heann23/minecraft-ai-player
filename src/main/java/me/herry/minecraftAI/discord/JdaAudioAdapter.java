@@ -29,6 +29,7 @@ public final class JdaAudioAdapter implements AudioReceiveHandler, AudioSendHand
         if (!value) { users = Set.of(); observe(session.quiet(true)); observe(session.participants(Set.of(), Map.of())); }
         else observe(session.quiet(muted));
     }
+    public synchronized boolean listening() { return !closed && !muted; }
     public synchronized CompletableFuture<Void> listening(boolean enabled) {
         if (closed) return CompletableFuture.failedFuture(new IllegalStateException(DiscordCommandErrors.AUDIO_CLOSED));
         if (enabled && restoring) return CompletableFuture.failedFuture(new IllegalStateException(DiscordCommandErrors.RESTORE_IN_PROGRESS));
