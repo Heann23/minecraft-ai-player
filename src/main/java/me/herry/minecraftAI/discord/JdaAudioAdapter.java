@@ -30,14 +30,14 @@ public final class JdaAudioAdapter implements AudioReceiveHandler, AudioSendHand
         else observe(session.quiet(muted));
     }
     public synchronized CompletableFuture<Void> listening(boolean enabled) {
-        if (closed) return CompletableFuture.failedFuture(new IllegalStateException("Discord audio closed"));
-        if (enabled && restoring) return CompletableFuture.failedFuture(new IllegalStateException("memory restore in progress"));
+        if (closed) return CompletableFuture.failedFuture(new IllegalStateException(DiscordCommandErrors.AUDIO_CLOSED));
+        if (enabled && restoring) return CompletableFuture.failedFuture(new IllegalStateException(DiscordCommandErrors.RESTORE_IN_PROGRESS));
         muted = !enabled; pending = null;
         return session.quiet(!enabled);
     }
     public synchronized CompletableFuture<Void> restoreBackup(String identifier) {
         MemoryFiles.requireBackupName(identifier);
-        if (closed || restoring) return CompletableFuture.failedFuture(new IllegalStateException("Discord restore unavailable"));
+        if (closed || restoring) return CompletableFuture.failedFuture(new IllegalStateException(DiscordCommandErrors.RESTORE_UNAVAILABLE));
         restoring = true; muted = true; pending = null;
         return session.restoreBackup(identifier).whenComplete((ignored, failed) -> {
             synchronized (JdaAudioAdapter.this) { restoring = false; }

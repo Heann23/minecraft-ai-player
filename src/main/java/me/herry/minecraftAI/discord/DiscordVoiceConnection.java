@@ -214,8 +214,8 @@ public final class DiscordVoiceConnection extends ListenerAdapter implements Dis
                 return;
             }
             try { result = command(event); }
-            catch (RuntimeException invalid) { result = java.util.concurrent.CompletableFuture.completedFuture("입력값을 확인해 주세요. 호칭은 한글·영문 1~20자로 입력해요."); }
-            result.whenComplete((message, failed) -> hook.editOriginal(failed == null ? message : "처리하지 못했어요. 연결이나 기억 저장 상태를 확인해 주세요.")
+            catch (RuntimeException thrown) { result = java.util.concurrent.CompletableFuture.completedFuture(DiscordCommandErrors.synchronous(event.getSubcommandName(), thrown)); }
+            result.whenComplete((message, failed) -> hook.editOriginal(failed == null ? message : DiscordCommandErrors.failure(failed))
                     .queue(ignored -> {}, replyFailure -> diagnostic.accept("discord-command-reply-failed")));
         }, failed -> hook.editOriginal("현재 서버 참가자와 권한을 확인하지 못했어요.").queue(ignored -> {}, replyFailure -> diagnostic.accept("discord-command-reply-failed"))),
                 failed -> diagnostic.accept("discord-command-ack-failed"));

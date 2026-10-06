@@ -171,7 +171,7 @@ public final class DiscordSession implements AutoCloseable {
 
     public CompletableFuture<Void> quiet(boolean value) {
         return post(() -> {
-            if (memoryMaintenance && !value) throw new IllegalStateException("memory restore in progress");
+            if (memoryMaintenance && !value) throw new IllegalStateException(DiscordCommandErrors.RESTORE_IN_PROGRESS);
             if (value) greetings.clearPending();
             turns.quiet(value); responses.cancel(); ingress.reset(); speech.refreshRoutes(); return done();
         });
@@ -179,7 +179,7 @@ public final class DiscordSession implements AutoCloseable {
     public CompletableFuture<Void> forget(String userId) {
         var subject = new DiscordMemory.Subject(settings.guildId(), settings.characterId(), userId);
         return post(() -> {
-            if (memoryMaintenance) throw new IllegalStateException("memory restore in progress");
+            if (memoryMaintenance) throw new IllegalStateException(DiscordCommandErrors.RESTORE_IN_PROGRESS);
             greetings.clearPending();
             textConversation.forget(userId);
             ingress.reset(); speech.refreshRoutes(); turns.cancelCurrent(); responses.cancel();
@@ -199,7 +199,7 @@ public final class DiscordSession implements AutoCloseable {
         var subject = new DiscordMemory.Subject(settings.guildId(), settings.characterId(), userId);
         var key = target.key(subject);
         return post(() -> {
-            if (memoryMaintenance) throw new IllegalStateException("memory restore in progress");
+            if (memoryMaintenance) throw new IllegalStateException(DiscordCommandErrors.RESTORE_IN_PROGRESS);
             greetings.clearPending(); textConversation.forget(userId);
             ingress.reset(); speech.refreshRoutes(); responses.cancel();
             return memory.forget(key);
@@ -228,7 +228,7 @@ public final class DiscordSession implements AutoCloseable {
         var key = new DiscordMemory.Key(subject, kind, "", label);
         if (interactionId == null || !interactionId.matches("[A-Za-z0-9_-]{1,80}")) throw new IllegalArgumentException("confirmation source");
         return post(() -> {
-            if (memoryMaintenance) throw new IllegalStateException("memory restore in progress");
+            if (memoryMaintenance) throw new IllegalStateException(DiscordCommandErrors.RESTORE_IN_PROGRESS);
             greetings.clearPending();
             textConversation.forget(userId);
             ingress.reset(); speech.refreshRoutes(); turns.forget(userId); responses.cancel();
@@ -238,7 +238,7 @@ public final class DiscordSession implements AutoCloseable {
     private CompletableFuture<Void> beforeTextPreference(String user, java.util.function.BooleanSupplier current) {
         return post(() -> {
             if (!current.getAsBoolean()) return done();
-            if (memoryMaintenance) throw new IllegalStateException("memory restore in progress");
+            if (memoryMaintenance) throw new IllegalStateException(DiscordCommandErrors.RESTORE_IN_PROGRESS);
             greetings.clearPending(); ingress.reset(); speech.refreshRoutes(); turns.forget(user); responses.cancel();
             return done();
         });
@@ -250,7 +250,7 @@ public final class DiscordSession implements AutoCloseable {
     private <T> CompletableFuture<T> memoryOperation(Supplier<CompletableFuture<T>> operation) {
         CompletableFuture<T> result = new CompletableFuture<>();
         post(() -> {
-            if (memoryMaintenance) throw new IllegalStateException("memory restore in progress");
+            if (memoryMaintenance) throw new IllegalStateException(DiscordCommandErrors.RESTORE_IN_PROGRESS);
             return operation.get().thenAccept(result::complete);
         }).whenComplete((ignored, error) -> { if (error != null) result.completeExceptionally(error); });
         return result;
@@ -259,7 +259,7 @@ public final class DiscordSession implements AutoCloseable {
     public CompletableFuture<Void> restoreBackup(String identifier) {
         MemoryFiles.requireBackupName(identifier);
         return post(() -> {
-            if (memoryMaintenance) throw new IllegalStateException("memory restore in progress");
+            if (memoryMaintenance) throw new IllegalStateException(DiscordCommandErrors.RESTORE_IN_PROGRESS);
             memoryMaintenance = true; textConversation.reset(); greetings.clearPending(); turns.quiet(true); turns.resetContext(); responses.cancel(); ingress.reset(); speech.refreshRoutes();
             CompletableFuture<Void> result = new CompletableFuture<>();
             store.restoreBackup(identifier).whenComplete((snapshot, error) -> post(() -> {
@@ -291,7 +291,7 @@ public final class DiscordSession implements AutoCloseable {
         });
         post(() -> {
             if (result.isCancelled()) return done();
-            if (memoryMaintenance) throw new IllegalStateException("memory restore in progress");
+            if (memoryMaintenance) throw new IllegalStateException(DiscordCommandErrors.RESTORE_IN_PROGRESS);
             var pending = textConversation.reply(user, text, interaction); active.set(pending);
             if (result.isCancelled()) pending.cancel(true);
             return pending.thenAccept(reply -> { if (!result.complete(reply)) textConversation.discard(reply); });
@@ -336,7 +336,7 @@ public final class DiscordSession implements AutoCloseable {
     }
     private CompletableFuture<Void> post(Supplier<? extends CompletionStage<Void>> action) {
         CompletableFuture<Void> result = new CompletableFuture<>();
-        if (closed.get()) return CompletableFuture.failedFuture(new IllegalStateException("Discord session closed"));
+        if (closed.get()) return CompletableFuture.failedFuture(new IllegalStateException(DiscordCommandErrors.SESSION_CLOSED));
         pendingEvents.add(result); result.whenComplete((ignored, error) -> pendingEvents.remove(result));
         Event task = new Event(action, result);
         try { events.execute(task); }
