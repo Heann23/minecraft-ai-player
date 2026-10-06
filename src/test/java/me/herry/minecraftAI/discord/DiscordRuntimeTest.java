@@ -37,6 +37,23 @@ class DiscordRuntimeTest {
             assertEquals(DiscordRuntime.State.FAILED, runtime.started().get(3, TimeUnit.SECONDS)); assertEquals(List.of("discord-start-failed"), codes);
         }
     }
+    @Test void configurationProblemsReportTheirFixedCodeAndNeverTheValue() throws Exception {
+        List<DiscordConfiguration.Invalid> invalid = List.of(
+                new DiscordConfiguration.Invalid(DiscordStartupFailure.Reason.CONFIG_LLM, new IllegalArgumentException("secret-token model")));
+        for (var failure : invalid) {
+            List<String> codes = new CopyOnWriteArrayList<>();
+            try (var runtime = new DiscordRuntime(() -> { throw failure; }, key -> "secret-token",
+                    (settings, token) -> { throw new AssertionError("provider opened after invalid configuration"); }, codes::add)) {
+                assertEquals(DiscordRuntime.State.FAILED, runtime.started().get(3, TimeUnit.SECONDS));
+                assertEquals(List.of("discord-config-invalid-llm"), codes); assertFalse(codes.getFirst().contains("secret"));
+            }
+        }
+        List<String> codes = new CopyOnWriteArrayList<>();
+        try (var runtime = new DiscordRuntime(() -> { throw new DiscordStartupFailure(DiscordStartupFailure.Reason.CONFIG_SYNTAX); }, key -> "secret-token",
+                (settings, token) -> { throw new AssertionError("provider opened after invalid configuration"); }, codes::add)) {
+            assertEquals(DiscordRuntime.State.FAILED, runtime.started().get(3, TimeUnit.SECONDS)); assertEquals(List.of("discord-config-syntax"), codes);
+        }
+    }
     @Test void knownStartupFailuresExposeOnlyFixedDiagnosticCodes() throws Exception {
         for (var reason : DiscordStartupFailure.Reason.values()) {
             List<String> codes = new CopyOnWriteArrayList<>();
