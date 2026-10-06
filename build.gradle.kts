@@ -1,13 +1,15 @@
 import java.util.Properties
+import java.util.zip.ZipFile
 
 plugins {
     java
     // NMS(서버 내부 코드) 접근을 위해 필요하다. Maven 에서는 지원되지 않는다.
     id("io.papermc.paperweight.userdev") version "2.0.0-beta.24"
+    id("com.gradleup.shadow") version "9.6.1"
 }
 
 group = "me.herry"
-version = "1.8.1"
+version = "1.9.2"
 description = "Autonomous AI player"
 
 java {
@@ -22,6 +24,14 @@ repositories {
 dependencies {
     // 테스트 서버(paper-26.3-140)와 동일한 빌드에 맞춘다.
     paperweight.paperDevBundle("26.3.build.140-beta")
+
+    implementation("net.dv8tion:JDA:6.7.0")
+    implementation("com.google.code.gson:gson:2.14.0")
+    implementation("club.minnced:jdave-api:0.1.8")
+    runtimeOnly("club.minnced:jdave-native-win-x86-64:0.1.8")
+    runtimeOnly("club.minnced:jdave-native-linux-x86-64:0.1.8")
+    runtimeOnly("club.minnced:jdave-native-linux-aarch64:0.1.8")
+    runtimeOnly("club.minnced:jdave-native-darwin:0.1.8")
 
     testImplementation(platform("org.junit:junit-bom:5.13.4"))
     testImplementation("org.junit.jupiter:junit-jupiter")
@@ -50,6 +60,7 @@ tasks {
 
     test {
         useJUnitPlatform()
+        jvmArgs("--enable-native-access=ALL-UNNAMED")
     }
 }
 
@@ -66,8 +77,9 @@ val pluginsDir: File? = run {
 }
 
 // 폴더가 설정되어 있고 실제로 있을 때만 실행된다. 다른 PC 나 CI 에서는 건너뛴다.
-val deployPlugin by tasks.registering {
-    val jarFile = tasks.jar.flatMap { it.archiveFile }
+val deployPlugin = tasks.register("deployPlugin") {
+    val jarFile = tasks.shadowJar.flatMap { it.archiveFile }
+    dependsOn(tasks.shadowJar)
     val target = pluginsDir
     onlyIf { target != null && target.isDirectory }
     doLast {
@@ -82,7 +94,52 @@ val deployPlugin by tasks.registering {
     }
 }
 
-// jar 는 항상 build/libs 에 만들어지고, 테스트 서버 폴더가 설정되어 있으면 그쪽에도 복사한다.
+// Discord 네이티브·서비스를 포함한 파일이 배포 대상이다. Paper/NMS는 compileOnly로 유지한다.
 tasks.jar {
+    archiveClassifier = "plain"
+}
+tasks.shadowJar {
+    archiveClassifier = ""
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    mergeServiceFiles()
+    filesMatching("META-INF/services/**") { duplicatesStrategy = DuplicatesStrategy.INCLUDE }
+    filesMatching("META-INF/*.kotlin_module") { duplicatesStrategy = DuplicatesStrategy.INCLUDE }
+    exclude("META-INF/*.SF", "META-INF/*.RSA", "META-INF/*.DSA", "**/module-info.class")
+    dependencies { exclude(dependency("org.slf4j:slf4j-api:.*")) }
+    relocate("com.google.gson", "me.herry.minecraftAI.discord.internal.gson")
+    relocate("com.fasterxml.jackson", "me.herry.minecraftAI.discord.internal.jackson")
+    failOnDuplicateEntries = true
     finalizedBy(deployPlugin)
 }
+
+// 실제 배포 파일에 음성 네이티브와 adapter가 있고 서버 자체가 섞이지 않았는지 검사한다.
+val verifyDiscordJar = tasks.register("verifyDiscordJar") {
+    val artifact = tasks.shadowJar.flatMap { it.archiveFile }
+    dependsOn(tasks.shadowJar)
+    inputs.file(artifact)
+    doLast {
+        ZipFile(artifact.get().asFile).use { zip ->
+            val entries = zip.entries().asSequence().map { it.name }.toSet()
+            listOf("net/dv8tion/jda/api/JDA.class", "club/minnced/discord/jdave/interop/JDaveSessionFactory.class",
+                "me/herry/minecraftAI/discord/internal/gson/Strictness.class", "club/minnced/opus/util/OpusLibrary.class",
+                "natives/win-x86-64/dave.dll", "natives/linux-x86-64/libdave.so",
+                "natives/linux-aarch64/libdave.so", "natives/darwin/libdave.dylib").forEach {
+                check(it in entries) { "Discord runtime resource missing: $it" }
+            }
+            check(entries.none { it.startsWith("org/bukkit/") || it.startsWith("net/minecraft/") }) {
+                "Paper/NMS must not be packaged in the plugin"
+            }
+        }
+    }
+}
+tasks.check { dependsOn(verifyDiscordJar) }
+
+val verifyDiscordRuntime = tasks.register<JavaExec>("verifyDiscordRuntime") {
+    dependsOn(tasks.shadowJar, tasks.compileTestJava)
+    mainClass = "me.herry.minecraftAI.discord.DiscordJarSmoke"
+    classpath = files(sourceSets.test.get().output.classesDirs, tasks.shadowJar.flatMap { it.archiveFile },
+        configurations.runtimeClasspath.get().filter { it.name.startsWith("slf4j-api-") })
+    javaLauncher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(25) }
+    jvmArgs("--enable-native-access=ALL-UNNAMED")
+}
+tasks.check { dependsOn(verifyDiscordRuntime) }

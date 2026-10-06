@@ -1,0 +1,67 @@
+# Discord 설정만 관리한다. config.yml의 게임 설정과 독립적이다.
+# 실제 접속에는 봇 토큰과 설치한 로컬 STT·Ollama·Piper 서버가 필요하다.
+# 서버 JVM 옵션: --enable-native-access=ALL-UNNAMED (Java 25 DAVE/Opus).
+enabled: false
+# 봇 토큰을 아래 token 에 그대로 붙여 넣는다. 이 파일을 다른 사람에게 보내거나 공개 저장소에 올리지 않는다.
+token: ''
+# token 이 비어 있으면 이 이름의 환경 변수에서 읽는다 (파일에 적고 싶지 않을 때).
+token-env: MINECRAFTAI_DISCORD_TOKEN
+# Discord ID는 숫자가 아니라 따옴표로 감싼 문자열로 쓴다.
+guild-id: ''
+voice-channel-id: ''
+character-id: herry
+auto-connect: true
+
+game:
+  # 선택 기능: Discord에서 상태를 읽을 게임 AI 이름. /ai status에 표시된 이름을 정확히 지정한다.
+  # 빈 값이면 게임 상태를 공유하지 않는다. character-id/Discord 이름으로 대상을 추측하지 않는다.
+  # /herry game은 최근 상태만 확인하며 게임 행동을 시키지 않는다.
+  target-ai: ''
+
+audio:
+  # RMS 에너지를 사용한 초기 잡음 구분. 음성 인식 신뢰도가 아니며 실제 마이크로 조정한다.
+  minimum-rms: 0.01
+  # 발화 종료까지 기다리는 무음 시간. 짧은 문장 사이에서 호출어가 잘리는 것을 줄인다.
+  # 길게 늘리면 응답 시작도 늦어진다. 실제 마이크로 100~2500ms 범위에서 조정한다.
+  end-silence-millis: 1000
+
+conversation:
+  # /herry status는 본문 없이 텍스트 처리·대기·완료·취소·실패 횟수를 표시한다(재시작 때 초기화).
+  # /herry me는 모델을 호출하지 않고 본인이 확정한 이름·말투·장난 설정만 개인 회신으로 보여 준다.
+  # 개인 말투: /herry speech allowed:true|false, 개인 장난 설정: /herry joke allowed:true|false.
+  # 본인이 직접 확정한 설정만 기억하며 /herry forget으로 이름·개인 설정·임시 문맥을 함께 지운다.
+  # 개인 텍스트의 "해리님, 장난 그만해 주세요" / "다시 장난해도 돼요"도 최소 설정만 확정한다.
+  # 음성 인식·인용문·타인 설명·모델의 응답은 이 경로에서 설정을 저장하지 않는다.
+  # "제 이름은 민수예요", "저한테 반말해도 돼요", "존댓말로 말해 주세요"도 직접 확정한다.
+  # 대상 없는 "응/네"나 "반말해도 돼요?" 같은 질문으로 말투 허락을 추측하지 않는다.
+  # 새 참가자에게 대화·음성 인식이 멈춘 뒤 짧게 인사한다. 잦은 재입장은 반복하지 않는다.
+  greet-on-join: true
+  followup-seconds: 60
+  context-lines: 32
+
+backup:
+  enabled: true
+  interval-seconds: 600
+  periodic-retention: 24
+  daily-retention: 7
+  max-megabytes: 128
+
+# 로컬 Ollama 제공자 연결 설정. 모델 설치·봇 접속은 아직 별도 단계다.
+# 설치한 한국어 대화 모델 이름을 지정하며 자동 다운로드하지 않는다.
+providers:
+  llm:
+    # Ollama 0.35.1 이상: 문맥의 자동 잘라내기/교체를 금지하고 초과 시 오래된 대화만 제한적으로 줄인다.
+    # 재시도 전체가 timeout-seconds 안에서 끝나며 질문·말투/장난 설정·유효한 게임 자료는 유지한다.
+    endpoint: 'http://127.0.0.1:11434/api/chat'
+    model: ''
+    timeout-seconds: 15
+    context-tokens: 4096
+    output-tokens: 160
+  stt:
+    endpoint: 'http://127.0.0.1:8080/inference'
+    timeout-seconds: 15
+  tts:
+    endpoint: 'http://127.0.0.1:5000/synthesize'
+    # 설치한 한국어 Piper 음성 이름. 비워 두면 로컬 서버가 선택한 음성 사용.
+    voice: ''
+    timeout-seconds: 10

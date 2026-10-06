@@ -124,6 +124,35 @@ public final class CommunicationHub {
         return answered;
     }
 
+    /** Exact target routing for external adapters. Original input identity is preserved in replies. */
+    public int receiveTo(String targetName, IncomingMessage message) {
+        return receiveTo(targetName, message, intent -> true);
+    }
+
+    /** A question-only adapter can reject a mutating intent before invoking the participant. */
+    public int receiveTo(String targetName, IncomingMessage message, java.util.function.Predicate<Intent> allowed) {
+        if (!enabled || targetName == null) return 0;
+        Participant participant = participants.get(key(targetName));
+        if (participant == null) return 0;
+        String lower = message.text().toLowerCase(Locale.ROOT);
+        String name = key(participant.name());
+        IncomingMessage body = lower.contains(name) ? message.withText(lower.replace(name, " ")) : message;
+        Intent intent = interpreter.interpret(body);
+        if (intent == null) intent = Intent.NONE;
+        if (!allowed.test(intent)) return 0;
+        List<String> lines = participant.respond(message, intent);
+        if (lines.isEmpty()) return 0;
+        for (String line : lines) reply(OutgoingMessage.reply(participant.name(), line, message));
+        return 1;
+    }
+
+    /** Main-thread read-only snapshot; names are immutable strings, never AI/world objects. */
+    public List<String> participantNames() {
+        return participants.values().stream().map(Participant::name).toList();
+    }
+
+    public boolean enabled() { return enabled; }
+
     // 대답은 질문이 온 곳으로 돌려보낸다. 그런 채널이 없으면 모든 채널에 보낸다.
     private void reply(OutgoingMessage message) {
         boolean delivered = false;
