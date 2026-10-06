@@ -21,6 +21,21 @@ class CombatSystemTest {
         return new Hostile(ThreatType.ZOMBIE, distance, false);
     }
 
+    // 실제 철기 회귀: 체력6·허기6·돌 도끼로 좀비 한 마리에게 먼저 다가가다 음식 탐색을 취소하고 죽었다.
+    @Test
+    void lowHealthPreventsStartingAMarginalFightAndStandingGround() {
+        CombatSystem configured = new CombatSystem(16, 4, 8);
+        double hungryAxe = STONE_SWORD * CombatSystem.readiness(0, 6);
+        List<Hostile> single = List.of(zombie(15));
+        assertTrue(CombatSystem.strength(6, 20, hungryAxe) > ThreatType.ZOMBIE.danger());
+        Decision assessment = configured.decide(6, 20, hungryAxe, single);
+        assertEquals(Decision.FLEE, assessment);
+        assertFalse(CombatSystem.canStandGround(assessment, false, false, single));
+        assertEquals(Decision.FLEE, configured.decide(8, 20, STONE_SWORD, single));
+        assertEquals(Decision.FIGHT, configured.decide(9, 20, STONE_SWORD, single));
+        assertEquals(Decision.NONE, configured.decide(6, 20, hungryAxe, List.of(zombie(21))));
+    }
+
     // 회귀: 도주가 실패하자 체력 8로 여섯 마리에게 맞서면서, 막 시작한 피신굴을 취소했다.
     @Test
     void doesNotStandGroundWhenTheCurrentFightIsTooDangerous() {

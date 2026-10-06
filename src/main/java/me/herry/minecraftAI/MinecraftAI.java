@@ -13,6 +13,7 @@ import me.herry.minecraftAI.discord.DiscordConfiguration;
 import me.herry.minecraftAI.discord.DiscordRuntime;
 import me.herry.minecraftAI.discord.DiscordVoiceConnection;
 import me.herry.minecraftAI.discord.DiscordGameState;
+import me.herry.minecraftAI.discord.MinecraftChatRelay;
 import me.herry.minecraftAI.ai.comm.GameStateReader;
 import org.bukkit.Bukkit;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -25,6 +26,8 @@ public final class MinecraftAI extends JavaPlugin {
     private DiscordRuntime discord;
     private DiscordGameState discordGame;
     private org.bukkit.scheduler.BukkitTask discordGameTask;
+    private MinecraftChatRelay discordChat;
+    private org.bukkit.scheduler.BukkitTask discordChatTask;
 
     @Override
     public void onEnable() {
@@ -51,8 +54,15 @@ public final class MinecraftAI extends JavaPlugin {
                 () -> java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime()), discordDiagnostic);
         discordGame = gameState;
         discordGameTask = Bukkit.getScheduler().runTaskTimer(this, gameState::refresh, 20, 20);
+        var chatRelay = new MinecraftChatRelay(hub, Bukkit::isPrimaryThread,
+                name -> {
+                    var player = Bukkit.getPlayerExact(name);
+                    return player == null ? null : player.getUniqueId();
+                }, Bukkit::getOnlineMode);
+        discordChat = chatRelay;
+        discordChatTask = Bukkit.getScheduler().runTaskTimer(this, chatRelay::drain, 2, 2);
         discord = new DiscordRuntime(() -> DiscordConfiguration.load(discordDirectory, () -> getResource("discord.yml")),
-                System::getenv, (settings, token) -> DiscordVoiceConnection.open(discordDirectory, settings, token, discordDiagnostic, gameState), discordDiagnostic);
+                System::getenv, (settings, token) -> DiscordVoiceConnection.open(discordDirectory, settings, token, discordDiagnostic, gameState, chatRelay), discordDiagnostic);
 
         // 플레이어를 접속시키는 일은 서버가 완전히 켜진 뒤(첫 틱)에 한다.
         Bukkit.getScheduler().runTask(this, () -> {
@@ -64,6 +74,10 @@ public final class MinecraftAI extends JavaPlugin {
     // 서버가 꺼지거나 플러그인이 내려갈 때 AI 의 상태를 저장하고, AI 플레이어와 틱 작업이 남지 않게 정리한다.
     @Override
     public void onDisable() {
+        if (discordChatTask != null) discordChatTask.cancel();
+        discordChatTask = null;
+        if (discordChat != null) discordChat.close();
+        discordChat = null;
         if (discordGameTask != null) discordGameTask.cancel();
         discordGameTask = null;
         if (discordGame != null) discordGame.close();
