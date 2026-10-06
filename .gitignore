@@ -21,6 +21,8 @@
 !/training/goal_features.py
 !/training/prepare_features.py
 !/training/test_goal_features.py
+!/training/train_goal_bc.py
+!/training/test_goal_bc.py
 !/training/README.md
 
 # AI 개발 지침은 하위 폴더에서도 GitHub에 올리지 않는다.
