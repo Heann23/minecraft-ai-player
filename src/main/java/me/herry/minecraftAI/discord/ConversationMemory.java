@@ -63,7 +63,7 @@ public final class ConversationMemory {
      */
     String nameCandidate(ConversationTurns.Token token, Subject speaker, String text, String utteranceId) {
         if (text == null || text.length() > 100) return null;
-        String body = text.strip().replaceFirst("(?iu)^(?:해리|Herry)(?:야|아|님|씨)?(?:\\s*[,，:!.]\\s*|\\s+)", "");
+        String body = CallWord.body(text);
         var name = ConfirmedTextName.read(body);
         if (name.isEmpty() || name.get().replaceFirst("(?:님|씨)$", "").matches("(?iu)해리|Herry")) return null;
         synchronized (turns) {
