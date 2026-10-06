@@ -211,14 +211,62 @@ class DiscordSessionTest {
             assertFalse(DiscordPersonalSettings.casual(subject, facts(store, "A"), now.get()));
         }
     }
-    @Test void unreliableVoiceNeverLoosensAndOtherwiseStillReachesTheModel() throws Exception {
+    @Test void unreliableVoiceLooseningIsOnlyEchoedAndQuestionsOrReportedSpeechStillReachTheModel() throws Exception {
         var store = store();
         try (var session = unreliable(store)) {
             session.participants(Set.of("A"), Map.of()).get(3, TimeUnit.SECONDS);
-            for (String text : List.of("해리야 장난해도 돼요", "해리야 나한테 반말해도 돼요", "해리야 장난하지 마?", "해리야 친구가 장난하지 마 라고 했어")) {
+            for (String text : List.of("해리야 장난해도 돼요", "해리야 나한테 반말해도 돼요")) { speech(session, "A", text); play(session); }
+            assertEquals(0, models.get()); assertTrue(facts(store, "A").isEmpty());
+            for (String text : List.of("해리야 장난하지 마?", "해리야 친구가 장난하지 마 라고 했어", "해리야 반말해도 돼?")) {
                 speech(session, "A", text); request(); play(session);
             }
-            assertEquals(4, models.get()); assertTrue(facts(store, "A").isEmpty());
+            assertEquals(3, models.get()); assertTrue(facts(store, "A").isEmpty());
+        }
+    }
+    @Test void unreliableVoiceCasualSpeechIsAllowedOnlyAfterTheSameUsersYes() throws Exception {
+        var store = store(); var subject = new DiscordMemory.Subject(GUILD, "herry", "A");
+        try (var session = unreliable(store)) {
+            session.participants(Set.of("A", "B"), Map.of()).get(3, TimeUnit.SECONDS);
+            speech(session, "A", "해리야 말 편하게 해"); play(session);
+            assertFalse(DiscordPersonalSettings.casual(subject, facts(store, "A"), now.get()));
+            speech(session, "B", "응"); assertFalse(DiscordPersonalSettings.casual(subject, facts(store, "A"), now.get()));
+            speech(session, "A", "응."); play(session);
+            assertEquals(0, models.get());
+            assertTrue(DiscordPersonalSettings.casual(subject, facts(store, "A"), now.get())); assertTrue(facts(store, "B").isEmpty());
+            speech(session, "A", "반말해도 돼"); play(session);
+            speech(session, "A", "응"); request(); play(session);
+            assertEquals(1, models.get());
+        }
+    }
+    @Test void unreliableVoiceJokesComeBackOnlyAfterYesAndNoKeepsTheStop() throws Exception {
+        var store = store();
+        try (var session = unreliable(store)) {
+            session.participants(Set.of("A"), Map.of()).get(3, TimeUnit.SECONDS);
+            speech(session, "A", "해리야 장난하지 마"); play(session);
+            speech(session, "A", "다시 장난쳐도 돼"); play(session);
+            speech(session, "A", "아니"); play(session);
+            assertTrue(facts(store, "A").stream().anyMatch(fact -> fact.key().kind() == DiscordMemory.Kind.AVOID_JOKE && fact.value().equals("AVOID")));
+            speech(session, "A", "장난쳐도 돼요"); play(session);
+            speech(session, "A", "네 맞아요"); play(session);
+            assertEquals(0, models.get());
+            assertTrue(facts(store, "A").stream().anyMatch(fact -> fact.key().kind() == DiscordMemory.Kind.AVOID_JOKE && fact.value().equals("ALLOWED")));
+            assertTrue(facts(store, "A").stream().noneMatch(fact -> fact.key().kind() == DiscordMemory.Kind.AVOID_JOKE && fact.value().equals("AVOID")));
+        }
+    }
+    @Test void unreliableVoiceForgetErasesOnlyAfterYesAndOnlyTheSpeakersOwnMemory() throws Exception {
+        var store = store(); rememberName(store, "A", "민수", 0); rememberName(store, "B", "지수", 0);
+        try (var session = unreliable(store)) {
+            session.participants(Set.of("A", "B"), Map.of()).get(3, TimeUnit.SECONDS);
+            speech(session, "A", "해리야 내 기억 지워 줘"); play(session);
+            speech(session, "A", "아니요"); play(session);
+            assertEquals(1, facts(store, "A").size());
+            speech(session, "A", "내 기억 모두 지워 줘"); play(session);
+            speech(session, "A", "응"); play(session);
+            assertEquals(0, models.get()); assertTrue(facts(store, "A").isEmpty());
+            assertEquals("지수", facts(store, "B").getFirst().value());
+            speech(session, "A", "그리고 안녕"); var next = request(); play(session);
+            assertTrue(next.memory().isEmpty()); assertEquals("그리고 안녕", DialogueContext.currentInput(next));
+            assertTrue(next.context().stream().noneMatch(line -> !line.assistant() && line.text().contains("지워")), "the deletion request must not stay in the transcript");
         }
     }
     @Test void voiceStopJokesFromSomeoneNotAddressingHerryIsIgnored() throws Exception {

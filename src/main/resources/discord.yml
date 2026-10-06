@@ -27,9 +27,10 @@ audio:
 
 conversation:
   # 해리는 음성 채널의 말만 듣는다. Discord에 글로 쓰는 대화는 받지 않는다.
+  # 내 이름·말투·장난 설정과 기억 삭제는 음성만으로 할 수 있다. 장난 중단·존댓말 요청은 바로 저장하고,
+  # 이름·반말 허락·장난 허용·기억 삭제는 해리가 되물은 뒤 같은 사람이 "네"라고 답해야 적용한다.
   # /herry me는 모델을 호출하지 않고 본인이 확정한 이름·말투·장난 설정만 개인 회신으로 보여 준다.
-  # 개인 말투: /herry speech allowed:true|false, 개인 장난 설정: /herry joke allowed:true|false.
-  # 본인이 직접 확정한 설정만 기억하며 /herry forget으로 이름·개인 설정·임시 문맥을 함께 지운다.
+  # 명령으로도 가능: /herry name, /herry speech allowed:true|false, /herry joke allowed:true|false, /herry forget.
   # 인용문·타인 설명·모델의 응답이나 대상 없는 "응/네", "반말해도 돼요?" 같은 질문으로 설정을 추측하지 않는다.
   # 새 참가자에게 대화·음성 인식이 멈춘 뒤 짧게 인사한다. 잦은 재입장은 반복하지 않는다.
   greet-on-join: true

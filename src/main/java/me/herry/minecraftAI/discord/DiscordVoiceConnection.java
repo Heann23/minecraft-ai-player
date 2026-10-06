@@ -134,7 +134,7 @@ public final class DiscordVoiceConnection extends ListenerAdapter implements Dis
                 Permission.VOICE_SPEAK, Permission.MESSAGE_SEND)) return java.util.concurrent.CompletableFuture.failedFuture(new IllegalStateException("Voice channel permissions unavailable"));
         channel.sendMessage("해리가 이 채널의 음성을 인식해 한국어로 대화합니다. 원본 음성은 파일로 저장하지 않습니다. "
                 + "관리자는 /herry quiet로 수신·답변을 중단하거나 /herry leave로 나가게 할 수 있어요. "
-                + "내 이름·말투·장난 설정은 /herry name, /herry speech, /herry joke로 정하고 /herry forget으로 내 기억을 지울 수 있어요.")
+                + "내 이름·말투·장난 설정은 해리에게 말로 정할 수 있고, /herry name, /herry speech, /herry joke, /herry forget으로도 정하거나 지울 수 있어요.")
                 .setAllowedMentions(Set.of()).timeout(5, TimeUnit.SECONDS).queue(notice -> {
                     if (stopped.get() || !connectWanted || connectAttempt.get() != attempt) { completion.cancel(false); return; }
                     try { guild.getAudioManager().setAutoReconnect(true); guild.getAudioManager().openAudioConnection(channel); completion.complete(null); }

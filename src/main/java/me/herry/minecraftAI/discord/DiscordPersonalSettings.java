@@ -35,7 +35,7 @@ final class DiscordPersonalSettings {
             default -> "설정 확인 필요";
         };
         return "내 설정\n호칭: " + displayName + "\n말투: " + displaySpeech + "\n장난: " + displayJokes
-                + "\n변경: /herry name · /herry speech · /herry joke\n전체 삭제: /herry forget";
+                + "\n변경: 음성으로 말하거나 /herry name · /herry speech · /herry joke\n삭제: 음성으로 말하거나 /herry forget";
     }
     private static String value(List<Fact> facts, Kind kind, String label) {
         return facts.stream().filter(fact -> fact.key().kind() == kind && fact.key().label().equals(label))
