@@ -144,6 +144,35 @@ class OllamaDialogueTest {
             assertTrue(fixture.data().get("continuingConversation").getAsBoolean());
         }
     }
+    private ResponsePipeline.Request afterAnswers(String... answers) {
+        var lines = new java.util.ArrayList<ConversationTurns.Line>(); long time = 1000;
+        for (String text : answers) {
+            lines.add(new ConversationTurns.Line("A", "Herry", "이전 질문", false, time++));
+            lines.add(new ConversationTurns.Line("Herry", "A", text, true, time++));
+        }
+        lines.add(new ConversationTurns.Line("A", "Herry", "다음 질문이에요", false, time));
+        return new ResponsePipeline.Request(new ConversationTurns.Token(UUID.randomUUID(), 1, 1, "A"), lines, List.of());
+    }
+    @Test void closingQuestionFlagTurnsOffAfterTwoQuestionEndingsInARow() throws Exception {
+        try (var fixture = new Fixture()) {
+            fixture.model.respond(request(List.of())); assertTrue(fixture.data().get("closingQuestionAllowed").getAsBoolean());
+            fixture.model.respond(afterAnswers("뭐 할까요?")); assertTrue(fixture.data().get("closingQuestionAllowed").getAsBoolean());
+            fixture.model.respond(afterAnswers("뭐 할까요?", "나무예요.", "더 할까요?")); assertTrue(fixture.data().get("closingQuestionAllowed").getAsBoolean());
+            fixture.model.respond(afterAnswers("나무예요.", "뭐 할까요?", "더 할까요?")); assertFalse(fixture.data().get("closingQuestionAllowed").getAsBoolean());
+            assertTrue(fixture.input.get().getAsJsonArray("messages").get(0).getAsJsonObject().get("content").getAsString().contains("closingQuestionAllowed"));
+        }
+    }
+    @Test void aClosingQuestionIsTrimmedOnlyAfterTwoInARowAndNeverALoneOrQuotedOne() throws Exception {
+        try (var fixture = new Fixture()) {
+            fixture.output("{\"done\":true,\"message\":{\"role\":\"assistant\",\"content\":\"나무부터 모아요. 철은 그다음이에요. 같이 갈까요?\"}}");
+            assertEquals("나무부터 모아요. 철은 그다음이에요. 같이 갈까요?", fixture.model.respond(afterAnswers("뭐 할까요?")));
+            assertEquals("나무부터 모아요. 철은 그다음이에요.", fixture.model.respond(afterAnswers("뭐 할까요?", "더 할까요?")));
+            fixture.output("{\"done\":true,\"message\":{\"role\":\"assistant\",\"content\":\"어떤 도구를 말씀하세요?\"}}");
+            assertEquals("어떤 도구를 말씀하세요?", fixture.model.respond(afterAnswers("뭐 할까요?", "더 할까요?")));
+            fixture.output("{\"done\":true,\"message\":{\"role\":\"assistant\",\"content\":\"나무예요. \\\"같이 갈까요?\\\"\"}}");
+            assertEquals("나무예요. \"같이 갈까요?\"", fixture.model.respond(afterAnswers("뭐 할까요?", "더 할까요?")));
+        }
+    }
     @Test void identityQuestionAndQuotedGreetingExplanationArePreserved() throws Exception {
         try (var fixture = new Fixture()) {
             fixture.output("{\"done\":true,\"message\":{\"role\":\"assistant\",\"content\":\"저는 해리예요. 함께 게임하는 친구예요.\"}}");

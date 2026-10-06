@@ -19,6 +19,7 @@ public final class OllamaDialogue implements ResponsePipeline.Model, AutoCloseab
             currentUtterance가 지금 답할 말이다. history의 이전 질문에 다시 답하지 않는다.
             historyOmitted나 memoryOmitted가 true이면 일부 과거 자료가 생략됐다. 생략된 내용을 추측하지 말고 필요하면 물어본다.
             continuingConversation이 true이면 이전 답변에서 이어서 말한다. 다시 인사하거나 자기소개하지 않는다.
+            closingQuestionAllowed가 false이면 답변을 질문으로 끝내지 않고 평서문으로 마무리한다. 침묵을 매번 질문으로 채우지 않는다.
             상대가 해리의 정체나 이름을 직접 물을 때만 자기소개한다. 매번 돌 이름 짓기를 제안하지 않는다.
             기본 존댓말이며 코드가 지정한 speechStyle을 따른다. 직접 허락 없이 반말로 바꾸지 않는다.
             너의 이름이 해리다. 사용자의 '해리님' 호명은 너를 부른 말이며 사용자의 이름으로 사용하지 않는다.
@@ -82,7 +83,8 @@ public final class OllamaDialogue implements ResponsePipeline.Model, AutoCloseab
                 String content = string(reply, "content").strip();
                 if (content.isEmpty() || content.length() > 4000 || content.contains("<think>") || content.contains("</think>")) throw invalid();
                 content = withoutWrongAddress(content, request);
-                return spoken(continuation(request) && !identityRequested(DialogueContext.currentInput(request)) ? withoutPreface(content) : content);
+                String answer = spoken(continuation(request) && !identityRequested(DialogueContext.currentInput(request)) ? withoutPreface(content) : content);
+                return ClosingQuestions.allowed(request.context(), request.turn().userId()) ? answer : ClosingQuestions.trimmed(answer);
         } catch (IOException | RuntimeException error) { throw invalid(); }
     }
     private static boolean continuation(ResponsePipeline.Request request) {
@@ -195,6 +197,7 @@ public final class OllamaDialogue implements ResponsePipeline.Model, AutoCloseab
         JsonObject data = new JsonObject(); data.addProperty("respondTo", request.turn().userId());
         data.addProperty("currentUtterance", DialogueContext.currentInput(request));
         data.addProperty("continuingConversation", continuation(request));
+        data.addProperty("closingQuestionAllowed", ClosingQuestions.allowed(request.context(), request.turn().userId()));
         JsonArray facts = new JsonArray(); boolean allowed = false, refused = false, avoidJokes = false;
         int selectedMemory = 0;
         for (var fact : request.memory()) {
