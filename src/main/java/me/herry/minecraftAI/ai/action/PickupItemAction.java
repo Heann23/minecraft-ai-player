@@ -11,6 +11,7 @@ import me.herry.minecraftAI.ai.primitive.PrimitiveTarget;
 import me.herry.minecraftAI.ai.primitive.PrimitiveType;
 import me.herry.minecraftAI.ai.util.BlockPoint;
 import me.herry.minecraftAI.ai.util.Positions;
+import me.herry.minecraftAI.ai.world.Base;
 import org.bukkit.FluidCollisionMode;
 import org.bukkit.Location;
 import org.bukkit.Material;
@@ -230,7 +231,9 @@ public final class PickupItemAction extends AbstractAction implements PrimitiveA
         // 새 탐색을 만들지 않고 기존 계단·굴·다리 계획의 안전 검사와 실제 행동을 한 단씩 사용한다.
         if (accessSteps >= MAX_ACCESS_STEPS || !ai.getBody().isGrounded()
                 || !isInRange(player.getLocation(), current.getLocation(), radius)) return false;
-        List<Action> step = TerrainPlans.stepToward(ai, walkingTarget(ai, current.getLocation()), false);
+        BlockPoint target = walkingTarget(ai, current.getLocation());
+        if (!canMakeAccessStep(ai, target, Positions.of(current.getLocation()))) return false;
+        List<Action> step = TerrainPlans.stepToward(ai, target, false);
         if (step.isEmpty()) return false;
         for (Action action : step) {
             if (action instanceof BreakBlockAction breaking && breaking.getTarget() instanceof PrimitiveTarget.Block target
@@ -245,9 +248,30 @@ public final class PickupItemAction extends AbstractAction implements PrimitiveA
     }
 
     private static boolean canClear(AIPlayer ai, Block obstacle) {
+        Base home = ai.getTeam().getWorldModel().getHome();
+        if (home != null && home.isInsideBuilding(ai.getWorldId(), Positions.of(obstacle))) return false;
         // 부족한 도구로 돌을 맨손 채굴하거나 기반암을 계속 두드리지 않는다.
         return obstacle.getType().getHardness() >= 0.0F
                 && (ai.getInventory().bestToolSlot(obstacle) >= 0 || obstacle.isPreferredTool(ItemStack.empty()));
+    }
+
+    private static boolean canMakeAccessStep(AIPlayer ai, BlockPoint target, BlockPoint drop) {
+        Base home = ai.getTeam().getWorldModel().getHome();
+        if (home == null) return true;
+        // 건축을 시작할 때부터 경계가 등록된다. 완공 전의 빈 origin도 기둥으로 막지 않는다.
+        if (home.isInsideBuilding(ai.getWorldId(), target) || home.isInsideBuilding(ai.getWorldId(), drop)) return false;
+        BlockPoint feet = ai.getPosition();
+        // 한 단 계획은 제자리 기둥/천장과 앞 또는 옆 한 칸의 계단/다리를 바꿀 수 있다.
+        // 설치 행동의 좌표는 공개되지 않으므로 그 제한된 후보 칸을 미리 보호한다. XZ만으로 집 밑 광산을 막지 않는다.
+        for (int dy = -1; dy <= 2; dy++) {
+            BlockPoint level = feet.offset(0, dy, 0);
+            if (home.isInsideBuilding(ai.getWorldId(), level)
+                    || home.isInsideBuilding(ai.getWorldId(), level.offset(1, 0, 0))
+                    || home.isInsideBuilding(ai.getWorldId(), level.offset(-1, 0, 0))
+                    || home.isInsideBuilding(ai.getWorldId(), level.offset(0, 0, 1))
+                    || home.isInsideBuilding(ai.getWorldId(), level.offset(0, 0, -1))) return false;
+        }
+        return true;
     }
 
     private void cancelAccess(AIPlayer ai) {
