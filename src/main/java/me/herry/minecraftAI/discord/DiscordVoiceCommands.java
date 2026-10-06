@@ -10,7 +10,7 @@ import net.dv8tion.jda.api.interactions.commands.build.SubcommandData;
 /** Personal actions always target the invoking Discord user; voice controls require fresh guild permission. */
 public final class DiscordVoiceCommands {
     private static final Set<String> PERSONAL = Set.of("status", "forget", "me", "name", "speech", "joke", "chat", "game", "cancel", "reset");
-    private static final Set<String> ADMIN = Set.of("leave", "resume", "quiet", "listen", "backup", "backups", "restore");
+    private static final Set<String> ADMIN = Set.of("leave", "resume", "quiet", "listen", "backup", "backups", "restore", "config");
     private DiscordVoiceCommands() {}
     public static boolean allowed(String configuredGuild, String actualGuild, String action, boolean manageGuild) {
         return configuredGuild != null && configuredGuild.equals(actualGuild) && action != null
@@ -36,6 +36,7 @@ public final class DiscordVoiceCommands {
                 new SubcommandData("resume", "관리자: 지정한 음성 채널에 다시 접속해요"),
                 new SubcommandData("quiet", "관리자: 음성 수신과 답변을 중단해요"),
                 new SubcommandData("listen", "관리자: 음성 대화를 다시 받아요"),
+                new SubcommandData("config", "관리자: discord.yml이 유효한지, 재시작이 필요한지 확인해요"),
                 new SubcommandData("backup", "관리자: 현재 확정 기억을 백업해요"),
                 new SubcommandData("backups", "관리자: 최근 기억 백업의 식별자를 확인해요"),
                 new SubcommandData("restore", "관리자: 대화를 멈추고 선택한 백업을 복원해요")

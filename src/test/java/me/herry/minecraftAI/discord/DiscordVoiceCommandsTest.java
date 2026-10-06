@@ -8,7 +8,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class DiscordVoiceCommandsTest {
     @Test void onlyServerManagersCanControlAnotherPersonsVoiceSession() {
-        for (String action : Set.of("leave", "resume", "quiet", "listen", "backup", "backups", "restore")) {
+        for (String action : Set.of("leave", "resume", "quiet", "listen", "backup", "backups", "restore", "config")) {
             assertFalse(DiscordVoiceCommands.allowed("guild", "guild", action, false));
             assertTrue(DiscordVoiceCommands.allowed("guild", "guild", action, true));
         }
@@ -25,9 +25,9 @@ class DiscordVoiceCommandsTest {
     }
     @Test void personalCommandsExposeNoTargetUserOrGameExecutionOption() {
         var definition = DiscordVoiceCommands.definition();
-        assertEquals("herry", definition.getName()); assertEquals(17, definition.getSubcommands().size());
+        assertEquals("herry", definition.getName()); assertEquals(18, definition.getSubcommands().size());
         assertEquals(Set.of("status", "me", "game", "chat", "cancel", "reset", "forget", "name", "speech", "joke",
-                "leave", "resume", "quiet", "listen", "backup", "backups", "restore"),
+                "leave", "resume", "quiet", "listen", "backup", "backups", "restore", "config"),
                 definition.getSubcommands().stream().map(command -> command.getName()).collect(Collectors.toSet()));
         for (var command : definition.getSubcommands()) {
             if (command.getName().equals("me")) assertTrue(command.getOptions().isEmpty());
