@@ -264,7 +264,8 @@ public final class GatherPlans {
     private static List<Action> approachBlocked(AIPlayer ai, BlockPoint target) {
         Player player = ai.getPlayer();
         // 손이 닿을 만큼 가까우면 바로 캔다. 앞을 가린 블록은 캐는 행동이 알아서 먼저 치운다.
-        if (Positions.center(player.getWorld(), target).distance(player.getEyeLocation()) <= BREAK_REACH) {
+        if (Positions.center(player.getWorld(), target).distance(player.getEyeLocation()) <= BREAK_REACH
+                && !BreakBlockAction.wouldCutShaftFrom(ai, target)) {
             ai.getTeam().claim(ai, target);
             return List.of(BreakBlockAction.mine(target), new PickupItemAction(DROP_RADIUS, false));
         }
@@ -352,6 +353,13 @@ public final class GatherPlans {
 
     // 다가가서, 캐고, 떨어진 아이템을 줍는다.
     private static List<Action> mineBlock(AIPlayer ai, BlockPoint target) {
+        // A resource within reach can still be behind a support of our return stairs.
+        // Mark it blocked before issuing the same unsafe break again, then approach from the side.
+        if (Positions.center(ai.getPlayer().getWorld(), target).distance(ai.getPlayer().getEyeLocation()) <= BREAK_REACH
+                && BreakBlockAction.wouldCutShaftFrom(ai, target)) {
+            ai.getMemory().rememberUnreachable(ai.getWorldId(), target, ai.getTicks());
+            return TerrainPlans.stepToward(ai, target, false);
+        }
         // 동료가 같은 곳을 노리지 않도록 맡아 둔다.
         ai.getTeam().claim(ai, target);
         return List.of(
