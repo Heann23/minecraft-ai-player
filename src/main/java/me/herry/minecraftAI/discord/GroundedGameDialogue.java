@@ -39,8 +39,7 @@ public final class GroundedGameDialogue implements ResponsePipeline.Model {
         return answer;
     }
     private static Question question(String text) {
-        String normalized = text.strip().replaceAll("\\s+", "").replaceAll("[?!！？.。]+$", "")
-                .replaceFirst("(?iu)^(?:해리(?:님|씨|야|아)?|Herry)[,!！，]?", "");
+        String normalized = CallWord.body(text).replaceAll("\\s+", "").replaceAll("[?!！？.。]+$", "");
         if (STATUS.matcher(normalized).matches()) return new Question(Kind.STATUS, "", "");
         if (LOCATION.matcher(normalized).matches()) return new Question(Kind.LOCATION, "", "");
         if (REASON.matcher(normalized).matches()) return new Question(Kind.REASON, "", "");

@@ -13,10 +13,10 @@ public final class AddresseeResolver {
         String body = text.strip();
         // Quoted names and reported speech do not constitute an explicit call.
         if (body.startsWith("\"") || body.startsWith("'") || body.startsWith("“") || body.startsWith("‘")) return unknown();
-        if (called(body, "해리", true) || called(body, "Herry", true)) return character();
+        if (CallWord.called(body)) return character();
         String matched = null;
         for (Map.Entry<String, String> entry : names.entrySet()) {
-            if (participants.contains(entry.getValue()) && !speaker.equals(entry.getValue()) && called(body, entry.getKey(), false)) {
+            if (participants.contains(entry.getValue()) && !speaker.equals(entry.getValue()) && called(body, entry.getKey())) {
                 if (matched != null && !matched.equals(entry.getValue())) return unknown();
                 matched = entry.getValue();
             }
@@ -28,10 +28,10 @@ public final class AddresseeResolver {
         if (suggestedUser == null || !participants.contains(suggestedUser)) return unknown();
         return new Result(ConversationTurns.Address.OTHER_USER, suggestedUser);
     }
-    private static boolean called(String text, String name, boolean character) {
+    /** Another participant is called by the same rule as Herry: name first, optional suffix, then a space, punctuation or the end. */
+    private static boolean called(String text, String name) {
         if (name == null || name.isBlank() || name.length() > 100) return false;
-        String suffix = character ? "(?:야|님|씨)?" : "(?:야|아|님|씨)?";
-        return Pattern.compile("(?iu)^" + Pattern.quote(name) + suffix + "(?:[\\s,!?~:]+|$)").matcher(text).find();
+        return Pattern.compile("(?iu)^" + Pattern.quote(name) + CallWord.SUFFIX + "(?:" + CallWord.SEPARATOR + "+|$)").matcher(text).find();
     }
     private static Result character() { return new Result(ConversationTurns.Address.CHARACTER, ""); }
     private static Result unknown() { return new Result(ConversationTurns.Address.UNKNOWN, ""); }

@@ -22,9 +22,7 @@ final class GroundedPersonalDialogue implements ResponsePipeline.Model {
     @Override public String respond(ResponsePipeline.Request request) throws Exception {
         if (!request.current().getAsBoolean()) throw new IOException("dialogue turn retired");
         if (request.permissionQuestion()) throw new IllegalArgumentException("permission questions are code-owned");
-        String input = DialogueContext.currentInput(request).strip()
-                .replaceFirst("(?iu)^(?:해리|Herry)(?:님|씨|야|아)?(?:\\s*[,，:]\\s*|\\s+)", "")
-                .replaceAll("\\s+", "").replaceAll("[?!！？.。]+$", "");
+        String input = CallWord.body(DialogueContext.currentInput(request)).replaceAll("\\s+", "").replaceAll("[?!！？.。]+$", "");
         Kind kind = NAME_QUESTION.matcher(input).matches() ? Kind.NAME
                 : SPEECH_QUESTION.matcher(input).matches() ? Kind.SPEECH_AGREEMENT
                 : JOKE_QUESTION.matcher(input).matches() ? Kind.AVOID_JOKE : null;

@@ -50,8 +50,7 @@ final class VoiceConfirmation {
      */
     static Proposal request(String input) {
         if (input == null || input.length() > 100 || input.indexOf('?') >= 0 || input.indexOf('？') >= 0) return null;
-        String text = input.strip().replaceFirst("(?iu)^(?:해리|Herry)(?:님|씨|야|아)?[\\s,，:.!~]*", "")
-                .replaceAll("\\s+", "").replaceAll("[.!。！~]+$", "");
+        String text = CallWord.body(input).replaceAll("\\s+", "").replaceAll("[.!。！~]+$", "");
         var target = ConfirmedTextForget.read(text);
         if (target == null) target = FORGET_ALL.contains(text) ? ConfirmedTextForget.Target.ALL : FORGET_NAME.contains(text) ? ConfirmedTextForget.Target.NAME
                 : FORGET_SPEECH.contains(text) ? ConfirmedTextForget.Target.SPEECH : FORGET_JOKE.contains(text) ? ConfirmedTextForget.Target.JOKE : null;
