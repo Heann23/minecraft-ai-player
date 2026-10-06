@@ -151,6 +151,12 @@ public final class DiscordSession implements AutoCloseable {
         var token = accepted.token(); var subject = new DiscordMemory.Subject(settings.guildId(), settings.characterId(), user);
         var tightened = memory.captureTightening(token, subject, text, utterance);
         if (tightened != null) return answerTightening(result, token, subject, tightened);
+        var nameAnswer = memory.answerNameConfirmation(token, subject, text, utterance);
+        if (nameAnswer != null) return answerName(result, token, subject, nameAnswer);
+        if (!result.recognition().reliableFinal()) {
+            String candidate = memory.nameCandidate(token, subject, text, utterance);
+            if (candidate != null) return askName(result, token, candidate);
+        }
         var saved = memory.capture(token, subject, text, result.recognition().reliableFinal(), utterance);
         Set<String> members = participants;
         CompletableFuture<Void> completed = new CompletableFuture<>();
@@ -175,15 +181,32 @@ public final class DiscordSession implements AutoCloseable {
     private CompletableFuture<Void> answerTightening(SpeechRecognitionWorker.Result result, ConversationTurns.Token token,
                                                      DiscordMemory.Subject subject, CompletableFuture<ConfirmedTextPreference.Change> saved) {
         Set<String> members = participants;
+        return speakFixed(result, token, saved.thenCompose(change -> store.visible(subject, members)
+                .thenApply(facts -> change.reply(DiscordPersonalSettings.casual(subject, facts, wallClock.getAsLong())))));
+    }
+    /** Speaks fixed code-owned text once it is ready, only if the turn and the audio route are still current. */
+    private CompletableFuture<Void> speakFixed(SpeechRecognitionWorker.Result result, ConversationTurns.Token token, CompletableFuture<String> text) {
         CompletableFuture<Void> completed = new CompletableFuture<>();
-        saved.thenCompose(change -> store.visible(subject, members)
-                        .thenApply(facts -> change.reply(DiscordPersonalSettings.casual(subject, facts, wallClock.getAsLong()))))
-                .whenComplete((reply, error) -> post(() -> {
-                    if (error != null) { if (turns.isCurrent(token)) turns.finish(token); diagnostic.accept("conversation-memory-failed"); }
-                    else if (ingress.valid(result.route()) && turns.isCurrent(token) && !responses.greet(token, reply)) turns.finish(token);
-                    return done();
-                }).whenComplete((ignored, failure) -> { if (failure == null) completed.complete(null); else completed.completeExceptionally(failure); }));
+        text.whenComplete((reply, error) -> post(() -> {
+            if (error != null) { if (turns.isCurrent(token)) turns.finish(token); diagnostic.accept("conversation-memory-failed"); }
+            else if (ingress.valid(result.route()) && turns.isCurrent(token) && !responses.greet(token, reply)) turns.finish(token);
+            return done();
+        }).whenComplete((ignored, failure) -> { if (failure == null) completed.complete(null); else completed.completeExceptionally(failure); }));
         return completed;
+    }
+    /** Repeats a heard name back. It is stored only if the same user answers yes to the whole question on the next turn. */
+    private CompletableFuture<Void> askName(SpeechRecognitionWorker.Result result, ConversationTurns.Token token, String candidate) {
+        if (ingress.valid(result.route()) && turns.isCurrent(token) && !responses.greet(token, VoiceNameConfirmation.question(candidate),
+                () -> turns.askNameConfirmation(token, candidate, 30_000))) turns.finish(token);
+        return done();
+    }
+    private CompletableFuture<Void> answerName(SpeechRecognitionWorker.Result result, ConversationTurns.Token token,
+                                               DiscordMemory.Subject subject, ConversationMemory.NameReply reply) {
+        Set<String> members = participants;
+        return speakFixed(result, token, reply.saved().thenCompose(ignored -> store.visible(subject, members)).thenApply(facts ->
+                reply.answer() == ConversationMemory.NameAnswer.CONFIRMED
+                        ? new ConfirmedTextPreference.Change(DiscordMemory.Kind.NAME, reply.name()).reply(DiscordPersonalSettings.casual(subject, facts, wallClock.getAsLong()))
+                        : VoiceNameConfirmation.declined()));
     }
 
     public CompletableFuture<Void> quiet(boolean value) {

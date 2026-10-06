@@ -17,6 +17,7 @@ public final class ConversationTurns implements AutoCloseable {
     public record Accepted(Decision decision, Token token) {}
     public record Line(String speaker, String target, String text, boolean assistant, long timeMillis) {}
     private record Question(Token token, long nextPersonalTurn, long expiresAt) {}
+    private record NameQuestion(Token token, String candidate, long nextPersonalTurn, long expiresAt) {}
 
     private final UUID conversation = UUID.randomUUID();
     private final LongSupplier clock;
@@ -30,6 +31,7 @@ public final class ConversationTurns implements AutoCloseable {
     private long turn, generation;
     private Token current;
     private Question permissionQuestion;
+    private NameQuestion nameQuestion;
     private String generated = "";
     private String currentInput = "", currentUtterance = "";
     private int heardCharacters;
@@ -57,6 +59,7 @@ public final class ConversationTurns implements AutoCloseable {
         personalTurns.remove(userId);
         engaged.remove(userId);
         if (permissionQuestion != null && permissionQuestion.token.userId.equals(userId)) permissionQuestion = null;
+        if (nameQuestion != null && nameQuestion.token.userId.equals(userId)) nameQuestion = null;
         invalidate();
         // Session transcript must not retain a departing person's private context.
         context.clear();
@@ -85,7 +88,7 @@ public final class ConversationTurns implements AutoCloseable {
         if (stop) {
             invalidate();
             engaged.remove(userId);
-            permissionQuestion = null;
+            permissionQuestion = null; nameQuestion = null;
             return new Accepted(Decision.STOPPED, null);
         }
         invalidate();
@@ -95,6 +98,7 @@ public final class ConversationTurns implements AutoCloseable {
         long personalTurn = personalTurns.merge(userId, 1L, Long::sum);
         if (permissionQuestion != null && permissionQuestion.token.userId.equals(userId)
                 && personalTurn > permissionQuestion.nextPersonalTurn) permissionQuestion = null;
+        if (nameQuestion != null && nameQuestion.token.userId.equals(userId) && personalTurn > nameQuestion.nextPersonalTurn) nameQuestion = null;
         add(new Line(userId, "Herry", text, false, now));
         return new Accepted(Decision.RESPOND, current);
     }
@@ -180,29 +184,46 @@ public final class ConversationTurns implements AutoCloseable {
         return true;
     }
 
+    /** May only be registered after the whole echo-back question was actually heard; the candidate lives in memory only. */
+    public synchronized boolean askNameConfirmation(Token token, String candidate, long validMillis) {
+        if (!isCurrent(token) || generated.isEmpty() || heardCharacters != generated.length() || validMillis < 1 || candidate == null || candidate.isBlank()) return false;
+        nameQuestion = new NameQuestion(token, candidate, personalTurns.get(token.userId) + 1, clock.getAsLong() + validMillis);
+        return true;
+    }
+
+    /** The asked user's very next turn only. Returns the candidate being answered and consumes the question, or null. */
+    public synchronized String answerNameConfirmation(Token answer) {
+        if (!isCurrent(answer) || nameQuestion == null) return null;
+        NameQuestion question = nameQuestion;
+        if (!question.token.userId.equals(answer.userId) || personalTurns.get(answer.userId) != question.nextPersonalTurn
+                || clock.getAsLong() >= question.expiresAt) return null;
+        nameQuestion = null;
+        return question.candidate;
+    }
+
     public synchronized void quiet(boolean value) {
         quiet = value;
         invalidate();
         engaged.clear();
-        permissionQuestion = null;
+        permissionQuestion = null; nameQuestion = null;
     }
 
     public synchronized List<Line> context() { return List.copyOf(context); }
     /** A private deletion request keeps its delivery token and deduplication, but no previous transcript. */
     public synchronized boolean clearContextFor(Token token) {
         if (!isCurrent(token)) return false;
-        context.clear(); permissionQuestion = null;
+        context.clear(); permissionQuestion = null; nameQuestion = null;
         return true;
     }
     /** Restore keeps membership and deduplication but retires every old answer and shared transcript. */
     public synchronized void resetContext() {
-        invalidate(); engaged.clear(); permissionQuestion = null; context.clear();
+        invalidate(); engaged.clear(); permissionQuestion = null; nameQuestion = null; context.clear();
     }
 
     /** Deletion clears temporary context and invalidates pending provider output too. */
     public synchronized void forget(String userId) {
         invalidate();
-        permissionQuestion = null;
+        permissionQuestion = null; nameQuestion = null;
         engaged.remove(userId);
         context.clear();
     }
@@ -215,7 +236,7 @@ public final class ConversationTurns implements AutoCloseable {
         engaged.clear();
         seen.clear();
         context.clear();
-        permissionQuestion = null;
+        permissionQuestion = null; nameQuestion = null;
     }
 
     private void invalidate() {

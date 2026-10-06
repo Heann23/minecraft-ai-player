@@ -80,5 +80,23 @@ class ConversationTurnsTest {
         Token next = call("A", "2"); turns.generated(next, "정상 답변"); turns.played(next, 5); turns.finish(next);
         assertTrue(turns.context().stream().anyMatch(l -> l.assistant() && l.text().equals("정상 답변")));
     }
+    private Token askedName(String user, String id) {
+        Token question = call(user, id); String text = "민수님이라고 부르면 될까요?"; turns.generated(question, text); turns.played(question, text.length());
+        assertTrue(turns.askNameConfirmation(question, "민수", 10_000)); turns.finish(question); return question;
+    }
+    @Test void nameConfirmationNeedsAFullyHeardQuestionAndTheTargetsNextTurnOnly() {
+        Token unheard = call("A", "u"); turns.generated(unheard, "민수님이라고 부르면 될까요?");
+        assertFalse(turns.askNameConfirmation(unheard, "민수", 10_000)); assertFalse(turns.askNameConfirmation(unheard, " ", 10_000)); turns.finish(unheard);
+        askedName("A", "q");
+        assertNull(turns.answerNameConfirmation(call("B", "b")));
+        Token answer = call("A", "a"); assertEquals("민수", turns.answerNameConfirmation(answer)); assertNull(turns.answerNameConfirmation(answer));
+    }
+    @Test void nameConfirmationLapsesWithTimeLaterTurnsLeaveForgetAndQuiet() {
+        askedName("A", "q1"); now += 10_000; assertNull(turns.answerNameConfirmation(call("A", "late")));
+        askedName("A", "q2"); call("A", "other"); assertNull(turns.answerNameConfirmation(call("A", "later")));
+        askedName("A", "q3"); turns.leave("A"); turns.join("A"); assertNull(turns.answerNameConfirmation(call("A", "after-leave")));
+        askedName("A", "q4"); turns.forget("A"); assertNull(turns.answerNameConfirmation(call("A", "after-forget")));
+        askedName("A", "q5"); turns.quiet(true); assertNull(turns.answerNameConfirmation(call("A", "after-quiet")));
+    }
     @Test void tokenFromDifferentSessionCannotReplay() { Token token = call("A", "1"); var other = new ConversationTurns(() -> now, 60_000, 4); other.join("A"); assertFalse(other.isCurrent(token)); other.close(); }
 }

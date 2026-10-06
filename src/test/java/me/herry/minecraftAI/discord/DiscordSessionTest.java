@@ -229,6 +229,39 @@ class DiscordSessionTest {
             assertEquals(0, models.get()); assertNull(session.nextFrame()); assertTrue(facts(store, "A").isEmpty());
         }
     }
+    @Test void unreliableVoiceNameIsEchoedAndStoredOnlyAfterTheSameUsersYes() throws Exception {
+        var store = store();
+        try (var session = unreliable(store)) {
+            session.participants(Set.of("A", "B"), Map.of()).get(3, TimeUnit.SECONDS);
+            speech(session, "A", "해리야 안녕"); request(); play(session);
+            speech(session, "A", "내 이름은 민수야"); play(session);
+            assertEquals(1, models.get()); assertTrue(facts(store, "A").isEmpty());
+            speech(session, "B", "응"); assertTrue(facts(store, "A").isEmpty());
+            speech(session, "A", "응"); play(session);
+            assertEquals(1, models.get());
+            assertTrue(facts(store, "A").stream().anyMatch(fact -> fact.key().kind() == DiscordMemory.Kind.NAME && fact.value().equals("민수")));
+            assertTrue(facts(store, "B").isEmpty());
+        }
+    }
+    @Test void unreliableVoiceNoToTheEchoedNameStoresNothingAndTheQuestionIsSpent() throws Exception {
+        var store = store();
+        try (var session = unreliable(store)) {
+            session.participants(Set.of("A"), Map.of()).get(3, TimeUnit.SECONDS);
+            speech(session, "A", "해리야 내 이름은 민수야"); play(session);
+            speech(session, "A", "아니요"); play(session);
+            assertEquals(0, models.get()); assertTrue(facts(store, "A").isEmpty());
+            speech(session, "A", "응"); request(); play(session);
+            assertEquals(1, models.get()); assertTrue(facts(store, "A").isEmpty());
+        }
+    }
+    @Test void unreliableVoiceNameOfTheCharacterItselfIsNotEchoed() throws Exception {
+        var store = store();
+        try (var session = unreliable(store)) {
+            session.participants(Set.of("A"), Map.of()).get(3, TimeUnit.SECONDS);
+            speech(session, "A", "해리야 내 이름은 해리야"); request(); play(session);
+            assertEquals(1, models.get()); assertTrue(facts(store, "A").isEmpty());
+        }
+    }
     @Test void directTextJokeBoundaryInterruptsOldVoiceAndAcknowledgesWithoutAnotherModelCall() throws Exception {
         var entered = new CountDownLatch(1); var interrupted = new CountDownLatch(1); var store = store();
         try (var session = session(store, (pcm, language) -> new SpeechRecognitionWorker.Recognition(transcriptions.take(), true), request -> {
