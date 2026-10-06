@@ -17,7 +17,7 @@ public final class ConversationTurns implements AutoCloseable {
     public record Accepted(Decision decision, Token token) {}
     public record Line(String speaker, String target, String text, boolean assistant, long timeMillis) {}
     private record Question(Token token, long nextPersonalTurn, long expiresAt) {}
-    private record NameQuestion(Token token, String candidate, long nextPersonalTurn, long expiresAt) {}
+    private record Confirmation(Token token, VoiceConfirmation.Proposal proposal, long nextPersonalTurn, long expiresAt) {}
 
     private final UUID conversation = UUID.randomUUID();
     private final LongSupplier clock;
@@ -31,11 +31,11 @@ public final class ConversationTurns implements AutoCloseable {
     private long turn, generation;
     private Token current;
     private Question permissionQuestion;
-    private NameQuestion nameQuestion;
+    private Confirmation confirmation;
     private String generated = "";
     private String currentInput = "", currentUtterance = "";
     private int heardCharacters;
-    private boolean closed, quiet, greeting, control;
+    private boolean closed, quiet, greeting;
 
     public ConversationTurns(LongSupplier clock, long followupMillis, int contextLimit) {
         if (followupMillis < 1 || contextLimit < 1 || contextLimit > 128) throw new IllegalArgumentException("turn limits");
@@ -59,7 +59,7 @@ public final class ConversationTurns implements AutoCloseable {
         personalTurns.remove(userId);
         engaged.remove(userId);
         if (permissionQuestion != null && permissionQuestion.token.userId.equals(userId)) permissionQuestion = null;
-        if (nameQuestion != null && nameQuestion.token.userId.equals(userId)) nameQuestion = null;
+        if (confirmation != null && confirmation.token.userId.equals(userId)) confirmation = null;
         invalidate();
         // Session transcript must not retain a departing person's private context.
         context.clear();
@@ -88,7 +88,7 @@ public final class ConversationTurns implements AutoCloseable {
         if (stop) {
             invalidate();
             engaged.remove(userId);
-            permissionQuestion = null; nameQuestion = null;
+            permissionQuestion = null; confirmation = null;
             return new Accepted(Decision.STOPPED, null);
         }
         invalidate();
@@ -98,7 +98,7 @@ public final class ConversationTurns implements AutoCloseable {
         long personalTurn = personalTurns.merge(userId, 1L, Long::sum);
         if (permissionQuestion != null && permissionQuestion.token.userId.equals(userId)
                 && personalTurn > permissionQuestion.nextPersonalTurn) permissionQuestion = null;
-        if (nameQuestion != null && nameQuestion.token.userId.equals(userId) && personalTurn > nameQuestion.nextPersonalTurn) nameQuestion = null;
+        if (confirmation != null && confirmation.token.userId.equals(userId) && personalTurn > confirmation.nextPersonalTurn) confirmation = null;
         add(new Line(userId, "Herry", text, false, now));
         return new Accepted(Decision.RESPOND, current);
     }
@@ -125,20 +125,6 @@ public final class ConversationTurns implements AutoCloseable {
         if (text == null || text.isBlank() || text.length() > 4000) throw new IllegalArgumentException("response text");
         if (!generated.isEmpty()) return false;
         generated = text;
-        return true;
-    }
-
-    /**
-     * Fixed acknowledgement of a private control request. It keeps the delivery token, but neither the request nor the
-     * acknowledgement becomes transcript: the earlier conversation stays exactly as it was.
-     */
-    public synchronized boolean acknowledgeControl(Token token, String text) {
-        if (!isCurrent(token)) return false;
-        if (text == null || text.isBlank() || text.length() > 4000) throw new IllegalArgumentException("response text");
-        if (!generated.isEmpty()) return false;
-        Line last = context.peekLast();
-        if (last != null && !last.assistant() && last.speaker().equals(token.userId()) && last.text().equals(currentInput)) context.removeLast();
-        generated = text; control = true;
         return true;
     }
 
@@ -184,46 +170,46 @@ public final class ConversationTurns implements AutoCloseable {
         return true;
     }
 
-    /** May only be registered after the whole echo-back question was actually heard; the candidate lives in memory only. */
-    public synchronized boolean askNameConfirmation(Token token, String candidate, long validMillis) {
-        if (!isCurrent(token) || generated.isEmpty() || heardCharacters != generated.length() || validMillis < 1 || candidate == null || candidate.isBlank()) return false;
-        nameQuestion = new NameQuestion(token, candidate, personalTurns.get(token.userId) + 1, clock.getAsLong() + validMillis);
+    /** May only be registered after the whole echo-back question was actually heard; the proposal lives in memory only. */
+    synchronized boolean askConfirmation(Token token, VoiceConfirmation.Proposal proposal, long validMillis) {
+        if (!isCurrent(token) || generated.isEmpty() || heardCharacters != generated.length() || validMillis < 1 || proposal == null) return false;
+        confirmation = new Confirmation(token, proposal, personalTurns.get(token.userId) + 1, clock.getAsLong() + validMillis);
         return true;
     }
 
-    /** The asked user's very next turn only. Returns the candidate being answered and consumes the question, or null. */
-    public synchronized String answerNameConfirmation(Token answer) {
-        if (!isCurrent(answer) || nameQuestion == null) return null;
-        NameQuestion question = nameQuestion;
+    /** The asked user's very next turn only. Returns the proposal being answered and consumes the question, or null. */
+    synchronized VoiceConfirmation.Proposal answerConfirmation(Token answer) {
+        if (!isCurrent(answer) || confirmation == null) return null;
+        Confirmation question = confirmation;
         if (!question.token.userId.equals(answer.userId) || personalTurns.get(answer.userId) != question.nextPersonalTurn
                 || clock.getAsLong() >= question.expiresAt) return null;
-        nameQuestion = null;
-        return question.candidate;
+        confirmation = null;
+        return question.proposal;
     }
 
     public synchronized void quiet(boolean value) {
         quiet = value;
         invalidate();
         engaged.clear();
-        permissionQuestion = null; nameQuestion = null;
+        permissionQuestion = null; confirmation = null;
     }
 
     public synchronized List<Line> context() { return List.copyOf(context); }
-    /** A private deletion request keeps its delivery token and deduplication, but no previous transcript. */
+    /** A confirmed deletion keeps its delivery token and deduplication, but no previous transcript. */
     public synchronized boolean clearContextFor(Token token) {
         if (!isCurrent(token)) return false;
-        context.clear(); permissionQuestion = null; nameQuestion = null;
+        context.clear(); permissionQuestion = null; confirmation = null;
         return true;
     }
     /** Restore keeps membership and deduplication but retires every old answer and shared transcript. */
     public synchronized void resetContext() {
-        invalidate(); engaged.clear(); permissionQuestion = null; nameQuestion = null; context.clear();
+        invalidate(); engaged.clear(); permissionQuestion = null; confirmation = null; context.clear();
     }
 
     /** Deletion clears temporary context and invalidates pending provider output too. */
     public synchronized void forget(String userId) {
         invalidate();
-        permissionQuestion = null; nameQuestion = null;
+        permissionQuestion = null; confirmation = null;
         engaged.remove(userId);
         context.clear();
     }
@@ -236,13 +222,13 @@ public final class ConversationTurns implements AutoCloseable {
         engaged.clear();
         seen.clear();
         context.clear();
-        permissionQuestion = null; nameQuestion = null;
+        permissionQuestion = null; confirmation = null;
     }
 
     private void invalidate() {
-        if (current != null && heardCharacters > 0 && !control) add(new Line("Herry", current.userId, generated.substring(0, heardCharacters), true, clock.getAsLong()));
+        if (current != null && heardCharacters > 0) add(new Line("Herry", current.userId, generated.substring(0, heardCharacters), true, clock.getAsLong()));
         current = null;
-        greeting = false; control = false;
+        greeting = false;
         generated = "";
         currentInput = ""; currentUtterance = "";
         heardCharacters = 0;
