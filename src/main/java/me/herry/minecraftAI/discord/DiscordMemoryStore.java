@@ -139,7 +139,7 @@ public final class DiscordMemoryStore implements AutoCloseable {
     public CompletableFuture<Snapshot> restore(Path backup) {
         Path path = backup.toAbsolutePath().normalize();
         return submit(() -> {
-            if (!path.getParent().equals(backups) || !MemoryFiles.backups(backups).contains(path)) throw new IOException("unknown backup");
+            if (!path.getParent().equals(backups) || !MemoryFiles.backups(backups).contains(path)) throw new IOException(DiscordCommandErrors.UNKNOWN_BACKUP);
             Snapshot candidate = MemoryFiles.read(path);
             Snapshot next = merge(candidate, state, Math.addExact(Math.max(candidate.revision(), state.revision()), 1));
             // Manual rollback must not clear the user's current, explicitly corrected joke boundary.
@@ -240,7 +240,7 @@ public final class DiscordMemoryStore implements AutoCloseable {
     }
     private <T> CompletableFuture<T> submit(IOOperation<T> operation) {
         CompletableFuture<T> result = new CompletableFuture<>();
-        if (closed.get()) return CompletableFuture.failedFuture(new IllegalStateException("memory closed"));
+        if (closed.get()) return CompletableFuture.failedFuture(new IllegalStateException(DiscordCommandErrors.MEMORY_CLOSED));
         try {
             worker.execute(() -> {
                 try { result.complete(operation.run()); }
