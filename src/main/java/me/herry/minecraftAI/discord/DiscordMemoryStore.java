@@ -115,8 +115,17 @@ public final class DiscordMemoryStore implements AutoCloseable {
                 .filter(f -> !f.expired(clock.getAsLong()) && !state.erased(f)).toList());
     }
 
+    /** Wall-clock times of the last successful and last failed backup; 0 if none. Times only, never contents. */
+    public long lastBackupAt() { return lastBackupAt; }
+    public long lastBackupFailedAt() { return lastBackupFailedAt; }
+    private volatile long lastBackupAt, lastBackupFailedAt;
     public CompletableFuture<Path> backup() {
         return submit(() -> {
+            try { return backupNow(); }
+            catch (IOException | RuntimeException failed) { lastBackupFailedAt = clock.getAsLong(); throw failed; }
+        });
+    }
+    private Path backupNow() throws IOException {
             if (state.revision() == backedRevision) return null;
             long now = clock.getAsLong();
             Snapshot saved = snapshot(state.revision(), state.facts(), state.deleted(), state.erasedKeys());
@@ -131,8 +140,8 @@ public final class DiscordMemoryStore implements AutoCloseable {
             if (newDay) MemoryFiles.write(backups.resolve("daily-" + now / 86_400_000 + "-" + state.revision() + ".mem"), saved);
             prune("periodic-", policy.periodic); prune("daily-", policy.daily);
             backedRevision = state.revision();
+            lastBackupAt = now;
             return path;
-        });
     }
 
     /** Caller must pause Discord processing, invalidate turns, and clear its context before restore. */

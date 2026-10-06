@@ -26,6 +26,15 @@ class DiscordMemoryStoreTest {
     }
     private void name(DiscordMemoryStore store, String name) { store.remember(NAME, name, Evidence.EXPLICIT, "utterance-1", 0).join(); }
 
+    @Test void backupTimesAreRecordedOnlyForBackupsThatWereActuallyWritten() throws Exception {
+        try (var store = open()) {
+            assertEquals(0, store.lastBackupAt()); assertEquals(0, store.lastBackupFailedAt());
+            name(store, "민수"); long first = now; assertNotNull(store.backup().join()); assertEquals(first, store.lastBackupAt());
+            now += 5_000; assertNull(store.backup().join()); assertEquals(first, store.lastBackupAt());
+            name(store, "지수"); now += 5_000; assertNotNull(store.backup().join()); assertEquals(now, store.lastBackupAt());
+            assertEquals(0, store.lastBackupFailedAt());
+        }
+    }
     @Test void restartPreservesConfirmedNameAndRefusal() throws Exception {
         try (var store = open()) { name(store, "민수"); store.remember(STYLE, "REFUSED", Evidence.EXPLICIT, "utterance-2", 0).join(); }
         try (var store = open()) {
