@@ -2,9 +2,7 @@ package me.herry.minecraftAI.discord;
 
 import java.nio.file.Path;
 import java.util.Set;
-import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import static org.junit.jupiter.api.Assertions.*;
@@ -31,25 +29,6 @@ class DiscordPersonalPreferencesTest {
             assertEquals("all", facts.getFirst().key().label()); assertEquals("AVOID", facts.getFirst().value());
             assertEquals(DiscordMemory.Evidence.EXPLICIT, facts.getFirst().evidence());
             assertTrue(reopened.visible(subject("B"), Set.of("A", "B")).get(3, TimeUnit.SECONDS).isEmpty());
-        }
-    }
-    @Test void preferenceChangeCancelsOldTextAndFreshRequestSeesOnlyLatestConfirmedValue() throws Exception {
-        var entered = new CountDownLatch(1); var interrupted = new CountDownLatch(1);
-        var freshRequest = new AtomicReference<ResponsePipeline.Request>();
-        try (var session = session(store(), request -> {
-            if (DialogueContext.currentInput(request).equals("옛 질문")) {
-                entered.countDown();
-                try { new CountDownLatch(1).await(); }
-                catch (InterruptedException cancelled) { interrupted.countDown(); throw cancelled; }
-            }
-            freshRequest.set(request); return "담백한 답변";
-        })) {
-            var old = session.textReply("A", "옛 질문", "old"); assertTrue(entered.await(3, TimeUnit.SECONDS));
-            session.confirmedJokes("A", false, "joke-new").get(3, TimeUnit.SECONDS);
-            assertTrue(interrupted.await(3, TimeUnit.SECONDS)); assertTrue(old.isCompletedExceptionally());
-            var fresh = session.textReply("A", "새 질문", "new").get(3, TimeUnit.SECONDS);
-            assertTrue(session.textCurrent(fresh)); assertEquals(1, freshRequest.get().context().size());
-            assertEquals("AVOID", freshRequest.get().memory().getFirst().value()); session.textSubmitted(fresh);
         }
     }
     @Test void correctionAndDeletionSurviveOldBackupRestoreAndRestart() throws Exception {

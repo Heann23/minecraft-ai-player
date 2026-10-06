@@ -56,7 +56,74 @@ class ConversationMemoryTest {
     private void askName(ConversationTurns turns, String candidate, String id) {
         var question = accept(turns, "A", "해리야 내 이름은 " + candidate + "야", id);
         String text = candidate + "님이라고 부르면 될까요?"; turns.generated(question, text); turns.played(question, text.length());
-        assertTrue(turns.askNameConfirmation(question, candidate, 30_000)); turns.finish(question);
+        assertTrue(turns.askConfirmation(question, VoiceConfirmation.Proposal.name(candidate), 30_000)); turns.finish(question);
+    }
+    private void ask(ConversationTurns turns, VoiceConfirmation.Proposal proposal, String id) {
+        var question = accept(turns, "A", "해리야 부탁이 있어", id); String text = VoiceConfirmation.question(proposal, false);
+        turns.generated(question, text); turns.played(question, text.length());
+        assertTrue(turns.askConfirmation(question, proposal, 30_000)); turns.finish(question);
+    }
+    @Test void spokenLooseningIsOnlyAProposalOfTheSpeakersOwnCurrentTurn() throws Exception {
+        var turns = turns();
+        try (var store = store()) {
+            var memory = new ConversationMemory(turns, store);
+            var token = accept(turns, "A", "해리야 반말해도 돼", "1");
+            assertEquals(VoiceConfirmation.CASUAL_SPEECH, memory.loosening(token, A, "해리야 반말해도 돼", "1"));
+            assertNull(memory.loosening(token, B, "해리야 반말해도 돼", "1")); assertNull(memory.loosening(token, A, "해리야 반말해도 돼", "2"));
+            assertNull(memory.loosening(null, A, "해리야 반말해도 돼", "1"));
+            var later = accept(turns, "A", "해리야 다음", "3"); assertNull(memory.loosening(token, A, "해리야 반말해도 돼", "1"));
+            assertNull(memory.loosening(later, A, "해리야 다음", "3"));
+            assertTrue(store.snapshot().join().facts().isEmpty());
+        } finally { turns.close(); }
+    }
+    @Test void spokenYesAppliesCasualSpeechAndJokesOnlyForTheAskedUser() throws Exception {
+        var turns = turns();
+        try (var store = store()) {
+            var memory = new ConversationMemory(turns, store);
+            ask(turns, VoiceConfirmation.CASUAL_SPEECH, "q1");
+            assertNull(memory.answerConfirmation(accept(turns, "B", "응", "b1"), B, "응", "b1"));
+            var yes = accept(turns, "A", "응", "a1"); var speech = memory.answerConfirmation(yes, A, "응", "a1");
+            assertEquals(ConversationMemory.Answer.CONFIRMED, speech.answer()); speech.saved().join();
+            assertTrue(DiscordPersonalSettings.casual(A, store.visible(A, Set.of("A")).join(), 1000));
+            ask(turns, VoiceConfirmation.JOKES, "q2");
+            var no = accept(turns, "A", "아니", "a2"); var declined = memory.answerConfirmation(no, A, "아니", "a2");
+            assertEquals(ConversationMemory.Answer.DECLINED, declined.answer()); declined.saved().join();
+            assertTrue(store.visible(A, Set.of("A")).join().stream().noneMatch(fact -> fact.key().kind() == Kind.AVOID_JOKE));
+            ask(turns, VoiceConfirmation.JOKES, "q3");
+            var again = accept(turns, "A", "좋아요", "a3"); memory.answerConfirmation(again, A, "좋아요", "a3").saved().join();
+            assertTrue(store.visible(A, Set.of("A")).join().stream().anyMatch(fact -> fact.key().kind() == Kind.AVOID_JOKE && fact.value().equals("ALLOWED")));
+            assertTrue(store.visible(B, Set.of("B")).join().isEmpty());
+        } finally { turns.close(); }
+    }
+    @Test void spokenYesErasesOnlyTheConfirmedScopeAndKeepsTheAnswerTurn() throws Exception {
+        var turns = turns();
+        try (var store = store()) {
+            var memory = new ConversationMemory(turns, store);
+            store.remember(new Key(A, Kind.NAME, "", "preferred"), "민수", Evidence.EXPLICIT, "n", 0).join();
+            store.remember(new Key(A, Kind.AVOID_JOKE, "", "all"), "AVOID", Evidence.EXPLICIT, "j", 0).join();
+            store.remember(new Key(B, Kind.NAME, "", "preferred"), "지수", Evidence.EXPLICIT, "b", 0).join();
+            ask(turns, VoiceConfirmation.Proposal.forget(ConfirmedTextForget.Target.NAME), "q1");
+            var yes = accept(turns, "A", "네", "a1"); var erased = memory.answerConfirmation(yes, A, "네", "a1"); erased.saved().join();
+            assertTrue(turns.isCurrent(yes)); assertTrue(turns.context().isEmpty());
+            var left = store.visible(A, Set.of("A")).join();
+            assertEquals(1, left.size()); assertEquals(Kind.AVOID_JOKE, left.getFirst().key().kind());
+            turns.finish(yes);
+            ask(turns, VoiceConfirmation.Proposal.forget(ConfirmedTextForget.Target.ALL), "q2");
+            var all = accept(turns, "A", "응", "a2"); memory.answerConfirmation(all, A, "응", "a2").saved().join();
+            assertTrue(store.visible(A, Set.of("A")).join().isEmpty());
+            assertEquals("지수", store.visible(B, Set.of("B")).join().getFirst().value());
+        } finally { turns.close(); }
+    }
+    @Test void spokenNameCorrectionIsACandidateToo() throws Exception {
+        var turns = turns();
+        try (var store = store()) {
+            var memory = new ConversationMemory(turns, store); int id = 0;
+            for (String said : java.util.List.of("해리야 내 이름은 민수가 아니라 지수야", "해리야. 앞으로 지수라고 불러 줘", "나를 지수라고 불러 주세요")) {
+                String utterance = "c" + id++; var token = accept(turns, "A", said, utterance);
+                assertEquals("지수", memory.nameCandidate(token, A, said, utterance), said);
+            }
+            assertTrue(store.snapshot().join().facts().isEmpty());
+        } finally { turns.close(); }
     }
     @Test void spokenNameIsOnlyACandidateFromAStrictOwnIntroduction() throws Exception {
         var turns = turns();
@@ -77,22 +144,22 @@ class ConversationMemoryTest {
         var turns = turns();
         try (var store = store()) {
             var memory = new ConversationMemory(turns, store); askName(turns, "민수", "q");
-            var other = accept(turns, "B", "응", "b1"); assertNull(memory.answerNameConfirmation(other, B, "응", "b1"));
-            var yes = accept(turns, "A", "네.", "a1"); var reply = memory.answerNameConfirmation(yes, A, "네.", "a1");
-            assertEquals(ConversationMemory.NameAnswer.CONFIRMED, reply.answer()); assertEquals("민수", reply.name()); reply.saved().join();
+            var other = accept(turns, "B", "응", "b1"); assertNull(memory.answerConfirmation(other, B, "응", "b1"));
+            var yes = accept(turns, "A", "네.", "a1"); var reply = memory.answerConfirmation(yes, A, "네.", "a1");
+            assertEquals(ConversationMemory.Answer.CONFIRMED, reply.answer()); assertEquals(VoiceConfirmation.Proposal.name("민수"), reply.proposal()); reply.saved().join();
             assertEquals("민수", store.visible(A, Set.of("A")).join().getFirst().value()); assertTrue(store.visible(B, Set.of("B")).join().isEmpty());
-            assertNull(memory.answerNameConfirmation(accept(turns, "A", "응", "a2"), A, "응", "a2"));
+            assertNull(memory.answerConfirmation(accept(turns, "A", "응", "a2"), A, "응", "a2"));
         } finally { turns.close(); }
     }
     @Test void spokenNoOrAnythingElseStoresNothing() throws Exception {
         var turns = turns();
         try (var store = store()) {
             var memory = new ConversationMemory(turns, store);
-            askName(turns, "민수", "q1"); var no = accept(turns, "A", "아니요", "n1"); var declined = memory.answerNameConfirmation(no, A, "아니요", "n1");
-            assertEquals(ConversationMemory.NameAnswer.DECLINED, declined.answer()); declined.saved().join();
-            askName(turns, "민수", "q2"); var vague = accept(turns, "A", "음 글쎄요", "m1"); assertNull(memory.answerNameConfirmation(vague, A, "음 글쎄요", "m1"));
-            var late = accept(turns, "A", "응", "m2"); assertNull(memory.answerNameConfirmation(late, A, "응", "m2"));
-            askName(turns, "민수", "q3"); var asking = accept(turns, "A", "응?", "m3"); assertNull(memory.answerNameConfirmation(asking, A, "응?", "m3"));
+            askName(turns, "민수", "q1"); var no = accept(turns, "A", "아니요", "n1"); var declined = memory.answerConfirmation(no, A, "아니요", "n1");
+            assertEquals(ConversationMemory.Answer.DECLINED, declined.answer()); declined.saved().join();
+            askName(turns, "민수", "q2"); var vague = accept(turns, "A", "음 글쎄요", "m1"); assertNull(memory.answerConfirmation(vague, A, "음 글쎄요", "m1"));
+            var late = accept(turns, "A", "응", "m2"); assertNull(memory.answerConfirmation(late, A, "응", "m2"));
+            askName(turns, "민수", "q3"); var asking = accept(turns, "A", "응?", "m3"); assertNull(memory.answerConfirmation(asking, A, "응?", "m3"));
             assertTrue(store.snapshot().join().facts().isEmpty());
         } finally { turns.close(); }
     }

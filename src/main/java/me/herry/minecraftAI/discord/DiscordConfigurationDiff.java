@@ -19,7 +19,8 @@ final class DiscordConfigurationDiff {
                 || !a.voiceChannelId().equals(b.voiceChannelId()) || !a.characterId().equals(b.characterId()) || a.autoConnect() != b.autoConnect()
                 || !running.token().equals(file.token()))
             changed.add("connection");
-        if (a.followupMillis() != b.followupMillis() || a.contextLines() != b.contextLines() || running.greetOnJoin() != file.greetOnJoin())
+        if (a.followupMillis() != b.followupMillis() || a.contextLines() != b.contextLines() || running.greetOnJoin() != file.greetOnJoin()
+                || running.minecraftChat() != file.minecraftChat())
             changed.add("conversation");
         if (!a.backup().equals(b.backup())) changed.add("backup");
         if (Double.compare(running.minimumRms(), file.minimumRms()) != 0 || running.endSilenceMillis() != file.endSilenceMillis()) changed.add("audio");

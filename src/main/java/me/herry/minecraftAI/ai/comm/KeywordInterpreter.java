@@ -8,7 +8,8 @@ import java.util.Locale;
  */
 public final class KeywordInterpreter implements LanguageInterpreter {
     private static final String[] STOP = {"멈춰", "멈춰줘", "그만", "정지", "stop"};
-    private static final String[] RESUME = {"다시 움직", "다시 시작", "계속해", "움직여", "resume"};
+    private static final String[] TEASING = {"장난", "농담", "놀리", "놀려"};
+    private static final String[] RESUME ={"다시 움직", "다시 시작", "계속해", "움직여", "resume"};
     private static final String[] AUTONOMOUS = {"알아서", "하던 거", "하던거", "자유롭게", "마음대로", "auto"};
     private static final String[] HOME = {"집", "거점", "home"};
     // "집에 뭐가 있어?" 같은 질문을 귀환 명령으로 읽지 않도록, 조사까지 붙은 꼴만 본다.
@@ -25,7 +26,8 @@ public final class KeywordInterpreter implements LanguageInterpreter {
         String text = message.text().toLowerCase(Locale.ROOT).trim();
         if (text.isEmpty()) return Intent.NONE;
 
-        if (containsAny(text, STOP)) return Intent.of(Intent.Type.STOP);
+        // "장난 그만해" 는 말버릇을 고쳐 달라는 뜻이지 하던 일을 멈추라는 뜻이 아니다.
+        if (containsAny(text, STOP) && !containsAny(text, TEASING)) return Intent.of(Intent.Type.STOP);
         if (containsAny(text, AUTONOMOUS)) return Intent.of(Intent.Type.AUTONOMOUS);
         if (containsAny(text, RESUME)) return Intent.of(Intent.Type.RESUME);
         if (containsAny(text, HOME) && containsAny(text, COME_BACK)) return Intent.of(Intent.Type.GO_HOME);

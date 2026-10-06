@@ -30,12 +30,11 @@ final class ConfirmedTextPreference {
     private static final Set<String> POLITE = Set.of("존댓말써주세요", "존댓말로말해주세요", "존댓말로해주세요", "존댓말로해", "반말하지마", "반말하지마세요", "반말하지말아주세요");
     private ConfirmedTextPreference() {}
     static Change read(String input) {
-        String personal = input.strip().replaceFirst("(?iu)^(?:해리|Herry)(?:님|씨|야|아)?(?:\\s*[,，:]\\s*|\\s+)", "");
+        String personal = CallWord.body(input);
         var name = ConfirmedTextName.read(personal);
         if (name.isPresent()) return new Change(DiscordMemory.Kind.NAME, name.get());
         boolean question = java.util.regex.Pattern.compile("[?？][.!?。！？]*$").matcher(personal).find();
-        String text = input.strip().replaceAll("\\s+", "").replaceFirst("[.!?。！？]+$", "")
-                .replaceFirst("(?iu)^(?:해리|Herry)(?:님|씨|야|아)?[,:，]?", "");
+        String text = personal.replaceAll("\\s+", "").replaceFirst("[.!?。！？]+$", "");
         if (POLITE.contains(text)) return new Change(DiscordMemory.Kind.SPEECH_AGREEMENT, "REFUSED");
         if (!question && CASUAL.contains(text)) return new Change(DiscordMemory.Kind.SPEECH_AGREEMENT, "ALLOWED");
         if (AVOID.contains(text)) return new Change(DiscordMemory.Kind.AVOID_JOKE, "AVOID");

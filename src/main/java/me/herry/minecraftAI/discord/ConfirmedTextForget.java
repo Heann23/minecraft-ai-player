@@ -44,8 +44,7 @@ final class ConfirmedTextForget {
     }
     static Target read(String input) {
         if (input == null || input.indexOf('?') >= 0 || input.indexOf('？') >= 0) return null;
-        String text = input.strip().replaceFirst("(?iu)^(?:해리|Herry)(?:님|씨|야|아)?(?:\\s*[,，:]\\s*|\\s+)", "")
-                .replaceAll("\\s+", "").replaceAll("[.!。！]+$", "");
+        String text = CallWord.body(input).replaceAll("\\s+", "").replaceAll("[.!。！]+$", "");
         return ALL.contains(text) ? Target.ALL : NAME.contains(text) ? Target.NAME
                 : SPEECH.contains(text) ? Target.SPEECH : JOKE.contains(text) ? Target.JOKE : null;
     }

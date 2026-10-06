@@ -34,8 +34,8 @@ public final class ConversationMemory {
     }
 
     /**
-     * Only settings that remove jokes or casual speech. Misheard speech can at worst make Herry plainer, and a slash command or
-     * text undoes it, so unlike names or consent these may come from STT that is not reliable. Loosening stays text and slash only.
+     * Only settings that remove jokes or casual speech. Misheard speech can at worst make Herry plainer, so unlike names or
+     * consent these are stored at once from STT that is not reliable. Loosening and deleting go through an echoed question.
      */
     static boolean tightening(ConfirmedTextPreference.Change change) {
         return change != null && ((change.kind() == Kind.AVOID_JOKE && change.value().equals("AVOID"))
@@ -53,35 +53,55 @@ public final class ConversationMemory {
         }
     }
 
-    enum NameAnswer { CONFIRMED, DECLINED }
-    /** The asked user's answer to an echoed name. {@code saved} completes once a confirmed name is stored. */
-    record NameReply(NameAnswer answer, String name, CompletableFuture<Void> saved) {}
+    enum Answer { CONFIRMED, DECLINED }
+    /** The asked user's answer to an echoed request. {@code saved} completes once a confirmed change is stored or erased. */
+    record Confirmed(Answer answer, VoiceConfirmation.Proposal proposal, CompletableFuture<Void> saved) {}
 
     /**
-     * A strict spoken self-introduction of this turn. Unreliable STT may mishear a name, so it is never stored from the
-     * introduction itself: the candidate is echoed back and stored only after the same user answers yes. Null if not one.
+     * A strict spoken self-introduction or name correction of this turn. Unreliable STT may mishear a name, so it is never
+     * stored from the sentence itself: the candidate is echoed back and stored only after the same user answers yes. Null if not one.
      */
     String nameCandidate(ConversationTurns.Token token, Subject speaker, String text, String utteranceId) {
         if (text == null || text.length() > 100) return null;
-        String body = text.strip().replaceFirst("(?iu)^(?:해리|Herry)(?:야|아|님|씨)?(?:\\s*[,，:!]\\s*|\\s+)", "");
-        var name = ConfirmedMemoryInput.introducedName(body, true);
+        String body = CallWord.body(text);
+        var name = ConfirmedTextName.read(body);
         if (name.isEmpty() || name.get().replaceFirst("(?:님|씨)$", "").matches("(?iu)해리|Herry")) return null;
         synchronized (turns) {
             return token != null && token.userId().equals(speaker.userId()) && turns.matchesInput(token, text, utteranceId) ? name.get() : null;
         }
     }
+    /**
+     * A spoken request of this turn that would loosen or delete the speaker's own setting: allow casual speech, allow jokes,
+     * or forget. Nothing is stored here; the request is echoed back first. Null if the utterance is not such a request.
+     */
+    VoiceConfirmation.Proposal loosening(ConversationTurns.Token token, Subject speaker, String text, String utteranceId) {
+        var proposal = VoiceConfirmation.request(text);
+        if (proposal == null) return null;
+        synchronized (turns) {
+            return token != null && token.userId().equals(speaker.userId()) && turns.matchesInput(token, text, utteranceId) ? proposal : null;
+        }
+    }
     /** The asked user's exact yes or no on their very next turn. Anything else leaves the question to lapse. Null if not an answer. */
-    NameReply answerNameConfirmation(ConversationTurns.Token token, Subject speaker, String text, String utteranceId) {
+    Confirmed answerConfirmation(ConversationTurns.Token token, Subject speaker, String text, String utteranceId) {
         Boolean yes = ConfirmedYesNo.read(text);
         if (yes == null) return null;
         synchronized (turns) {
             if (token == null || !token.userId().equals(speaker.userId()) || !turns.matchesInput(token, text, utteranceId)) return null;
-            String candidate = turns.answerNameConfirmation(token);
-            if (candidate == null) return null;
-            if (!yes) return new NameReply(NameAnswer.DECLINED, candidate, CompletableFuture.completedFuture(null));
-            return new NameReply(NameAnswer.CONFIRMED, candidate, store.remember(new Key(speaker, Kind.NAME, "", "preferred"),
-                    candidate, Evidence.EXPLICIT, utteranceId, 0).<Void>thenApply(snapshot -> null));
+            var proposal = turns.answerConfirmation(token);
+            if (proposal == null) return null;
+            if (!yes) return new Confirmed(Answer.DECLINED, proposal, CompletableFuture.completedFuture(null));
+            return new Confirmed(Answer.CONFIRMED, proposal, apply(token, speaker, proposal, utteranceId));
         }
+    }
+    /** Caller holds the turn lock, so the write is ordered with every other admission and deletion. */
+    private CompletableFuture<Void> apply(ConversationTurns.Token token, Subject speaker, VoiceConfirmation.Proposal proposal, String utteranceId) {
+        var change = VoiceConfirmation.change(proposal);
+        if (change != null) return store.remember(new Key(speaker, change.kind(), "", change.label()), change.value(), Evidence.EXPLICIT, utteranceId, 0)
+                .thenApply(snapshot -> null);
+        // The answer still has to be spoken, so the turn stays; only the transcript the erased facts came from goes.
+        turns.clearContextFor(token);
+        var target = proposal.target();
+        return (target == ConfirmedTextForget.Target.ALL ? store.forget(speaker) : store.forget(target.key(speaker))).thenApply(snapshot -> null);
     }
 
     /** Clear live model/playback routes and shared context before erasing durable memories. */

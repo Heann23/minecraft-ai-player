@@ -12,21 +12,21 @@ class DiscordVoiceCommandsTest {
             assertFalse(DiscordVoiceCommands.allowed("guild", "guild", action, false));
             assertTrue(DiscordVoiceCommands.allowed("guild", "guild", action, true));
         }
-        for (String action : Set.of("status", "me", "name", "speech", "joke", "forget", "chat", "game", "cancel", "reset")) {
+        for (String action : Set.of("me", "name", "speech", "joke", "forget")) {
             assertTrue(DiscordVoiceCommands.allowed("guild", "guild", action, false));
             assertFalse(DiscordVoiceCommands.allowed("guild", "other", action, true));
         }
     }
     @Test void wrongGuildUnknownCommandAndMissingScopeCannotBeAuthorized() {
         assertFalse(DiscordVoiceCommands.allowed("guild", "other", "leave", true));
-        assertFalse(DiscordVoiceCommands.allowed(null, null, "status", true));
+        assertFalse(DiscordVoiceCommands.allowed(null, null, "me", true));
         assertFalse(DiscordVoiceCommands.allowed("guild", "guild", "delete-other", true));
         assertFalse(DiscordVoiceCommands.allowed("guild", "guild", null, true));
     }
     @Test void personalCommandsExposeNoTargetUserOrGameExecutionOption() {
         var definition = DiscordVoiceCommands.definition();
-        assertEquals("herry", definition.getName()); assertEquals(19, definition.getSubcommands().size());
-        assertEquals(Set.of("status", "me", "game", "chat", "cancel", "reset", "forget", "name", "speech", "joke",
+        assertEquals("herry", definition.getName()); assertEquals(14, definition.getSubcommands().size());
+        assertEquals(Set.of("me", "forget", "name", "speech", "joke",
                 "leave", "resume", "quiet", "listen", "backup", "backups", "restore", "config", "diagnose"),
                 definition.getSubcommands().stream().map(command -> command.getName()).collect(Collectors.toSet()));
         for (var command : definition.getSubcommands()) {
@@ -58,14 +58,13 @@ class DiscordVoiceCommandsTest {
         assertEquals(Set.of("all", "name", "speech", "joke"),
                 scope.getChoices().stream().map(choice -> choice.getAsString()).collect(Collectors.toSet()));
     }
-    @Test void cancelAndResetCannotTargetAnotherPersonOrAcceptExecutionArguments() {
-        for (String action : Set.of("cancel", "reset")) {
-            var command = DiscordVoiceCommands.definition().getSubcommands().stream()
-                    .filter(value -> value.getName().equals(action)).findFirst().orElseThrow();
-            assertTrue(command.getOptions().isEmpty());
-            assertTrue(DiscordVoiceCommands.allowed("guild", "guild", action, false));
-            assertFalse(DiscordVoiceCommands.allowed("guild", "other", action, true));
-            assertFalse(DiscordVoiceCommands.allowed(null, null, action, true));
+    @Test void typedConversationAndStatusLookupsAreNotCommands() {
+        var names = DiscordVoiceCommands.definition().getSubcommands().stream().map(command -> command.getName()).collect(Collectors.toSet());
+        for (String removed : Set.of("chat", "cancel", "reset", "status", "game")) {
+            assertFalse(names.contains(removed), removed);
+            assertFalse(DiscordVoiceCommands.allowed("guild", "guild", removed, true), removed);
         }
+        assertTrue(DiscordVoiceCommands.definition().getSubcommands().stream().flatMap(command -> command.getOptions().stream())
+                .noneMatch(option -> option.getName().equals("message")), "No command accepts free text to talk to Herry");
     }
 }

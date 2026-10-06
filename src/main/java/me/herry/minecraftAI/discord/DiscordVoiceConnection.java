@@ -43,6 +43,9 @@ public final class DiscordVoiceConnection extends ListenerAdapter implements Dis
     private final DiscordSession session;
     private final JdaAudioAdapter audio;
     private final DiscordGameState game;
+    /** Free talk in Minecraft chat; null when the plugin gave no relay, the option is off, or no game AI is named. */
+    private final MinecraftChatRelay chatRelay;
+    private final MinecraftChatConversation chat;
     private final AtomicBoolean stopped = new AtomicBoolean();
     private final AtomicBoolean closed = new AtomicBoolean();
     private final DiscordGatewayReadiness ready = new DiscordGatewayReadiness();
@@ -57,9 +60,14 @@ public final class DiscordVoiceConnection extends ListenerAdapter implements Dis
     }
     public static DiscordVoiceConnection open(Path directory, DiscordConfiguration configuration, String token,
                                                Consumer<String> diagnostic, DiscordGameState game) throws Exception {
+        return open(directory, configuration, token, diagnostic, game, null);
+    }
+    /** With a relay, lines typed in Minecraft chat to the configured game AI join the same dialogue while this connection runs. */
+    public static DiscordVoiceConnection open(Path directory, DiscordConfiguration configuration, String token,
+                                               Consumer<String> diagnostic, DiscordGameState game, MinecraftChatRelay chat) throws Exception {
         // The dialogue needs a model name; say so instead of failing later with a generic start failure.
         if (configuration.dialogue().model().isEmpty()) throw new DiscordStartupFailure(DiscordStartupFailure.Reason.MODEL_MISSING);
-        DiscordVoiceConnection connection = new DiscordVoiceConnection(directory, configuration, diagnostic, game);
+        DiscordVoiceConnection connection = new DiscordVoiceConnection(directory, configuration, diagnostic, game, chat);
         try {
             connection.jda = JDABuilder.createLight(token, GatewayIntent.GUILD_VOICE_STATES)
                     .setMemberCachePolicy(MemberCachePolicy.VOICE).enableCache(CacheFlag.VOICE_STATE)
@@ -73,14 +81,15 @@ public final class DiscordVoiceConnection extends ListenerAdapter implements Dis
             connection.close(); throw new DiscordStartupFailure(DiscordStartupFailure.Reason.TOKEN_REJECTED);
         } catch (Exception | LinkageError failed) { connection.close(); throw failed; }
     }
-    private DiscordVoiceConnection(Path directory, DiscordConfiguration configuration, Consumer<String> diagnostic, DiscordGameState game) throws Exception {
+    private DiscordVoiceConnection(Path directory, DiscordConfiguration configuration, Consumer<String> diagnostic, DiscordGameState game,
+                                   MinecraftChatRelay chatRelay) throws Exception {
         Consumer<String> counted = code -> { counters.record(code); diagnostic.accept(code); };
         this.downstream = diagnostic;
         this.configuration = configuration; this.directory = directory; this.diagnostic = counted; connectWanted = configuration.discord().autoConnect();
         this.game = game;
         dialogue = new OllamaDialogue(configuration.dialogue(), System::currentTimeMillis,
                 game == null ? () -> new DiscordGameState.View(DiscordGameState.Code.NOT_CONFIGURED, null) : game::view);
-        LocalSpeechProviders createdSpeech = null; DiscordMemoryStore store = null;
+        LocalSpeechProviders createdSpeech = null; DiscordMemoryStore store = null; MinecraftChatConversation createdChat = null;
         try {
             createdSpeech = new LocalSpeechProviders(configuration.speech());
             store = new DiscordMemoryStore(directory.resolve("discord"), configuration.discord().backup(), System::currentTimeMillis);
@@ -92,7 +101,14 @@ public final class DiscordVoiceConnection extends ListenerAdapter implements Dis
             session = new DiscordSession(configuration.discord(), store, createdSpeech, personal, createdSpeech, counted,
                     System::currentTimeMillis, () -> TimeUnit.NANOSECONDS.toMillis(System.nanoTime()), true, configuration.capturePolicy(), configuration.greetOnJoin());
             speech = createdSpeech; audio = new JdaAudioAdapter(session, configuration.minimumRms(), counted);
+            if (chatRelay != null && configuration.minecraftChat() && !configuration.targetAi().isEmpty()) {
+                createdChat = new MinecraftChatConversation(configuration.discord(), store, personal, configuration.targetAi(), chatRelay, counted,
+                        System::currentTimeMillis, () -> TimeUnit.NANOSECONDS.toMillis(System.nanoTime()));
+                session.chat(createdChat);
+            }
+            this.chatRelay = chatRelay; chat = createdChat;
         } catch (Exception | LinkageError failed) {
+            if (createdChat != null) createdChat.close();
             if (store != null) store.close(); if (createdSpeech != null) createdSpeech.close(); dialogue.close(); throw failed;
         }
     }
@@ -123,6 +139,8 @@ public final class DiscordVoiceConnection extends ListenerAdapter implements Dis
             if (connectWanted) connectWithNotice().whenComplete((ignored, failed) -> { if (failed != null) diagnostic.accept("discord-connect-failed"); });
         }, failed -> diagnostic.accept("discord-command-registration-failed"));
         diagnostic.accept("discord-gateway-ready");
+        // Only now: a connection that failed to start must leave Minecraft chat with its rule-based answers.
+        if (chat != null && !stopped.get()) { chatRelay.attach(chat); diagnostic.accept("minecraft-chat-ready"); }
     }
     private java.util.concurrent.CompletableFuture<Void> connectWithNotice() {
         var completion = new java.util.concurrent.CompletableFuture<Void>();
@@ -134,7 +152,7 @@ public final class DiscordVoiceConnection extends ListenerAdapter implements Dis
                 Permission.VOICE_SPEAK, Permission.MESSAGE_SEND)) return java.util.concurrent.CompletableFuture.failedFuture(new IllegalStateException("Voice channel permissions unavailable"));
         channel.sendMessage("해리가 이 채널의 음성을 인식해 한국어로 대화합니다. 원본 음성은 파일로 저장하지 않습니다. "
                 + "관리자는 /herry quiet로 수신·답변을 중단하거나 /herry leave로 나가게 할 수 있어요. "
-                + "내 이름·말투는 /herry name, /herry speech로 직접 정하고 /herry forget으로 내 기억을 지울 수 있어요.")
+                + "내 이름·말투·장난 설정은 해리에게 말로 정할 수 있고, /herry name, /herry speech, /herry joke, /herry forget으로도 정하거나 지울 수 있어요.")
                 .setAllowedMentions(Set.of()).timeout(5, TimeUnit.SECONDS).queue(notice -> {
                     if (stopped.get() || !connectWanted || connectAttempt.get() != attempt) { completion.cancel(false); return; }
                     try { guild.getAudioManager().setAutoReconnect(true); guild.getAudioManager().openAudioConnection(channel); completion.complete(null); }
@@ -214,23 +232,6 @@ public final class DiscordVoiceConnection extends ListenerAdapter implements Dis
                             .queue(ignored -> {}, failure -> diagnostic.accept("discord-command-reply-failed"));
                 }); return;
             }
-            if (event.getSubcommandName().equals("chat")) {
-                session.textReply(event.getUser().getId(), java.util.Objects.requireNonNull(event.getOption("message")).getAsString(), event.getId())
-                        .whenComplete((reply, failed) -> {
-                            if (failed != null || stopped.get() || !session.textCurrent(reply)) {
-                                boolean replaced = !stopped.get() && (failed == null || failed instanceof java.util.concurrent.CancellationException
-                                        || failed.getCause() instanceof java.util.concurrent.CancellationException);
-                                hook.editOriginal(replaced ? "이 답변은 취소되었거나 새 요청으로 바뀌었어요. 필요하면 다시 요청해 주세요."
-                                        : "대화를 처리하지 못했어요. 잠시 뒤 다시 시도해 주세요.").queue(ignored -> {}, failure -> diagnostic.accept("discord-command-reply-failed"));
-                                return;
-                            }
-                            hook.editOriginal(reply.text()).setAllowedMentions(Set.of())
-                                    .setCheck(() -> !stopped.get() && session.textCurrent(reply)).queue(sent -> session.textSubmitted(reply), failure -> {
-                                session.textDiscard(reply); diagnostic.accept("discord-command-reply-failed");
-                            });
-                        });
-                return;
-            }
             try { result = command(event); }
             catch (RuntimeException thrown) { result = java.util.concurrent.CompletableFuture.completedFuture(DiscordCommandErrors.synchronous(event.getSubcommandName(), thrown)); }
             result.whenComplete((message, failed) -> hook.editOriginal(failed == null ? message : DiscordCommandErrors.failure(failed))
@@ -241,21 +242,6 @@ public final class DiscordVoiceConnection extends ListenerAdapter implements Dis
     private java.util.concurrent.CompletableFuture<String> command(SlashCommandInteractionEvent event) {
         String user = event.getUser().getId(), source = event.getId();
         return switch (event.getSubcommandName()) {
-            case "reset" -> session.resetText(user).thenApply(ignored ->
-                    "내 임시 텍스트 문맥을 비웠어요. 저장된 호칭·말투·장난 설정은 유지하고 새 대화를 시작해요.");
-            case "cancel" -> session.cancelText(user).thenApply(active -> active
-                    ? "내 텍스트 답변 중단을 요청했어요. 이전 대화와 기억은 유지해요."
-                    : "현재 중단할 내 텍스트 답변이 없어요.");
-            case "game" -> java.util.concurrent.CompletableFuture.completedFuture(game == null ? "게임 상태 연결을 사용할 수 없어요." : game.describe());
-            case "status" -> {
-                var status = session.status();
-                yield java.util.concurrent.CompletableFuture.completedFuture("음성 연결: " + (event.getGuild().getAudioManager().isConnected() ? "연결됨" : "연결 안 됨")
-                        + " · 참가자: " + status.users() + "명 · 기억 저장: " + (status.memoryFailure() ? "확인 필요" : "정상")
-                        + " · 기억 버전: " + status.memoryRevision()
-                        + (status.memoryRecovered() ? " · 백업에서 자동 복구됨: " + java.time.Instant.ofEpochMilli(status.memoryRecoveredAt()) : "")
-                        + (status.rejectedRecoveryPoints() > 0 ? " · 제외한 손상/미래 백업: " + status.rejectedRecoveryPoints() + "개" : "")
-                        + "\n" + session.textStatus().describe() + "\n완료는 답변 준비 완료이며 Discord 전달 확인은 별도예요.");
-            }
             case "forget" -> {
                 var selected = event.getOption("scope");
                 String scope = selected == null ? "all" : selected.getAsString();
@@ -281,7 +267,7 @@ public final class DiscordVoiceConnection extends ListenerAdapter implements Dis
                 var status = session.status(); var guild = event.getGuild();
                 yield java.util.concurrent.CompletableFuture.completedFuture(DiscordDiagnostics.describe(new DiscordDiagnostics.Snapshot(
                         jda == null ? "없음" : jda.getStatus().name(), guild.getAudioManager().isConnected(), audio.listening(), connectWanted,
-                        status.memoryFailure(), session.lastBackupAt(), session.lastBackupFailedAt(), System.currentTimeMillis(), counters.describe())));
+                        status.users(), chat != null && chatRelay.attached(), status.memoryFailure(), session.lastBackupAt(), session.lastBackupFailedAt(), System.currentTimeMillis(), counters.describe())));
             }
             case "config" -> java.util.concurrent.CompletableFuture.supplyAsync(() -> DiscordConfigurationDiff.check(configuration,
                     () -> DiscordConfiguration.load(directory, () -> null)), configCheck);
@@ -304,7 +290,12 @@ public final class DiscordVoiceConnection extends ListenerAdapter implements Dis
             default -> java.util.concurrent.CompletableFuture.completedFuture("지원하지 않는 명령이에요.");
         };
     }
-    @Override public void stop() { stopped.set(true); configCheck.shutdownNow(); if (game != null) game.configure(""); audio.close(); }
+    @Override public void stop() {
+        stopped.set(true); configCheck.shutdownNow();
+        // Chat first and before the store goes: from here the hub gets no dialogue and falls back to the rule answers.
+        if (chat != null) { chatRelay.detach(chat); chat.close(); }
+        if (game != null) game.configure(""); audio.close();
+    }
     @Override public void close() {
         if (!closed.compareAndSet(false, true)) return;
         stop();

@@ -67,7 +67,7 @@ public final class ResponsePipeline implements AutoCloseable {
     synchronized boolean greet(ConversationTurns.Token token, String text) {
         return greet(token, text, null);
     }
-    /** Literal text whose follow-up registration runs only after the whole text was heard, still under the current turn. */
+    /** Literal text whose follow-up registration runs with the final frame of the whole text, under the turn lock and the current turn. */
     synchronized boolean greet(ConversationTurns.Token token, String text, Runnable afterHeard) {
         if (text == null || text.isBlank() || text.length() > 240) throw new IllegalArgumentException("greeting text");
         return admit(new Request(token, List.of(), List.of()), text, afterHeard);
@@ -121,8 +121,12 @@ public final class ResponsePipeline implements AutoCloseable {
                     synchronized (turns) {
                         if (characters >= heard.get() && characters <= sentence.length() && turns.played(request.turn, prefix + characters)) {
                             heard.set(characters);
-                            // Admission is atomic with the final frame, not a later worker wakeup.
-                            if (greeting != null && prefix + characters == response.length()) turns.greeted(request.turn);
+                            // Admission is atomic with the final frame, not a later worker wakeup: a reply that
+                            // starts right as the sentence ends must still find the follow-up or question registered.
+                            if (greeting != null && prefix + characters == response.length()) {
+                                turns.greeted(request.turn);
+                                if (afterHeard != null) afterHeard.run();
+                            }
                         }
                     }
                 });
@@ -132,7 +136,6 @@ public final class ResponsePipeline implements AutoCloseable {
             }
             if (valid(request)) {
                 if (request.permissionQuestion) turns.askCasualPermission(request.turn, 30_000);
-                if (afterHeard != null) afterHeard.run();
                 turns.finish(request.turn);
             }
         } catch (InterruptedException e) {

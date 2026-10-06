@@ -62,41 +62,36 @@ class ConversationTurnsTest {
     @Test void deletionInvalidatesAllPendingContext() { Token token = call("B", "1"); turns.forget("A"); assertFalse(turns.isCurrent(token)); assertTrue(turns.context().isEmpty()); }
     @Test void quietIgnoresFollowupsButAllowsDirectQuestion() { call("A", "1"); turns.quiet(true); assertNull(turns.accept("A", "2", "왜?", Address.UNKNOWN, false).token()); assertNotNull(call("A", "3")); }
     @Test void contextIsBoundedAndCloseIsFinal() { for (int i = 0; i < 10; i++) call("A", "" + i); assertEquals(4, turns.context().size()); turns.close(); assertNull(call("A", "last")); assertThrows(IllegalStateException.class, () -> turns.join("C")); }
-    @Test void controlAcknowledgementKeepsDeliveryButLeavesTranscriptUntouched() {
-        Token earlier = turns.accept("A", "q", "첫 질문", Address.CHARACTER, false).token();
-        Token control = turns.accept("A", "c", "답변 취소해줘", Address.CHARACTER, false).token();
-        assertFalse(turns.isCurrent(earlier)); assertTrue(turns.acknowledgeControl(control, "중단했어요."));
-        assertEquals(java.util.List.of("첫 질문"), turns.context().stream().map(Line::text).toList());
-        assertTrue(turns.played(control, "중단했어요.".length())); turns.finish(control);
-        assertEquals(java.util.List.of("첫 질문"), turns.context().stream().map(Line::text).toList()); assertFalse(turns.busy());
-    }
-    @Test void controlAcknowledgementRejectsRetiredTurnAndSecondAnswer() {
-        Token old = call("A", "1"); Token fresh = call("A", "2");
-        assertFalse(turns.acknowledgeControl(old, "늦은 응답")); assertTrue(turns.acknowledgeControl(fresh, "응답"));
-        assertFalse(turns.acknowledgeControl(fresh, "또 응답")); assertFalse(turns.generated(fresh, "또 응답"));
-    }
-    @Test void controlAcknowledgementDoesNotLeakIntoTheNextAnswer() {
-        Token control = call("A", "1"); turns.acknowledgeControl(control, "응답."); turns.played(control, 3); turns.finish(control);
-        Token next = call("A", "2"); turns.generated(next, "정상 답변"); turns.played(next, 5); turns.finish(next);
-        assertTrue(turns.context().stream().anyMatch(l -> l.assistant() && l.text().equals("정상 답변")));
-    }
     private Token askedName(String user, String id) {
         Token question = call(user, id); String text = "민수님이라고 부르면 될까요?"; turns.generated(question, text); turns.played(question, text.length());
-        assertTrue(turns.askNameConfirmation(question, "민수", 10_000)); turns.finish(question); return question;
+        assertTrue(turns.askConfirmation(question, VoiceConfirmation.Proposal.name("민수"), 10_000)); turns.finish(question); return question;
     }
     @Test void nameConfirmationNeedsAFullyHeardQuestionAndTheTargetsNextTurnOnly() {
         Token unheard = call("A", "u"); turns.generated(unheard, "민수님이라고 부르면 될까요?");
-        assertFalse(turns.askNameConfirmation(unheard, "민수", 10_000)); assertFalse(turns.askNameConfirmation(unheard, " ", 10_000)); turns.finish(unheard);
+        assertFalse(turns.askConfirmation(unheard, VoiceConfirmation.Proposal.name("민수"), 10_000)); turns.finish(unheard);
+        Token heard = call("A", "h"); turns.generated(heard, "질문"); turns.played(heard, 2);
+        assertFalse(turns.askConfirmation(heard, null, 10_000)); assertFalse(turns.askConfirmation(heard, VoiceConfirmation.JOKES, 0)); turns.finish(heard);
         askedName("A", "q");
-        assertNull(turns.answerNameConfirmation(call("B", "b")));
-        Token answer = call("A", "a"); assertEquals("민수", turns.answerNameConfirmation(answer)); assertNull(turns.answerNameConfirmation(answer));
+        assertNull(turns.answerConfirmation(call("B", "b")));
+        Token answer = call("A", "a"); assertEquals(VoiceConfirmation.Proposal.name("민수"), turns.answerConfirmation(answer)); assertNull(turns.answerConfirmation(answer));
     }
     @Test void nameConfirmationLapsesWithTimeLaterTurnsLeaveForgetAndQuiet() {
-        askedName("A", "q1"); now += 10_000; assertNull(turns.answerNameConfirmation(call("A", "late")));
-        askedName("A", "q2"); call("A", "other"); assertNull(turns.answerNameConfirmation(call("A", "later")));
-        askedName("A", "q3"); turns.leave("A"); turns.join("A"); assertNull(turns.answerNameConfirmation(call("A", "after-leave")));
-        askedName("A", "q4"); turns.forget("A"); assertNull(turns.answerNameConfirmation(call("A", "after-forget")));
-        askedName("A", "q5"); turns.quiet(true); assertNull(turns.answerNameConfirmation(call("A", "after-quiet")));
+        askedName("A", "q1"); now += 10_000; assertNull(turns.answerConfirmation(call("A", "late")));
+        askedName("A", "q2"); call("A", "other"); assertNull(turns.answerConfirmation(call("A", "later")));
+        askedName("A", "q3"); turns.leave("A"); turns.join("A"); assertNull(turns.answerConfirmation(call("A", "after-leave")));
+        askedName("A", "q4"); turns.forget("A"); assertNull(turns.answerConfirmation(call("A", "after-forget")));
+        askedName("A", "q5"); turns.quiet(true); assertNull(turns.answerConfirmation(call("A", "after-quiet")));
+    }
+    @Test void aNewerQuestionReplacesTheOlderOneAndAConfirmedDeletionKeepsOnlyTheAnswerTurn() {
+        askedName("A", "q1");
+        Token second = call("A", "q2"); String text = "모두 지울까요?"; turns.generated(second, text); turns.played(second, text.length());
+        var forget = VoiceConfirmation.Proposal.forget(ConfirmedTextForget.Target.ALL);
+        assertTrue(turns.askConfirmation(second, forget, 10_000)); turns.finish(second);
+        Token yes = turns.accept("A", "y", "응", Address.UNKNOWN, false).token();
+        assertEquals(forget, turns.answerConfirmation(yes)); assertFalse(turns.context().isEmpty());
+        assertTrue(turns.clearContextFor(yes)); assertTrue(turns.context().isEmpty()); assertTrue(turns.isCurrent(yes));
+        assertTrue(turns.generated(yes, "지웠어요.")); assertTrue(turns.played(yes, 5)); turns.finish(yes);
+        assertEquals(java.util.List.of("지웠어요."), turns.context().stream().map(Line::text).toList());
     }
     @Test void tokenFromDifferentSessionCannotReplay() { Token token = call("A", "1"); var other = new ConversationTurns(() -> now, 60_000, 4); other.join("A"); assertFalse(other.isCurrent(token)); other.close(); }
 }
