@@ -74,7 +74,13 @@ public final class HomePlans {
 
         boolean bedtime = situation.night || ai.getPerception().isThundering();
         situation.canSleep = home.bed() != null && bedtime && world.getEnvironment() == World.Environment.NORMAL
-                && situation.homeDistance <= SLEEP_TRIP_RANGE && ai.getTicks() >= ai.getSleepRetryAfter();
+                && sleepTripInRange(feet, center) && ai.getTicks() >= ai.getSleepRetryAfter();
+    }
+
+    // 집 바로 아래여도 수십 칸 깊은 광산이면 가까운 침대가 아니다.
+    // 수평 거리만 쓰면 광석 접근을 중단하고 새 상승 굴을 파다가 원래 길에서 멀어진다.
+    static boolean sleepTripInRange(BlockPoint feet, BlockPoint home) {
+        return feet.distanceSq(home) <= SLEEP_TRIP_RANGE * SLEEP_TRIP_RANGE;
     }
 
     // 지금 만들려는 것에 필요한 재료는 상자에 넣지 않는다.
