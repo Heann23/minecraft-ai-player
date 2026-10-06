@@ -98,6 +98,19 @@ public final class CombatSystem {
     }
 
     /**
+     * 달아나지 못했을 때 맞서 싸워도 되는지. 현재 전력으로 감당할 수 있는 상대에게만 적용하며,
+     * 더 가까운 다른 몬스터가 있어도 폭발 거리 안의 크리퍼는 빠뜨리지 않는다.
+     */
+    public static boolean canStandGround(Decision fightAssessment, boolean outnumbered, boolean shotFromOutOfReach,
+                                         List<Hostile> hostiles) {
+        if (fightAssessment != Decision.FIGHT || outnumbered || shotFromOutOfReach) return false;
+        for (Hostile hostile : hostiles) {
+            if (hostile.type() == ThreatType.CREEPER && hostile.distance() <= CREEPER_FLEE_RANGE) return false;
+        }
+        return true;
+    }
+
+    /**
      * 방패 없이도 크리퍼를 상대할 수 있는지. 한 대 치고, 부풀면 뒷걸음으로 물러났다가, 부풀기를 멈추면 다시 친다.
      *
      * @param weaponPower            갑옷과 허기를 반영하지 않은 무기 자체의 공격력

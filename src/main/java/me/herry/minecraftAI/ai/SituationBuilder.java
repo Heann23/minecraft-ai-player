@@ -148,7 +148,6 @@ final class SituationBuilder {
         CombatMemory combatMemory = ai.getCombatMemory();
         long now = ai.getTicks();
         double nearest = Double.MAX_VALUE;
-        boolean nearestIsCreeper = false;
         ThreatType nearestType = null;
         boolean shotFromOutOfReach = false;
         for (Threat threat : perception.getThreats()) {
@@ -172,7 +171,6 @@ final class SituationBuilder {
             if (threat.distance() <= ai.getConfig().fleeDistance) situation.hostileNearby = true;
             if (threat.distance() < nearest) {
                 nearest = threat.distance();
-                nearestIsCreeper = threat.type() == ThreatType.CREEPER;
                 nearestType = threat.type();
             }
         }
@@ -184,7 +182,8 @@ final class SituationBuilder {
                 || CombatSystem.canHitAndRun(rawWeaponPower, combatMemory.retreatBlockedWithin(now, RETREAT_BLOCKED_WINDOW));
         // 이미 상대하던 중이면 교전 범위를 조금 넓게 본다. 경계에 걸친 몬스터 때문에 판단이 매번 뒤바뀌지 않게 한다.
         boolean engagedBefore = combatMemory.wasEngaged();
-        CombatSystem.Decision decision = ai.getCombat().decide(situation.health, situation.maxHealth, weaponPower, hostiles, canFaceBlast, engagedBefore);
+        CombatSystem.Decision fightAssessment = ai.getCombat().decide(situation.health, situation.maxHealth, weaponPower, hostiles, canFaceBlast, engagedBefore);
+        CombatSystem.Decision decision = fightAssessment;
         // 도망치던 중에 체력이 조금 회복됐다고 바로 다시 덤비면, 다가갔다가 맞고 물러나기를 반복하게 된다.
         // 한번 도망쳤으면 얼마 동안은 물러나 있고, 그 뒤에도 확실히 이길 수 있을 때만 다시 싸운다.
         if (decision == CombatSystem.Decision.FIGHT) {
@@ -196,7 +195,7 @@ final class SituationBuilder {
         }
         // 땅속에서는 보이는 한두 마리를 잡으러 나서면 그 주변의 몬스터가 모두 이쪽을 보고 몰려온다.
         // 보이지 않는 것까지 합쳐서 감당할 수 없으면 나서지 않고, 몬스터가 아직 멀리 있을 때 물러나 숨는다.
-        boolean outnumbered = decision == CombatSystem.Decision.FIGHT && situation.underground
+        boolean outnumbered = fightAssessment == CombatSystem.Decision.FIGHT && situation.underground
                 && ai.getCombat().isOutnumbered(situation.health, situation.maxHealth, weaponPower, around);
         if (outnumbered) decision = CombatSystem.Decision.FLEE;
         if (shotFromOutOfReach) decision = CombatSystem.Decision.FLEE;
@@ -207,9 +206,11 @@ final class SituationBuilder {
         // 한번 맞서기로 했으면 적이 한 걸음 멀어졌다고 다시 도망치지 않고 얼마 동안은 계속 싸운다.
         boolean stuckFleeing = ai.getMemory().countRecentFailures("RunAway", now, CORNERED_WINDOW) > 0
                 || combatMemory.hitsWhileFleeing(now, BEATEN_WINDOW) >= BEATEN_HITS;
-        boolean cornered = nearest <= CORNERED_RANGE && !nearestIsCreeper && stuckFleeing;
+        // 지금 전력으로 감당할 수 없으면, 이전의 궁지 대응 기억으로 도주 판단을 뒤집지 않는다.
+        boolean canStandGround = CombatSystem.canStandGround(fightAssessment, outnumbered, shotFromOutOfReach, hostiles);
+        boolean cornered = nearest <= CORNERED_RANGE && canStandGround && stuckFleeing;
         if (decision == CombatSystem.Decision.FLEE && cornered) combatMemory.onStandGround(now, STAND_GROUND_TICKS);
-        if (decision == CombatSystem.Decision.FLEE && !nearestIsCreeper && combatMemory.isStandingGround(now)) {
+        if (decision == CombatSystem.Decision.FLEE && canStandGround && combatMemory.isStandingGround(now)) {
             decision = CombatSystem.Decision.FIGHT;
         }
         situation.combat = decision;
