@@ -308,20 +308,4 @@ class DiscordSessionTest {
             speech(session, "B", "민수님 어디예요"); request(); play(session); assertEquals(3, models.get());
         }
     }
-    @Test void directTextJokeBoundaryInterruptsOldVoiceAndAcknowledgesWithoutAnotherModelCall() throws Exception {
-        var entered = new CountDownLatch(1); var interrupted = new CountDownLatch(1); var store = store();
-        try (var session = session(store, (pcm, language) -> new SpeechRecognitionWorker.Recognition(transcriptions.take(), true), request -> {
-            models.incrementAndGet(); entered.countDown();
-            try { new CountDownLatch(1).await(); return "폐기할 장난"; }
-            catch (InterruptedException cancelled) { interrupted.countDown(); throw cancelled; }
-        })) {
-            session.participants(Set.of("A"), Map.of()).get(3, TimeUnit.SECONDS);
-            speech(session, "A", "해리님, 인사해 주세요"); await(entered);
-            var reply = session.textReply("A", "해리님, 장난 그만해 주세요", "joke-stop").get(3, TimeUnit.SECONDS);
-            assertEquals("미안해요. 장난은 멈추고 담백하게 이야기할게요.", reply.text());
-            assertTrue(session.textCurrent(reply)); session.textSubmitted(reply); await(interrupted);
-            assertNull(session.nextFrame()); assertEquals(1, models.get());
-            assertTrue(session.personalSettings("A").get(3, TimeUnit.SECONDS).text().contains("장난 중단"));
-        }
-    }
 }

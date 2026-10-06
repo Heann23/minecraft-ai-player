@@ -61,22 +61,5 @@ public final class DiscordGameState implements AutoCloseable {
         return new View(code, latest);
     }
     public synchronized long diagnosticFailures() { return diagnosticFailures; }
-    public synchronized String describe() {
-        var view = view();
-        if (view.code() != Code.FRESH) return switch (view.code()) {
-            case NOT_CONFIGURED -> "연결할 게임 AI가 아직 지정되지 않았어요. 관리자가 discord.yml의 game.target-ai에 AI 이름을 설정해 주세요.";
-            case NOT_FOUND -> "설정한 게임 AI가 현재 서버에 없어요. 지금 게임 상태는 알 수 없어요.";
-            default -> "현재 게임 상태를 확인하지 못했어요. 오래된 상태를 현재 상태로 말하지 않을게요.";
-        };
-        var state = view.snapshot();
-        String items = state.items().entrySet().stream().sorted(java.util.Map.Entry.comparingByKey()).limit(12)
-                .map(item -> item.getKey() + " " + item.getValue() + "개").collect(java.util.stream.Collectors.joining(", "));
-        if (state.items().size() > 12) items += " · 그 외 " + (state.items().size() - 12) + "종류";
-        return state.aiName() + ": " + state.activity() + ". 체력 " + Math.round(state.health() * 10) / 10.0 + ", 허기 " + state.food()
-                + ".\n위치: " + state.dimension() + " " + state.x() + ", " + state.y() + ", " + state.z()
-                + (state.reason().isEmpty() ? "" : "\n마지막 판단 이유: " + state.reason())
-                + "\n현재 인벤토리 종류·개수: " + (items.isEmpty() ? "비어 있어요." : items)
-                + "\n서버에서 최근 확인한 상태예요. 아이템 별명·사연이나 과거 경험은 이 자료로 확인할 수 없어요.";
-    }
     @Override public synchronized void close() { closed = true; target = ""; latest = null; code = Code.STOPPED; }
 }

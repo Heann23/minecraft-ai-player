@@ -31,7 +31,6 @@ public final class DiscordSession implements AutoCloseable {
     private final SpeechRecognitionWorker speech;
     private final PcmPlayback playback;
     private final ResponsePipeline responses;
-    private final DiscordTextConversation textConversation;
     private final Consumer<String> diagnostic;
     private final ThreadPoolExecutor events;
     private final ScheduledExecutorService timer;
@@ -82,7 +81,6 @@ public final class DiscordSession implements AutoCloseable {
         turns = new ConversationTurns(wallClock, settings.followupMillis(), settings.contextLines());
         memory = new ConversationMemory(turns, store); ingress = new VoiceIngress(java.util.Objects.requireNonNull(capturePolicy), monotonicMillis);
         playback = new PcmPlayback(); responses = new ResponsePipeline(turns, model, voice, playback, this.diagnostic);
-        textConversation = new DiscordTextConversation(settings, store, model, wallClock, this::beforeTextPreference);
         events = new ThreadPoolExecutor(1, 1, 0, TimeUnit.MILLISECONDS, new ArrayBlockingQueue<>(128), r -> daemon(r, "MinecraftAI-discord-events"));
         speech = new SpeechRecognitionWorker(ingress, recognizer, result -> {
             pendingRecognitions.incrementAndGet();
@@ -270,7 +268,6 @@ public final class DiscordSession implements AutoCloseable {
         return post(() -> {
             if (memoryMaintenance) throw new IllegalStateException(DiscordCommandErrors.RESTORE_IN_PROGRESS);
             greetings.clearPending(); staleNames();
-            textConversation.forget(userId);
             ingress.reset(); speech.refreshRoutes(); turns.cancelCurrent(); responses.cancel();
             return memory.forget(subject);
         });
@@ -289,7 +286,7 @@ public final class DiscordSession implements AutoCloseable {
         var key = target.key(subject);
         return post(() -> {
             if (memoryMaintenance) throw new IllegalStateException(DiscordCommandErrors.RESTORE_IN_PROGRESS);
-            greetings.clearPending(); textConversation.forget(userId); staleNames();
+            greetings.clearPending(); staleNames();
             ingress.reset(); speech.refreshRoutes(); responses.cancel();
             return memory.forget(key);
         });
@@ -319,17 +316,8 @@ public final class DiscordSession implements AutoCloseable {
         return post(() -> {
             if (memoryMaintenance) throw new IllegalStateException(DiscordCommandErrors.RESTORE_IN_PROGRESS);
             greetings.clearPending();
-            textConversation.forget(userId);
             ingress.reset(); speech.refreshRoutes(); turns.forget(userId); responses.cancel();
             return store.remember(key, value, DiscordMemory.Evidence.EXPLICIT, "slash-" + interactionId, 0).thenApply(snapshot -> null);
-        });
-    }
-    private CompletableFuture<Void> beforeTextPreference(String user, java.util.function.BooleanSupplier current) {
-        return post(() -> {
-            if (!current.getAsBoolean()) return done();
-            if (memoryMaintenance) throw new IllegalStateException(DiscordCommandErrors.RESTORE_IN_PROGRESS);
-            greetings.clearPending(); staleNames(); ingress.reset(); speech.refreshRoutes(); turns.forget(user); responses.cancel();
-            return done();
         });
     }
     public CompletableFuture<String> backup() {
@@ -349,7 +337,7 @@ public final class DiscordSession implements AutoCloseable {
         MemoryFiles.requireBackupName(identifier);
         return post(() -> {
             if (memoryMaintenance) throw new IllegalStateException(DiscordCommandErrors.RESTORE_IN_PROGRESS);
-            memoryMaintenance = true; textConversation.reset(); greetings.clearPending(); staleNames(); turns.quiet(true); turns.resetContext(); responses.cancel(); ingress.reset(); speech.refreshRoutes();
+            memoryMaintenance = true; greetings.clearPending(); staleNames(); turns.quiet(true); turns.resetContext(); responses.cancel(); ingress.reset(); speech.refreshRoutes();
             CompletableFuture<Void> result = new CompletableFuture<>();
             store.restoreBackup(identifier).whenComplete((snapshot, error) -> post(() -> {
                 memoryMaintenance = false;
@@ -360,44 +348,8 @@ public final class DiscordSession implements AutoCloseable {
         });
     }
     public PcmPlayback.Frame nextFrame() { return playback.nextFrame(); }
-    /** Drops only temporary private text state; the persistent store and shared voice context are untouched. */
-    public CompletableFuture<Void> resetText(String user) {
-        new DiscordMemory.Subject(settings.guildId(), settings.characterId(), user);
-        return post(() -> { textConversation.forget(user); return done(); });
-    }
-    public CompletableFuture<Boolean> cancelText(String user) {
-        new DiscordMemory.Subject(settings.guildId(), settings.characterId(), user);
-        CompletableFuture<Boolean> result = new CompletableFuture<>();
-        post(() -> { result.complete(textConversation.cancelPending(user)); return done(); })
-                .whenComplete((ignored, error) -> { if (error != null) result.completeExceptionally(error); });
-        return result;
-    }
-    public CompletableFuture<DiscordTextConversation.Reply> textReply(String user, String text, String interaction) {
-        CompletableFuture<DiscordTextConversation.Reply> result = new CompletableFuture<>();
-        var active = new java.util.concurrent.atomic.AtomicReference<CompletableFuture<DiscordTextConversation.Reply>>();
-        result.whenComplete((reply, error) -> {
-            if (result.isCancelled()) { var pending = active.get(); if (pending != null) pending.cancel(true); }
-        });
-        post(() -> {
-            if (result.isCancelled()) return done();
-            if (memoryMaintenance) throw new IllegalStateException(DiscordCommandErrors.RESTORE_IN_PROGRESS);
-            var pending = textConversation.reply(user, text, interaction); active.set(pending);
-            if (result.isCancelled()) pending.cancel(true);
-            return pending.thenAccept(reply -> { if (!result.complete(reply)) textConversation.discard(reply); });
-        }).whenComplete((ignored, error) -> {
-            if (error == null) return;
-            var cause = error instanceof java.util.concurrent.CompletionException ? error.getCause() : error;
-            if (cause instanceof java.util.concurrent.CancellationException) result.cancel(false);
-            else result.completeExceptionally(error);
-        });
-        return result;
-    }
     public long lastBackupAt() { return store.lastBackupAt(); }
     public long lastBackupFailedAt() { return store.lastBackupFailedAt(); }
-    public boolean textCurrent(DiscordTextConversation.Reply reply) { return textConversation.current(reply); }
-    public DiscordTextConversation.Status textStatus() { return textConversation.status(); }
-    public void textSubmitted(DiscordTextConversation.Reply reply) { textConversation.submitted(reply); }
-    public void textDiscard(DiscordTextConversation.Reply reply) { textConversation.discard(reply); }
     public boolean submitted(PcmPlayback.Frame frame) { return playback.submitted(frame); }
     public Status status() {
         var memoryStatus = store.status();
@@ -451,7 +403,7 @@ public final class DiscordSession implements AutoCloseable {
         if (!closed.compareAndSet(false, true)) return;
         timer.shutdownNow();
         synchronized (eventGate) { ingress.close(); turns.close(); userCount = 0; }
-        textConversation.close(); responses.close(); playback.close(); speech.close();
+        responses.close(); playback.close(); speech.close();
         for (Runnable task : events.shutdownNow()) if (task instanceof DiscordSession.Event event) event.result.cancel(false);
         pendingEvents.forEach(result -> result.cancel(false)); store.close();
     }
