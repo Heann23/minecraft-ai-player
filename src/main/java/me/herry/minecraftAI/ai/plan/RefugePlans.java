@@ -9,7 +9,6 @@ import me.herry.minecraftAI.ai.combat.CombatSystem;
 import me.herry.minecraftAI.ai.inventory.InventorySystem;
 import me.herry.minecraftAI.ai.navigation.BukkitTerrainView;
 import me.herry.minecraftAI.ai.navigation.Enclosure;
-import me.herry.minecraftAI.ai.navigation.PathGoal;
 import me.herry.minecraftAI.ai.navigation.RefugeSearch;
 import me.herry.minecraftAI.ai.perception.PerceptionSystem;
 import me.herry.minecraftAI.ai.perception.Visibility;
@@ -84,7 +83,7 @@ public final class RefugePlans {
         ai.getCombatMemory().onRefuge(now);
         List<Action> actions = new ArrayList<>();
         for (BlockPoint block : refuge.toBreak()) actions.add(new BreakBlockAction(block));
-        if (!refuge.cell().equals(feet)) actions.add(new MoveToAction(PathGoal.arrive(refuge.cell(), 0.3), false));
+        actions.add(MoveToAction.enterCell(refuge.cell()));
         for (BlockPoint block : refuge.toSeal()) actions.add(new PlaceFillerAction(block));
         // 나중에 굴을 이어 팔 때 몬스터가 있던 쪽이 아니라 숨어든 쪽으로 판다.
         BlockFace direction = faceOf(refuge.cell().x() - feet.x(), refuge.cell().z() - feet.z());
