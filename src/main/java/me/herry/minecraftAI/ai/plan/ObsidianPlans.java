@@ -74,7 +74,9 @@ public final class ObsidianPlans {
         BlockPoint stand = feet.offset(0, -2, 0);
         BukkitTerrainView terrain = new BukkitTerrainView(world);
         // 보통 물가와 구별한다: 손이 닿는 곳에 흑요석이나 용암이 있어야 한다.
-        return !ObsidianSite.reachable(stand, cell -> isObsidianOrLava(world, cell), terrain).isEmpty();
+        // 마지막으로 닿는 블록까지 캤어도 드롭 회수와 물 회수는 아직 끝나지 않았다.
+        return !ObsidianSite.reachable(stand, cell -> isObsidianOrLava(world, cell), terrain).isEmpty()
+                || looseObsidian(ai.getPlayer()) > 0;
     }
 
     public static boolean knowsLake(AIPlayer ai) {
