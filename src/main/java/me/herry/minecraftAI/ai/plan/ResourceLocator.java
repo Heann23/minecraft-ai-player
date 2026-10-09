@@ -62,6 +62,7 @@ public final class ResourceLocator {
             // 집의 벽과 바닥으로 쓴 돌은 캐러 갈 자원이 아니다.
             if (isResource(type) && home != null && home.isInsideBuilding(worldId, pos)) continue;
             if (!canGatherAt(type, pos, from, step -> shafts.isStep(worldId, step))) continue;
+            if (isResource(type) && memory.contains(MemoryType.MINING_OBSTRUCTED, worldId, pos, now)) continue;
             // 청크가 내려가 있으면 확인할 수 없으니 이번에는 후보에서만 뺀다.
             if (!Positions.isLoaded(world, pos)) continue;
             if (BlockScanner.interestOf(Positions.block(world, pos).getType()) != type) {

@@ -2,6 +2,9 @@ package me.herry.minecraftAI.ai.action;
 
 import me.herry.minecraftAI.ai.AIBody;
 import me.herry.minecraftAI.ai.AIPlayer;
+import me.herry.minecraftAI.ai.navigation.AStarSearch;
+import me.herry.minecraftAI.ai.navigation.BlockClass;
+import me.herry.minecraftAI.ai.navigation.BukkitTerrainView;
 import me.herry.minecraftAI.ai.util.BlockPoint;
 import me.herry.minecraftAI.ai.util.Positions;
 import org.bukkit.Location;
@@ -22,6 +25,7 @@ public final class EnterPortalAction extends AbstractAction {
     private static final int OUTSIDE_TICKS = 15;
     // 한쪽으로 나가려는데 이만큼 지나도 못 나갔으면 반대쪽으로 나간다.
     private static final int FLIP_TICKS = 30;
+    private static final float FACING_TOLERANCE = 30.0F;
 
     private final BlockPoint portal;
     private World world;
@@ -29,6 +33,8 @@ public final class EnterPortalAction extends AbstractAction {
     private int leavingTicks;
     private int outsideTicks;
     private int side = 1;
+    private BlockPoint exitOrigin;
+    private BlockPoint exit;
 
     public EnterPortalAction(BlockPoint portal) {
         super("EnterPortal", TIMEOUT);
@@ -40,6 +46,9 @@ public final class EnterPortalAction extends AbstractAction {
         Player player = ai.getPlayer();
         world = player.getWorld();
         leaving = isInPortal(player);
+        if (leaving) exitOrigin = Positions.feet(player.getLocation());
+        ai.getBody().inputMove(0.0F, 0.0F);
+        ai.getBody().inputJump(false);
         ai.getBody().inputSprint(false);
     }
 
@@ -61,14 +70,30 @@ public final class EnterPortalAction extends AbstractAction {
         boolean alongX = isFrameOrPortal(portal.offset(1, 0, 0)) || isFrameOrPortal(portal.offset(-1, 0, 0));
 
         if (leaving) {
-            if (!inside && ++outsideTicks >= OUTSIDE_TICKS) {
-                leaving = false;
+            BukkitTerrainView terrain = new BukkitTerrainView(world);
+            BlockPoint next = safeExit(terrain, alongX, side);
+            BlockPoint opposite = safeExit(terrain, alongX, -side);
+            if (next == null || inside && ++leavingTicks % FLIP_TICKS == 0 && opposite != null) {
+                if (opposite == null) {
+                    fail("no safe portal exit");
+                    return;
+                }
+                side = -side;
+                next = opposite;
+            }
+            if (!next.equals(exit)) {
+                exit = next;
+                ai.debug("Leaving portal safely via " + exit);
+            }
+            if (!inside) {
+                // 포탈을 벗어났으면 바로 멈춘다. 작은 생성 발판의 다음 칸은 용암이나 낭떠러지일 수 있다.
+                body.inputMove(0.0F, 0.0F);
+                body.inputJump(false);
+                if (++outsideTicks >= OUTSIDE_TICKS) leaving = false;
                 return;
             }
-            if (inside && ++leavingTicks % FLIP_TICKS == 0) side = -side;
-            double x = portal.x() + 0.5 + (alongX ? 0.0 : 2.0 * side);
-            double z = portal.z() + 0.5 + (alongX ? 2.0 * side : 0.0);
-            walkToward(body, location, x, z, inside);
+            outsideTicks = 0;
+            walkToward(body, location, exit.x() + 0.5, exit.z() + 0.5, true);
             return;
         }
 
@@ -88,14 +113,30 @@ public final class EnterPortalAction extends AbstractAction {
     protected void onEnd(AIPlayer ai) {
         ai.getBody().inputMove(0.0F, 0.0F);
         ai.getBody().inputJump(false);
+        ai.getBody().inputSprint(false);
+    }
+
+    // 포탈 바로 옆의 마른 지지칸만 쓴다. 한 칸 낮은 바닥은 허용하되, 물이나 지지 없는 칸으로는 나가지 않는다.
+    private BlockPoint safeExit(BukkitTerrainView terrain, boolean alongX, int direction) {
+        for (int dy = 0; dy >= -1; dy--) {
+            BlockPoint cell = exitOrigin.offset(alongX ? 0 : direction, dy, alongX ? direction : 0);
+            if (terrain.classify(cell.x(), cell.y(), cell.z()) != BlockClass.OPEN
+                    || terrain.classify(cell.x(), cell.y() + 1, cell.z()) != BlockClass.OPEN
+                    || terrain.classify(cell.x(), cell.y() - 1, cell.z()) != BlockClass.SOLID) continue;
+            if (AStarSearch.isStandable(terrain, cell.x(), cell.y(), cell.z())) return cell;
+        }
+        return null;
     }
 
     private void walkToward(AIBody body, Location location, double x, double z, boolean move) {
         double dx = x - location.getX();
         double dz = z - location.getZ();
         boolean close = dx * dx + dz * dz < 0.04;
-        if (!close) body.inputLook(Positions.yawTo(dx, dz), 0.0F);
-        body.inputMove(move && !close ? 1.0F : 0.0F, 0.0F);
+        float yaw = Positions.yawTo(dx, dz);
+        if (!close) body.inputLook(yaw, 0.0F);
+        // 돌아서는 동안 전진하면, 포탈 재진입 전에 반대편 발판 밖으로 걸어 나갈 수 있다.
+        boolean facing = Math.abs(Positions.angleDifference(location.getYaw(), yaw)) < FACING_TOLERANCE;
+        body.inputMove(move && !close && facing ? 1.0F : 0.0F, 0.0F);
         body.inputJump(false);
     }
 
@@ -104,6 +145,7 @@ public final class EnterPortalAction extends AbstractAction {
     }
 
     private boolean isFrameOrPortal(BlockPoint cell) {
+        if (!Positions.isLoaded(world, cell) || cell.y() < world.getMinHeight() || cell.y() >= world.getMaxHeight()) return false;
         Material type = Positions.block(world, cell).getType();
         return type == Material.NETHER_PORTAL || type == Material.OBSIDIAN;
     }

@@ -62,9 +62,14 @@ public final class TerrainPlans {
     private TerrainPlans() {
     }
 
-    // 머리 위로 땅이 두껍게 덮여 있는지. 나뭇잎은 지붕으로 치지 않아서 숲속은 지하로 보지 않는다.
+    // 머리 위와 주변 대부분이 땅으로 덮여 있는지. 산의 국소적인 바위 지붕과 나뭇잎은 지하로 보지 않는다.
     public static boolean isDeepUnderground(World world, BlockPoint feet) {
-        return SurfaceRules.isDeepUnderground(hasCeiling(world), surfaceY(world, feet.x(), feet.z()), feet.y(), CAVE_DEPTH);
+        boolean ceiling = hasCeiling(world);
+        int surface = surfaceY(world, feet.x(), feet.z());
+        if (!SurfaceRules.isDeepUnderground(ceiling, surface, feet.y(), CAVE_DEPTH)) return false;
+        // 읽지 못하는 청크를 지상의 출구로 가정하지 않는다. 높이맵 8곳만 읽고 청크를 새로 불러오지 않는다.
+        return SurfaceRules.isDeepUnderground(ceiling, surface, feet.y(), CAVE_DEPTH,
+                countHigherSamples(world, feet, PIT_RADIUS, CAVE_DEPTH, true));
     }
 
     // 머리 위로 하늘이 열려 있는지 (나뭇잎은 가린 것으로 치지 않는다). 굴이나 동굴 안이면 false.
@@ -84,7 +89,10 @@ public final class TerrainPlans {
     public static boolean needsToClimb(AIPlayer ai) {
         World world = ai.getPlayer().getWorld();
         BlockPoint feet = ai.getPosition();
-        return isDeepUnderground(world, feet) || isInPit(world, feet);
+        // 좁은 굴의 바깥은 낮은 지면일 수 있다. 가까이 기록된 굴의 입구가 위에 있으면 접근로를 내서라도 올라간다.
+        boolean inRecordedShaft = !isUnderOpenSky(world, feet)
+                && ShaftPlans.hasHigherShaft(ai);
+        return inRecordedShaft || isDeepUnderground(world, feet) || isInPit(world, feet);
     }
 
     // 주변(반경 3칸)의 지면이 발보다 높은 곳이 많은지. 갇혔을 때 위로 나갈지 아래로 나갈지 정한다.
@@ -93,12 +101,19 @@ public final class TerrainPlans {
     }
 
     private static int countHigherSamples(World world, BlockPoint feet, int radius, int minDiff) {
+        return countHigherSamples(world, feet, radius, minDiff, false);
+    }
+
+    private static int countHigherSamples(World world, BlockPoint feet, int radius, int minDiff, boolean unknownIsHigher) {
         int higher = 0;
         for (int i = 0; i < 8; i++) {
             double angle = Math.PI * i / 4.0;
             int x = feet.x() + (int) Math.round(Math.cos(angle) * radius);
             int z = feet.z() + (int) Math.round(Math.sin(angle) * radius);
-            if (!world.isChunkLoaded(x >> 4, z >> 4)) continue;
+            if (!world.isChunkLoaded(x >> 4, z >> 4)) {
+                if (unknownIsHigher) higher++;
+                continue;
+            }
             if (SurfaceRules.isHigherGround(hasCeiling(world), surfaceY(world, x, z), feet.y(), minDiff)) higher++;
         }
         return higher;
@@ -133,8 +148,9 @@ public final class TerrainPlans {
         World world = ai.getPlayer().getWorld();
         boolean underShaft = cutsShaft(ai, world, new BukkitTerrainView(world), ai.getPosition().offset(0, 2, 0));
         List<Action> aside = hidden || underShaft ? digTunnel(ai, false) : List.<Action>of();
-        // 캘 것 없이 숨은 자리 안에서 걷기만 하는 것은 자리를 옮기는 것이 아니다.
-        if (aside.stream().anyMatch(BreakBlockAction.class::isInstance)) return aside;
+        // 이미 파낸 안전한 옆 칸으로도 이동한다. 그 칸으로 옮겨야 다음 벽에 계단을 낼 수 있다.
+        // 이동 계획을 버리면 같은 벽 앞에서 기다리다가 몬스터 쪽 천장을 열게 된다.
+        if (!aside.isEmpty()) return aside;
 
         List<Action> pillar = pillarUp(ai, null);
         if (!pillar.isEmpty()) {

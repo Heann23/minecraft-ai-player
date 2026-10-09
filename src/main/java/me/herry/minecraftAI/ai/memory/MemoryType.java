@@ -31,6 +31,8 @@ public enum MemoryType {
     LOOT_CHEST(true),
     // 가 보려 했지만 길이 없었던 곳. 같은 대상을 계속 다시 고르지 않기 위해 잠시 기억한다.
     UNREACHABLE(false),
+    // 귀환 발판을 허물어야 캘 수 있었던 대상. 일반 길 막힘과 달리 옆길 접근도 잠시 보류한다.
+    MINING_OBSTRUCTED(false),
     // 멀리서 나뭇잎이 보여서 가 본(가 보기로 한) 곳. 원목이 없는 덤불을 계속 다시 찾아가지 않기 위해 잠시 기억한다.
     CHECKED_PLACE(false);
 

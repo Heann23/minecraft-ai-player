@@ -18,9 +18,10 @@ public final class GoalReasons {
     public static String explain(GoalType goal, Situation s) {
         String target = s.nextMilestone == null ? "다음 준비물" : s.nextMilestone.label();
         return switch (goal) {
-            case IDLE -> waitsForMorning(s) ? waitingBelow(target) : "지금 할 수 있는 일이 없어서 잠깐 기다리고 있어요";
+            case IDLE -> waitsForMorning(s) ? waitingBelow(s.workPickaxeNeedsWood ? "작업용 돌 곡괭이" : target) : "지금 할 수 있는 일이 없어서 잠깐 기다리고 있어요";
             case ESCAPE_DANGER -> escapeReason(s);
-            case SURVIVE -> s.sealedIn ? "몬스터를 피해 숨은 자리에서 체력이 " + (int) Math.ceil(s.health) + " 에서 회복되기를 기다리고 있어요"
+            case SURVIVE -> GoalSystem.waitsInRefuge(s) ? "회복할 음식이 없어 몬스터가 많은 밤 동안 피신처에서 아침을 기다리고 있어요"
+                    : s.sealedIn ? "몬스터를 피해 숨은 자리에서 체력이 " + (int) Math.ceil(s.health) + " 에서 회복되기를 기다리고 있어요"
                     : "체력이 " + (int) Math.ceil(s.health) + " 밖에 안 남아서 싸움을 피하고 회복해야 해요";
             case FIGHT_HOSTILE -> "이길 수 있는 몬스터가 가까이 와서 먼저 처리하려고요";
             case ASSIST_ALLY -> "동료가 몬스터에게 공격받고 있어서요";
@@ -34,9 +35,11 @@ public final class GoalReasons {
             case STORE_ITEMS -> "가방 빈칸이 " + s.emptySlots + "칸이고 당장 안 쓰는 것이 " + s.storableSlots + "칸 있어서 집 상자에 넣어 두려고요";
             case PICKUP_ITEMS -> "근처에 떨어진 아이템이 있어서요";
             case FETCH_ITEMS -> target + "에 필요한 재료가 집 상자에 있어서, 새로 구하는 대신 꺼내 오려고요";
-            case FIND_WOOD -> GoalSystem.packsWoodForTrip(s) ? "땅속에는 나무가 없어서, 내려가기 전에 챙길 나무를 찾고 있어요"
+            case FIND_WOOD -> s.workPickaxeNeedsWood ? "작업용 돌 곡괭이를 보충할 막대가 없어서 나무를 찾고 있어요"
+                    : GoalSystem.packsWoodForTrip(s) ? "땅속에는 나무가 없어서, 내려가기 전에 챙길 나무를 찾고 있어요"
                     : target + "에 나무가 필요한데 아는 나무가 없어서 찾아야 해요";
-            case COLLECT_WOOD -> s.treeUnfinished ? "베던 나무를 끝까지 베려고요"
+            case COLLECT_WOOD -> s.workPickaxeNeedsWood ? "작업용 돌 곡괭이를 보충할 막대를 만들려고 나무를 모으고 있어요"
+                    : s.treeUnfinished ? "베던 나무를 끝까지 베려고요"
                     : GoalSystem.packsWoodForTrip(s) ? "땅속에는 나무가 없어서, 내려가기 전에 곡괭이 자루와 연료로 쓸 나무를 챙기려고요"
                     : target + "에 쓸 나무가 부족해서요";
             // 작업대가 필요할 때는 다음에 이룰 것이 작업대 자체로 잡혀 있어서, 무엇을 만들려는지는 따로 알 수 없다.
@@ -98,7 +101,7 @@ public final class GoalReasons {
 
     // 땅속에서 밤을 나는 중이다. 할 일이 없는 것이 아니라, 올라가야 하는 일을 아침으로 미룬 것이다.
     private static boolean waitsForMorning(Situation s) {
-        return GoalSystem.staysBelow(s) && s.need == Situation.Need.WOOD;
+        return GoalSystem.staysBelow(s) && (s.need == Situation.Need.WOOD || s.workPickaxeNeedsWood);
     }
 
     private static String waitingBelow(String target) {
@@ -106,6 +109,7 @@ public final class GoalReasons {
     }
 
     private static String exploreReason(Situation s) {
+        if (s.workPickaxeNeedsWood && GoalSystem.staysBelow(s)) return waitingBelow("작업용 돌 곡괭이");
         Milestone next = s.nextMilestone;
         if (next == null) return "해야 할 일을 다 마쳐서 주변을 둘러보고 있어요";
         if (waitsForMorning(s)) return waitingBelow(next.label());

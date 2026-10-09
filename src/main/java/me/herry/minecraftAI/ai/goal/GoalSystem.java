@@ -110,7 +110,8 @@ public final class GoalSystem {
         register(GoalType.CRAFT_WORK_TOOL, situation -> situation.workPickaxeWanted ? 313.0 : 0.0);
         register(GoalType.BUILD_SHELTER, GoalSystem::buildShelter);
         register(GoalType.COLLECT_WOOD, GoalSystem::collectWood);
-        register(GoalType.FIND_WOOD, situation -> wantsWood(situation) && !situation.knowsTree ? 240.0 : 0.0);
+        register(GoalType.FIND_WOOD, situation -> wantsWood(situation) && !situation.knowsTree
+                ? situation.workPickaxeNeedsWood ? 311.0 : 240.0 : 0.0);
         register(GoalType.MINE_STONE, GoalSystem::mineStone);
         register(GoalType.MINE_IRON, GoalSystem::mineIron);
         // 다이아몬드는 귀하므로 보이면 다른 광석보다 먼저 캔다. 철보다 낮은 곡괭이로 캐면 아무것도 나오지 않는다.
@@ -222,14 +223,20 @@ public final class GoalSystem {
     // 체력이 낮을 때 싸움을 피하고 먹거나 쉬어서 회복한다.
     private static double survive(Situation situation) {
         boolean canEat = situation.hasFood && situation.food < 20;
-        // 숨은 자리에서는 체력이 넉넉히 돌아올 때까지 나가지 않는다. 회복할 방법이 없으면 기다려도 소용없으니 나간다.
+        // 회복할 음식이 없어도 밤에 안전한 봉쇄를 뜯고 나가지는 않는다. 허기 0의 실제 기아는 예외다.
         if (situation.sealedIn && situation.health < situation.maxHealth * REFUGE_LEAVE_HEALTH) {
-            return canEat || situation.canRegenerate ? 850.0 : 0.0;
+            return canEat || situation.canRegenerate || waitsInRefuge(situation) ? 850.0 : 0.0;
         }
         if (situation.healthState == SurvivalSystem.HealthState.OK) return 0.0;
         if (situation.combat == CombatSystem.Decision.FIGHT) return 0.0;
         boolean canRest = situation.canRegenerate && !situation.hostileNearby;
         return canEat || canRest ? 850.0 : 0.0;
+    }
+
+    public static boolean waitsInRefuge(Situation situation) {
+        return situation.sealedIn && situation.health < situation.maxHealth * REFUGE_LEAVE_HEALTH
+                && situation.food > 0 && situation.surfaceTooLate
+                && !situation.canRegenerate && !(situation.hasFood && situation.food < 20);
     }
 
     // 동료가 도움을 청하면 하던 일을 멈추고 도우러 간다. 자기 몸이 성하지 않으면 나서지 않는다.
@@ -294,6 +301,7 @@ public final class GoalSystem {
      * 돌 곡괭이에 쓸 돌을 캐기 전에 부서진다.
      */
     private static double mineCoal(Situation situation) {
+        if (situation.workPickaxeNeedsWood) return 0.0;
         if (!situation.hasPickaxe || situation.inventoryFull) return 0.0;
         if (situation.coalVeinNearby && situation.canMineIron && situation.coal < VEIN_CAP) return 312.0;
         if (!situation.knowsCoal) return 0.0;
@@ -302,6 +310,7 @@ public final class GoalSystem {
 
     // 철은 다음 장비에 필요할 때 찾아가서 캐고, 눈앞에 보이는 광맥은 필요한 양과 상관없이 다 캔다(갑옷에 많이 든다).
     private static double mineIron(Situation situation) {
+        if (situation.workPickaxeNeedsWood) return 0.0;
         if (situation.ironVeinNearby && situation.canMineIron && !situation.inventoryFull
                 && situation.rawIron + situation.ironIngots < VEIN_CAP) return 312.0;
         return wantsIron(situation) && situation.knowsIron ? 200.0 : 0.0;
@@ -428,6 +437,7 @@ public final class GoalSystem {
     }
 
     private static boolean wantsWood(Situation situation) {
+        if (situation.workPickaxeNeedsWood) return !staysBelow(situation);
         if (situation.nextMilestone == null || staysBelow(situation)) return false;
         if (situation.need == Situation.Need.WOOD) return true;
         // 제련할 철은 모였는데 화로에 넣을 연료가 없으면 나무를 구한다.
@@ -443,6 +453,7 @@ public final class GoalSystem {
     private static double collectWood(Situation situation) {
         // 발판 위에 올라가 있으면 마저 베고 내려오는 것이 먼저다.
         if (situation.climbing) return 335.0;
+        if (situation.workPickaxeNeedsWood && !staysBelow(situation) && situation.knowsTree && !situation.inventoryFull) return 311.0;
         if (situation.treeUnfinished && !situation.inventoryFull) {
             boolean chopping = situation.currentGoal == GoalType.COLLECT_WOOD;
             double finish = chopping && situation.hasPickaxe ? 310.0 : 298.0;
@@ -477,6 +488,7 @@ public final class GoalSystem {
     }
 
     private static boolean wantsIron(Situation situation) {
+        if (situation.workPickaxeNeedsWood) return false;
         return situation.need == Situation.Need.IRON && situation.hasPickaxe && !hasEnoughOre(situation);
     }
 
@@ -486,6 +498,7 @@ public final class GoalSystem {
 
     // 다이아몬드는 철 곡괭이 이상으로만 캘 수 있다. 필요한 만큼 모이면 더 찾아다니지 않는다.
     private static boolean wantsDiamond(Situation situation) {
+        if (situation.workPickaxeNeedsWood) return false;
         return situation.need == Situation.Need.DIAMOND && situation.canMineDiamond && situation.diamonds < situation.diamondsNeeded;
     }
 }

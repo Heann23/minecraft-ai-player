@@ -68,6 +68,12 @@ final class ShaftPlans {
         return !ShaftAccess.canReach(new BukkitTerrainView(ai.getPlayer().getWorld()), feet, FollowPathAction.waypointGoal(above));
     }
 
+    // 접근로가 막혔어도 가까운 굴의 입구가 위에 있으면 먼저 올라갈 길을 만든다.
+    static boolean hasHigherShaft(AIPlayer ai) {
+        return ai.getTeam().getShafts().higher(ai.getWorldId(), ai.getPosition(),
+                SHAFT_CLIMB_RANGE, SHAFT_MIN_DEPTH) != null;
+    }
+
     // 지금 있는 굴을 따라 입구까지 걸어 올라간다.
     static List<Action> followShaftUp(AIPlayer ai) {
         if (shaftFailedRecently(ai)) return List.of();
@@ -104,6 +110,11 @@ final class ShaftPlans {
         List<BlockPoint> points = dead.points();
         BlockPoint back = points.get(Math.max(0, points.size() - 1 - DEAD_END_BACK_OFF));
         if (back.equals(feet)) return List.of();
+        BukkitTerrainView terrain = new BukkitTerrainView(ai.getPlayer().getWorld());
+        if (!ShaftAccess.canReach(terrain, feet, FollowPathAction.waypointGoal(back))) {
+            ai.debug("Known tunnel backtrack has no reachable access from " + feet + " to " + back);
+            return List.of();
+        }
         ai.debug("Nothing more to dig at the end of the tunnel at " + dead.end() + ", going back to " + back + " to dig another way");
         return List.of(new FollowPathAction(List.of(back)));
     }

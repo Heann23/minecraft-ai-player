@@ -224,7 +224,7 @@ public final class BreakBlockAction extends AbstractAction implements PrimitiveA
         }
         // 대상 자체가 광석 발판인 경우도 보호한다. 가리는 블록만 검사하면 발판의 석탄을 직접 캐 버린다.
         if (ai.getTeam().getShafts().isStep(world.getUID(), next.offset(0, 1, 0))) {
-            ai.getMemory().rememberUnreachable(world.getUID(), target, ai.getTicks());
+            ai.getMemory().rememberMiningObstructed(world.getUID(), target, ai.getTicks());
             fail("would cut the way out");
             return;
         }
@@ -276,6 +276,18 @@ public final class BreakBlockAction extends AbstractAction implements PrimitiveA
 
     // 눈과 목표 블록 사이를 가로막는 첫 번째 블록. 목표가 바로 보이면 null.
     private @Nullable Block findObstruction(Player player) {
+        return findObstruction(player, world, target);
+    }
+
+    /** Plans approaching a blocked resource must preserve the same shaft supports as mining. */
+    public static boolean wouldCutShaftFrom(AIPlayer ai, BlockPoint target) {
+        World world = ai.getPlayer().getWorld();
+        Block obstruction = findObstruction(ai.getPlayer(), world, target);
+        BlockPoint next = obstruction == null ? target : Positions.of(obstruction);
+        return ai.getTeam().getShafts().isStep(world.getUID(), next.offset(0, 1, 0));
+    }
+
+    private static @Nullable Block findObstruction(Player player, World world, BlockPoint target) {
         Location eye = player.getEyeLocation();
         Vector direction = Positions.center(world, target).toVector().subtract(eye.toVector());
         double distance = direction.length();

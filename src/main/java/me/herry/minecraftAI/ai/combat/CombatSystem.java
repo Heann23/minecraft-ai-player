@@ -33,11 +33,15 @@ public final class CombatSystem {
     private static final double STARVING_PENALTY = 0.7;
 
     private final double engageRange;
-    private final double criticalHealth;
+    private final double retreatHealth;
 
     public CombatSystem(double engageRange, double criticalHealth) {
+        this(engageRange, criticalHealth, criticalHealth);
+    }
+
+    public CombatSystem(double engageRange, double criticalHealth, double lowHealth) {
         this.engageRange = engageRange;
-        this.criticalHealth = criticalHealth;
+        this.retreatHealth = Math.max(criticalHealth, lowHealth);
     }
 
     /**
@@ -78,7 +82,9 @@ public final class CombatSystem {
         }
         if (!engaged) return Decision.NONE;
 
-        if (health <= criticalHealth) return Decision.FLEE;
+        // 저체력에서 전력이 근소하게 앞서도 먼저 다가가 싸우지 않는다. 초기 평가부터 도주해야
+        // 궁지 대응도 이 평가를 보고 음식 찾기·피신을 다시 전투로 바꾸지 않는다.
+        if (health <= retreatHealth) return Decision.FLEE;
         return threat > strength(health, maxHealth, weaponPower) ? Decision.FLEE : Decision.FIGHT;
     }
 
@@ -95,6 +101,19 @@ public final class CombatSystem {
             if (hostile.type().isHostileMob() && hostile.distance() <= engageRange) threat += hostile.type().danger();
         }
         return threat > strength(health, maxHealth, weaponPower);
+    }
+
+    /**
+     * 달아나지 못했을 때 맞서 싸워도 되는지. 현재 전력으로 감당할 수 있는 상대에게만 적용하며,
+     * 더 가까운 다른 몬스터가 있어도 폭발 거리 안의 크리퍼는 빠뜨리지 않는다.
+     */
+    public static boolean canStandGround(Decision fightAssessment, boolean outnumbered, boolean shotFromOutOfReach,
+                                         List<Hostile> hostiles) {
+        if (fightAssessment != Decision.FIGHT || outnumbered || shotFromOutOfReach) return false;
+        for (Hostile hostile : hostiles) {
+            if (hostile.type() == ThreatType.CREEPER && hostile.distance() <= CREEPER_FLEE_RANGE) return false;
+        }
+        return true;
     }
 
     /**

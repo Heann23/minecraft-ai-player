@@ -21,6 +21,68 @@ class CombatSystemTest {
         return new Hostile(ThreatType.ZOMBIE, distance, false);
     }
 
+    // 실제 철기 회귀: 체력6·허기6·돌 도끼로 좀비 한 마리에게 먼저 다가가다 음식 탐색을 취소하고 죽었다.
+    @Test
+    void lowHealthPreventsStartingAMarginalFightAndStandingGround() {
+        CombatSystem configured = new CombatSystem(16, 4, 8);
+        double hungryAxe = STONE_SWORD * CombatSystem.readiness(0, 6);
+        List<Hostile> single = List.of(zombie(15));
+        assertTrue(CombatSystem.strength(6, 20, hungryAxe) > ThreatType.ZOMBIE.danger());
+        Decision assessment = configured.decide(6, 20, hungryAxe, single);
+        assertEquals(Decision.FLEE, assessment);
+        assertFalse(CombatSystem.canStandGround(assessment, false, false, single));
+        assertEquals(Decision.FLEE, configured.decide(8, 20, STONE_SWORD, single));
+        assertEquals(Decision.FIGHT, configured.decide(9, 20, STONE_SWORD, single));
+        assertEquals(Decision.NONE, configured.decide(6, 20, hungryAxe, List.of(zombie(21))));
+    }
+
+    // 회귀: 도주가 실패하자 체력 8로 여섯 마리에게 맞서면서, 막 시작한 피신굴을 취소했다.
+    @Test
+    void doesNotStandGroundWhenTheCurrentFightIsTooDangerous() {
+        List<Hostile> group = List.of(new Hostile(ThreatType.SKELETON, 3, true), zombie(4), zombie(5),
+                zombie(6), new Hostile(ThreatType.SPIDER, 7, true), new Hostile(ThreatType.CREEPER, 8, false));
+        Decision assessment = combat.decide(8, 20, 3.36, group, true);
+        assertEquals(Decision.FLEE, assessment);
+        assertFalse(CombatSystem.canStandGround(assessment, false, false, group));
+
+        List<Hostile> single = List.of(zombie(2));
+        Decision critical = combat.decide(4, 20, 3.36, single, true);
+        assertFalse(CombatSystem.canStandGround(critical, false, false, single));
+    }
+
+    // 보이는 상대는 감당 가능해도, 동굴 주변의 무리와 닿지 않는 활 공격 때문에 물러나는 판단은 보존한다.
+    @Test
+    void doesNotOverrideTheOtherReasonsToRetreat() {
+        List<Hostile> visible = List.of(zombie(3));
+        Decision assessment = combat.decide(20, 20, STONE_SWORD, visible);
+        List<Hostile> around = List.of(zombie(3), zombie(4), zombie(5), zombie(6), zombie(7), zombie(8));
+        boolean outnumbered = combat.isOutnumbered(20, 20, STONE_SWORD, around);
+        assertEquals(Decision.FIGHT, assessment);
+        assertTrue(outnumbered);
+        assertFalse(CombatSystem.canStandGround(assessment, outnumbered, false, visible));
+        assertFalse(CombatSystem.canStandGround(assessment, false, true, visible));
+    }
+
+    // 회귀: 크리퍼가 3칸 앞에 있어도 거미가 2칸 앞에 오면, 가장 가까운 적만 보고 다시 싸웠다.
+    @Test
+    void doesNotIgnoreACloseCreeperBehindANearerSpider() {
+        List<Hostile> mixed = List.of(new Hostile(ThreatType.SPIDER, 2, true), new Hostile(ThreatType.CREEPER, 3, true));
+        Decision unprotected = combat.decide(20, 20, 3.36, mixed, false);
+        assertFalse(CombatSystem.canStandGround(unprotected, false, false, mixed));
+        Decision protectedFight = combat.decide(20, 20, 3.36, mixed, true);
+        assertEquals(Decision.FIGHT, protectedFight);
+        assertFalse(CombatSystem.canStandGround(protectedFight, false, false, mixed));
+    }
+
+    // 감당 가능한 좀비에게서 달아나지 못하면, 기존 궁지 대응으로 맞설 수 있다.
+    @Test
+    void keepsStandingGroundAgainstAManageableNonExplosiveOpponent() {
+        List<Hostile> single = List.of(zombie(2));
+        Decision assessment = combat.decide(20, 20, STONE_SWORD, single);
+        assertTrue(CombatSystem.canStandGround(assessment, false, false, single));
+        assertFalse(CombatSystem.canStandGround(Decision.NONE, false, false, List.of()));
+    }
+
     // 갑옷이 좋으면 같은 무기로도 더 많은 상대를 감당하고, 굶주렸으면 덜 감당한다.
     @Test
     void armorAndHungerChangeHowMuchItCanTakeOn() {

@@ -96,7 +96,7 @@ public final class AIController {
         this.experience = !config.recordExperience ? null : new JsonlExperienceWriter(
                 plugin.getDataFolder().toPath().resolve("training-data"), config.experienceMaxBytes, plugin.getLogger()::warning);
         this.services = new AIServices(config, debugger, crafting,
-                new CombatSystem(config.engageRange, config.criticalHealth),
+                new CombatSystem(config.engageRange, config.criticalHealth, config.lowHealth),
                 new SurvivalSystem(config.lowHealth, config.criticalHealth, config.eatBelow),
                 new Planner(), team, budget, experience == null ? ExperienceSink.NONE : experience,
                 plugin.getPluginMeta().getVersion(), plugin.getLogger()::warning);

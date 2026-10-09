@@ -91,6 +91,20 @@ class RefugeGoalsTest {
         assertFalse(memory.isWaryAfterRefuge(5001));
     }
 
+    @Test
+    void remainsWaryWhileProtectedEvenAfterTheInitialTwoMinuteWindow() {
+        CombatMemory memory = new CombatMemory();
+        memory.onRefuge(5000);
+        assertTrue(memory.updateSealedIn(true, 5001));
+        assertFalse(memory.updateSealedIn(true, 8000));
+        assertTrue(memory.isWaryAfterRefuge(8000));
+        assertTrue(memory.updateSealedIn(false, 8001));
+        assertTrue(memory.isWaryAfterRefuge(10400));
+        assertFalse(memory.isWaryAfterRefuge(10401));
+        memory.reset();
+        assertFalse(memory.isWaryAfterRefuge(8000));
+    }
+
     // 다가갈 길이 없었던 몬스터는 한동안(300틱) 적어 두었다가 다시 시도한다.
     @Test
     void remembersUnreachableMonstersForAWhile() {
