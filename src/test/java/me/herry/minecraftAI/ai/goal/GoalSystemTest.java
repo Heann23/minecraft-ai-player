@@ -1,10 +1,12 @@
 package me.herry.minecraftAI.ai.goal;
 
+import me.herry.minecraftAI.ai.brain.GoalReasons;
 import me.herry.minecraftAI.ai.combat.CombatSystem;
 import me.herry.minecraftAI.ai.survival.SurvivalSystem;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class GoalSystemTest {
@@ -479,5 +481,150 @@ class GoalSystemTest {
         situation.inLava = false;
         situation.knowsTree = true;
         assertTrue(goals.select(situation, 0L).score() < GoalSystem.EMERGENCY_SCORE);
+    }
+
+    // 회귀: 체력 10, 허기 4에서 회복할 음식이 없다는 이유로 밤에 숨은 자리를 나와 다시 공격받았다.
+    // 허기는 낮아도 0은 아니므로 당장 굶어 죽지 않고, 체력 10은 기존 LOW 기준보다 높다.
+    private static Situation hungryInRefugeAtNight() {
+        Situation situation = new Situation();
+        situation.currentGoal = GoalType.SURVIVE;
+        situation.health = 10.0;
+        situation.maxHealth = 20.0;
+        situation.healthState = SurvivalSystem.HealthState.OK;
+        situation.food = 4;
+        situation.shouldEat = true;
+        situation.starving = true;
+        situation.hasFood = false;
+        situation.canRegenerate = false;
+        situation.sealedIn = true;
+        situation.hostileNearby = true;
+        situation.night = true;
+        situation.surfaceTooLate = true;
+        return situation;
+    }
+
+    @Test
+    void keepsTheNightRefugeWithoutFoodOrNaturalRegeneration() {
+        Situation situation = hungryInRefugeAtNight();
+        // 사냥으로 목표가 바뀌었더라도 밖으로 나가기 전에 안전 대기로 되돌아온다.
+        situation.currentGoal = GoalType.FIND_FOOD;
+        assertEquals(420.0, goals.score(GoalType.FIND_FOOD, situation));
+        assertEquals(new GoalSystem.Selection(GoalType.SURVIVE, 850.0), goals.select(situation, 0L));
+
+        // 밖에 사냥감이 보여도 막힌 자리의 보호를 버리고 나가지는 않는다.
+        situation.preyNearby = true;
+        assertEquals(700.0, goals.score(GoalType.FIND_FOOD, situation));
+        assertEquals(GoalType.SURVIVE, select(situation));
+    }
+
+    @Test
+    void usesSurfaceSafetyAtDuskAndWhileAnyHungerRemains() {
+        Situation situation = hungryInRefugeAtNight();
+        situation.night = false;
+        situation.food = 1;
+        // 아직 밤이 아니어도 나갔다 돌아오기에는 늦은 시간이다.
+        assertEquals(GoalType.SURVIVE, select(situation));
+    }
+
+    @Test
+    void leavesTheNightRefugeToFindFoodAtZeroHunger() {
+        Situation situation = hungryInRefugeAtNight();
+        situation.food = 0;
+        assertEquals(0.0, goals.score(GoalType.SURVIVE, situation));
+        assertEquals(GoalType.FIND_FOOD, select(situation));
+    }
+
+    @Test
+    void resumesForagingWhenMorningMakesTheSurfaceSafe() {
+        Situation situation = hungryInRefugeAtNight();
+        situation.night = false;
+        situation.surfaceTooLate = false;
+        assertEquals(0.0, goals.score(GoalType.SURVIVE, situation));
+        assertEquals(GoalType.FIND_FOOD, select(situation));
+    }
+
+    @Test
+    void resumesForagingWhenNoProtectedRefugeRemains() {
+        Situation situation = hungryInRefugeAtNight();
+        situation.sealedIn = false;
+        situation.hostileNearby = false;
+        assertEquals(0.0, goals.score(GoalType.SURVIVE, situation));
+        assertEquals(GoalType.FIND_FOOD, select(situation));
+    }
+
+    @Test
+    void leavesTheHungryRefugeAtTheExistingHealthBoundary() {
+        Situation situation = hungryInRefugeAtNight();
+        situation.health = 15.5;
+        assertEquals(GoalType.SURVIVE, select(situation));
+
+        situation.health = 16.0;
+        assertEquals(0.0, goals.score(GoalType.SURVIVE, situation));
+        assertEquals(GoalType.FIND_FOOD, select(situation));
+    }
+
+    @Test
+    void immediateDangersStillOverrideHungryNightWaiting() {
+        Situation situation = hungryInRefugeAtNight();
+        situation.inLava = true;
+        assertEquals(GoalType.ESCAPE_DANGER, select(situation));
+        situation.inLava = false;
+
+        situation.standingInDanger = true;
+        assertEquals(GoalType.ESCAPE_DANGER, select(situation));
+        situation.standingInDanger = false;
+
+        situation.suffocating = true;
+        assertEquals(GoalType.ESCAPE_DANGER, select(situation));
+        situation.suffocating = false;
+
+        situation.drowning = true;
+        assertEquals(GoalType.ESCAPE_DANGER, select(situation));
+        situation.drowning = false;
+
+        situation.combat = CombatSystem.Decision.FLEE;
+        assertEquals(GoalType.ESCAPE_DANGER, select(situation));
+    }
+
+    @Test
+    void stillEatsInsideTheRefugeWhenFoodIsAvailableDuringTheDay() {
+        Situation situation = hungryInRefugeAtNight();
+        situation.night = false;
+        situation.surfaceTooLate = false;
+        situation.hasFood = true;
+        situation.foodCount = 1;
+        assertEquals(GoalType.SURVIVE, select(situation));
+        assertTrue(GoalReasons.explain(GoalType.SURVIVE, situation).contains("회복"));
+    }
+
+    @Test
+    void stillRestsInsideTheRefugeWhenNaturalRegenerationIsPossible() {
+        Situation situation = hungryInRefugeAtNight();
+        situation.night = false;
+        situation.surfaceTooLate = false;
+        situation.food = 18;
+        situation.starving = false;
+        situation.canRegenerate = true;
+        assertEquals(GoalType.SURVIVE, select(situation));
+        assertTrue(GoalReasons.explain(GoalType.SURVIVE, situation).contains("회복"));
+    }
+
+    @Test
+    void ordinaryHealthyHungerStillSelectsFoodRatherThanNightWaiting() {
+        Situation situation = hungryInRefugeAtNight();
+        situation.health = 20.0;
+        situation.sealedIn = false;
+        situation.hasFood = true;
+        situation.foodCount = 1;
+        assertEquals(GoalType.FIND_FOOD, select(situation));
+    }
+
+    @Test
+    void explainsWaitingForNightSafetyWithoutClaimingHealthWillRecover() {
+        Situation situation = hungryInRefugeAtNight();
+        String reason = GoalReasons.explain(select(situation), situation);
+        assertTrue(reason.contains("밤"), reason);
+        assertTrue(reason.contains("아침"), reason);
+        assertFalse(reason.contains("회복되기를 기다"), reason);
     }
 }

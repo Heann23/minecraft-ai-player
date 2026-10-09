@@ -20,7 +20,8 @@ public final class GoalReasons {
         return switch (goal) {
             case IDLE -> waitsForMorning(s) ? waitingBelow(s.workPickaxeNeedsWood ? "작업용 돌 곡괭이" : target) : "지금 할 수 있는 일이 없어서 잠깐 기다리고 있어요";
             case ESCAPE_DANGER -> escapeReason(s);
-            case SURVIVE -> s.sealedIn ? "몬스터를 피해 숨은 자리에서 체력이 " + (int) Math.ceil(s.health) + " 에서 회복되기를 기다리고 있어요"
+            case SURVIVE -> GoalSystem.waitsInRefuge(s) ? "회복할 음식이 없어 몬스터가 많은 밤 동안 피신처에서 아침을 기다리고 있어요"
+                    : s.sealedIn ? "몬스터를 피해 숨은 자리에서 체력이 " + (int) Math.ceil(s.health) + " 에서 회복되기를 기다리고 있어요"
                     : "체력이 " + (int) Math.ceil(s.health) + " 밖에 안 남아서 싸움을 피하고 회복해야 해요";
             case FIGHT_HOSTILE -> "이길 수 있는 몬스터가 가까이 와서 먼저 처리하려고요";
             case ASSIST_ALLY -> "동료가 몬스터에게 공격받고 있어서요";

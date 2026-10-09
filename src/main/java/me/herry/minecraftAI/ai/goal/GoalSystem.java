@@ -223,14 +223,20 @@ public final class GoalSystem {
     // 체력이 낮을 때 싸움을 피하고 먹거나 쉬어서 회복한다.
     private static double survive(Situation situation) {
         boolean canEat = situation.hasFood && situation.food < 20;
-        // 숨은 자리에서는 체력이 넉넉히 돌아올 때까지 나가지 않는다. 회복할 방법이 없으면 기다려도 소용없으니 나간다.
+        // 회복할 음식이 없어도 밤에 안전한 봉쇄를 뜯고 나가지는 않는다. 허기 0의 실제 기아는 예외다.
         if (situation.sealedIn && situation.health < situation.maxHealth * REFUGE_LEAVE_HEALTH) {
-            return canEat || situation.canRegenerate ? 850.0 : 0.0;
+            return canEat || situation.canRegenerate || waitsInRefuge(situation) ? 850.0 : 0.0;
         }
         if (situation.healthState == SurvivalSystem.HealthState.OK) return 0.0;
         if (situation.combat == CombatSystem.Decision.FIGHT) return 0.0;
         boolean canRest = situation.canRegenerate && !situation.hostileNearby;
         return canEat || canRest ? 850.0 : 0.0;
+    }
+
+    public static boolean waitsInRefuge(Situation situation) {
+        return situation.sealedIn && situation.health < situation.maxHealth * REFUGE_LEAVE_HEALTH
+                && situation.food > 0 && situation.surfaceTooLate
+                && !situation.canRegenerate && !(situation.hasFood && situation.food < 20);
     }
 
     // 동료가 도움을 청하면 하던 일을 멈추고 도우러 간다. 자기 몸이 성하지 않으면 나서지 않는다.
