@@ -10,6 +10,7 @@ import me.herry.minecraftAI.ai.util.BlockPoint;
 import me.herry.minecraftAI.ai.util.Positions;
 import org.bukkit.Location;
 import org.bukkit.World;
+import org.bukkit.HeightMap;
 import org.bukkit.entity.Player;
 import org.jetbrains.annotations.Nullable;
 
@@ -97,7 +98,9 @@ public final class ExploreAreaAction extends AbstractAction {
             int z = (int) Math.floor(location.getZ() + Math.sin(angle) * range);
             if (!world.isChunkLoaded(x >> 4, z >> 4)) continue;
 
-            int surface = world.getHighestBlockYAt(x, z) + 1;
+            // 지상 탐색은 나무 수관 대신 지면 높이를 기준으로 목적지를 고른다.
+            int surface = (stayUnderground ? world.getHighestBlockYAt(x, z)
+                    : world.getHighestBlockYAt(x, z, HeightMap.MOTION_BLOCKING_NO_LEAVES)) + 1;
             if (stayUnderground) {
                 // 동굴을 탐험할 때는 지금 높이 근처에서, 위가 막혀 있는(지상이 아닌) 칸만 고른다.
                 BlockPoint ground = GroundFinder.find(terrain, x, location.getBlockY(), z, 4, 8);
