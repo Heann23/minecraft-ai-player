@@ -107,6 +107,12 @@ final class FakePlayer extends ServerPlayer {
         this.inputStrafe = 0.0F;
         this.inputJump = false;
         this.inputSprint = false;
+        // Stopping is also observable before the next entity tick. Release the
+        // already-applied key state now while retaining ordinary movement momentum.
+        this.xxa = 0.0F;
+        this.zza = 0.0F;
+        this.setJumping(false);
+        if (this.isSprinting()) this.setSprinting(false);
         setSneakInput(false);
         syncLookTarget();
     }
