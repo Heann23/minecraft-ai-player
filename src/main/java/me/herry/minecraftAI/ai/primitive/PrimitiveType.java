@@ -25,5 +25,7 @@ public enum PrimitiveType {
     EQUIP_ITEM,
     SELECT_SLOT,
     CRAFT_ITEM,
-    WAIT
+    WAIT,
+    SNEAK,
+    SWIM
 }
