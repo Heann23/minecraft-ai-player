@@ -43,6 +43,10 @@ public final class SwimAction extends AbstractAction implements PrimitiveAction 
             fail("swim requires nearby loaded water");
             return;
         }
+        if (player.getFoodLevel() <= 6) {
+            fail("insufficient food for sprint swimming");
+            return;
+        }
         ai.getBody().inputSneak(false);
         checkpointDistance = distanceSquared(player);
     }
@@ -62,6 +66,10 @@ public final class SwimAction extends AbstractAction implements PrimitiveAction 
             fail("insufficient air");
             return;
         }
+        if (player.getFoodLevel() <= 6) {
+            fail("cannot sustain sprint swimming");
+            return;
+        }
         double distance = distanceSquared(player);
         if (distance <= ARRIVAL_RADIUS_SQ) {
             succeed();
@@ -79,12 +87,16 @@ public final class SwimAction extends AbstractAction implements PrimitiveAction 
                 return;
             }
         }
-        // Aim near the destination's torso so the swimming pose does not dive below a surface target.
-        ai.getBody().lookAt(target.x(), target.y() + 0.6, target.z());
-        boolean facing = ai.getBody().isFacing(target.x(), target.y() + 0.6, target.z(), 35.0F);
-        ai.getBody().inputMove(facing ? 1.0F : 0.0F, 0.0F);
-        ai.getBody().inputSprint(facing && player.getFoodLevel() > 6);
-        ai.getBody().inputJump(player.getRemainingAir() < 120 || target.y() - player.getLocation().getY() > 0.4);
+        // Vanilla starts swimming only after the eyes are submerged. Crouch descends
+        // through the ordinary fluid movement loop; never force the swimming flag.
+        boolean dive = !player.isSwimming() && player.getEyeLocation().getBlock().getType() != Material.WATER;
+        double aimY = target.y() + (player.isSwimming() ? 0.4 : -0.2);
+        ai.getBody().lookAt(target.x(), aimY, target.z());
+        boolean facing = ai.getBody().isFacing(target.x(), aimY, target.z(), 35.0F);
+        ai.getBody().inputSneak(dive);
+        ai.getBody().inputMove(facing && !dive ? 1.0F : 0.0F, 0.0F);
+        ai.getBody().inputSprint(facing);
+        ai.getBody().inputJump(!dive && (player.getRemainingAir() < 120 || target.y() - player.getLocation().getY() > 0.4));
     }
 
     private boolean validTarget() {

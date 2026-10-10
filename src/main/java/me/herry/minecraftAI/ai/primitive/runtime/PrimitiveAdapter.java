@@ -406,6 +406,7 @@ public final class PrimitiveAdapter {
         if (!reason.isEmpty()) return reason;
         if (!ai.getPlayer().isInWater()) return "not in water";
         if (ai.getPlayer().getRemainingAir() <= 60) return "insufficient air for swimming";
+        if (ai.getPlayer().getFoodLevel() <= 6) return "insufficient food for sprint swimming";
         BlockPoint target = new BlockPoint((int) Math.floor(swim.target().x()), (int) Math.floor(swim.target().y()), (int) Math.floor(swim.target().z()));
         return Positions.block(ai.getPlayer().getWorld(), target).getType() == Material.WATER ? "" : "swimming target is not water";
     }
