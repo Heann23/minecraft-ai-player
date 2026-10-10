@@ -38,10 +38,14 @@ final class BlockPlacing {
      * 손에 든 아이템을 block 자리에 놓는다. 보호 플러그인이 막으면 원래대로 되돌리고 false.
      */
     static boolean place(Player player, Block block) {
+        return place(player, block, supportOf(block));
+    }
+
+    // Exact primitives already checked the particular support face the player can see.
+    static boolean place(Player player, Block block, Block against) {
         ItemStack hand = player.getInventory().getItemInMainHand();
         if (hand.isEmpty() || !hand.getType().isBlock()) return false;
-        Block against = supportOf(block);
-        if (against == null) return false;
+        if (against == null || !against.getType().isSolid() || block.getFace(against) == null) return false;
 
         BlockData data = hand.getType().createBlockData();
         BlockState replaced = block.getState();

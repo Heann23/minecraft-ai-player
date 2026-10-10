@@ -36,6 +36,7 @@ public final class PickupItemAction extends AbstractAction implements PrimitiveA
 
     private final double radius;
     private final boolean requireItem;
+    private final boolean allowClearing;
     private Item current;
     private int itemTicks;
     private boolean walkingDirectly;
@@ -50,9 +51,19 @@ public final class PickupItemAction extends AbstractAction implements PrimitiveA
      *                    아이템을 주우려고 세운 계획이 헛돌았다는 것을 알려서 같은 목표가 반복되지 않게 한다.
      */
     public PickupItemAction(double radius, boolean requireItem) {
+        this(radius, requireItem, true);
+    }
+
+    private PickupItemAction(double radius, boolean requireItem, boolean allowClearing) {
         super("PickupItem", TIMEOUT);
         this.radius = radius;
         this.requireItem = requireItem;
+        this.allowClearing = allowClearing;
+    }
+
+    /** Controlled pickup never invents mining steps to reach a drop. */
+    public static PickupItemAction direct(double radius, boolean requireItem) {
+        return new PickupItemAction(radius, requireItem, false);
     }
 
     /**
@@ -74,14 +85,16 @@ public final class PickupItemAction extends AbstractAction implements PrimitiveA
     protected void onTick(AIPlayer ai) {
         Player player = ai.getPlayer();
         if (ai.getInventory().isFull()) {
-            succeed();
+            if (!allowClearing && ai.getInventory().count(material -> true) <= itemsBefore) fail("inventory full without collecting an item");
+            else succeed();
             return;
         }
 
         if (current == null || !current.isValid() || !current.getWorld().equals(player.getWorld())) {
             current = findNearest(ai, player);
             if (current == null) {
-                if (requireItem && !foundAny) fail("nothing to pick up");
+                if (!allowClearing && requireItem && ai.getInventory().count(material -> true) <= itemsBefore) fail("no item collected");
+                else if (requireItem && !foundAny) fail("nothing to pick up");
                 else succeed();
                 return;
             }
@@ -122,6 +135,10 @@ public final class PickupItemAction extends AbstractAction implements PrimitiveA
         if (navigation.getState() == NavigationSystem.State.ARRIVED) {
             walkingDirectly = true;
         } else if (navigation.getState() == NavigationSystem.State.FAILED) {
+            if (!allowClearing) {
+                giveUp(ai, "no path (" + navigation.getFailReason() + ")");
+                return;
+            }
             // 아이템이 있는 칸에 설 수 없으면 (블록 틈, 반블록 위 등) 최대한 가까이 가서 직접 걸어 본다.
             if (looseApproach) {
                 String reason = navigation.getFailReason();
@@ -147,6 +164,7 @@ public final class PickupItemAction extends AbstractAction implements PrimitiveA
      * 치울 블록이 없거나 이미 여러 번 치웠으면 false.
      */
     private boolean clearWay(AIPlayer ai, Player player) {
+        if (!allowClearing) return false;
         if (clears >= MAX_CLEARS) return false;
         // 몬스터를 피해 숨은 지 얼마 안 됐고 몬스터가 아직 주변에 있으면, 아이템 하나 때문에 벽을 캐지 않는다.
         // 막아 둔 블록을 캐서 숨은 자리를 몬스터 쪽으로 연 일이 있었다.
@@ -182,6 +200,12 @@ public final class PickupItemAction extends AbstractAction implements PrimitiveA
     // 닿을 수 없는 아이템(나무 위 등)은 잠시 기억해 두고 다시 주우러 가지 않는다.
     private void giveUp(AIPlayer ai, String reason) {
         ai.debug("Could not pick up " + current.getItemStack().getType() + " at " + Positions.of(current.getLocation()) + ": " + reason);
+        if (!allowClearing) {
+            ai.getNavigation().stop();
+            current = null;
+            fail(reason);
+            return;
+        }
         ai.getMemory().remember(MemoryType.UNREACHABLE, ai.getWorldId(), Positions.of(current.getLocation()), ai.getTicks(), UNREACHABLE_TTL);
         ai.getNavigation().stop();
         current = null;
