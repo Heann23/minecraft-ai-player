@@ -16,6 +16,7 @@ public final class PrimitiveProgramAction implements Action {
     private String reason = "";
     private int elapsed;
     private int index;
+    private int stepTicks;
     private Action child;
     private PrimitiveSnapshot before;
     private PrimitiveResult result;
@@ -47,6 +48,7 @@ public final class PrimitiveProgramAction implements Action {
         }
         PrimitiveCommand command = program.steps().get(index);
         if (child == null) {
+            stepTicks = 0;
             before = PrimitiveAdapter.capture(ai);
             PrimitiveCheck check = PrimitiveAdapter.check(ai, command);
             if (!check.allowed()) {
@@ -61,6 +63,7 @@ public final class PrimitiveProgramAction implements Action {
                 return;
             }
         }
+        stepTicks++;
         child.update(ai);
         if (child.getStatus() == ActionStatus.FAILED) {
             finish(ai, "FAILED", child.getFailReason());
@@ -82,8 +85,9 @@ public final class PrimitiveProgramAction implements Action {
     private void record(AIPlayer ai, String outcome, String detail) {
         if (before == null) return;
         PrimitiveSnapshot after = PrimitiveAdapter.capture(ai);
+        OutcomeSignals observed = OutcomeSignals.between(before, after, objectiveReached(after));
         transitions.add(new PrimitiveTransition(index, program.steps().get(index), before, after, outcome, detail,
-                OutcomeSignals.between(before, after, objectiveReached(after))));
+                new OutcomeSignals(stepTicks, observed.healthLost(), observed.died(), observed.itemDelta(), observed.objectiveReached())));
     }
 
     private void finish(AIPlayer ai, String outcome, String detail) {
