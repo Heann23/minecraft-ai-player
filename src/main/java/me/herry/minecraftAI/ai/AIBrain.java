@@ -23,6 +23,10 @@ import me.herry.minecraftAI.ai.plan.BuildPlans;
 import me.herry.minecraftAI.ai.plan.Plan;
 import me.herry.minecraftAI.ai.plan.Planner;
 import me.herry.minecraftAI.ai.skill.SkillPlan;
+import me.herry.minecraftAI.ai.primitive.control.PrimitiveProgram;
+import me.herry.minecraftAI.ai.primitive.control.PrimitiveResult;
+import me.herry.minecraftAI.ai.primitive.control.Submission;
+import me.herry.minecraftAI.ai.primitive.runtime.PrimitiveProgramAction;
 import me.herry.minecraftAI.ai.util.BlockPoint;
 import org.jetbrains.annotations.Nullable;
 
@@ -79,6 +83,12 @@ final class AIBrain {
     private @Nullable Directive directive;
     private @Nullable Situation lastSituation;
     private @Nullable Plan plan;
+    private @Nullable PrimitiveProgramAction controlledProgram;
+    private @Nullable PrimitiveResult lastPrimitiveResult;
+    private boolean primitiveLease;
+    private int primitiveIdleTicks;
+    private long primitiveIdleUntil;
+    private java.util.UUID primitiveLeaseWorld;
     private boolean waitingForPlan;
     // "갇혀서 갈 수 없음"으로 이동이 연달아 실패한 횟수
     private int trappedStreak;
@@ -95,6 +105,13 @@ final class AIBrain {
         long tickStarted = profiler.begin();
         long now = ai.getTicks();
 
+        if (primitiveLease && controlledProgram == null && (now >= primitiveIdleUntil
+                || !ai.getWorldId().equals(primitiveLeaseWorld) || ai.getPlayer().getHealth() <= 6.0
+                || ai.getPlayer().isInLava()
+                || ai.getPlayer().isInWater() && ai.getPlayer().getRemainingAir() <= 60)) {
+            cancelPrimitiveProgram("idle control expired or became unsafe", true);
+        }
+
         long started = profiler.begin();
         boolean scanned = ai.getPerceptionSystem().tickBlockScan(ai.getMemory(), now);
         profiler.end(TickProfiler.Section.BLOCK_SCAN, started);
@@ -103,7 +120,10 @@ final class AIBrain {
             // 새로 훑어본 결과를 근처의 동료와 나눈다 (동료가 있을 때만).
             ai.getTeam().shareDiscoveries(ai);
         }
-        if (now % ai.getConfig().updateInterval == 0) think(now);
+        if (now % ai.getConfig().updateInterval == 0) {
+            if (controlledProgram == null && !primitiveLease) think(now);
+            else ai.getPerceptionSystem().update();
+        }
 
         started = profiler.begin();
         runAction(now);
@@ -114,6 +134,7 @@ final class AIBrain {
 
     // 진행 중인 행동과 계획을 모두 버리고 처음 상태로 돌아간다.
     void reset() {
+        cancelPrimitiveProgram("lifecycle reset", false);
         if (plan != null) plan.cancel(ai);
         plan = null;
         trappedStreak = 0;
@@ -128,7 +149,70 @@ final class AIBrain {
 
     // 닿지 못해서 포기했던 상대라도 먼저 때려 오면 다시 맞서 싸울 수 있게 한다.
     void onAttacked() {
+        // Damage events arrive before health is applied; capture its actual effect on the next tick.
+        if (controlledProgram != null) controlledProgram.requestInterrupt("attacked");
+        else if (primitiveLease) cancelPrimitiveProgram("attacked while awaiting policy", true);
         goals.clearCooldown(GoalType.FIGHT_HOSTILE);
+    }
+
+    Submission submitPrimitiveProgram(PrimitiveProgram program) {
+        if (controlledProgram != null) return new Submission(false, "another primitive program is running");
+        if (forcedGoal != null || directive != null) return new Submission(false, "an explicit goal or directive is active");
+        if (!program.worldId().equals(ai.getWorldId())) return new Submission(false, "world mismatch");
+        long age = ai.getTicks() - program.observedTick();
+        if (age < 0 || age > 40) return new Submission(false, "stale or future observation");
+        if (ai.getPlayer().getHealth() <= 6.0 || ai.getPlayer().isInLava()) return new Submission(false, "unsafe player state");
+        if (!primitiveLease) interruptTeacherForPrimitiveControl();
+        controlledProgram = new PrimitiveProgramAction(program);
+        lastPrimitiveResult = null;
+        plan = new Plan(GoalType.IDLE, List.of(controlledProgram));
+        return new Submission(true, "");
+    }
+
+    Submission beginPrimitiveControl(int idleTicks) {
+        if (idleTicks < 1 || idleTicks > 100) return new Submission(false, "idle budget must be 1..100 ticks");
+        if (primitiveLease || controlledProgram != null) return new Submission(false, "primitive control is already active");
+        if (forcedGoal != null || directive != null) return new Submission(false, "an explicit goal or directive is active");
+        if (ai.getPlayer().getHealth() <= 6.0 || ai.getPlayer().isInLava()) return new Submission(false, "unsafe player state");
+        interruptTeacherForPrimitiveControl();
+        primitiveLease = true;
+        primitiveIdleTicks = idleTicks;
+        primitiveIdleUntil = ai.getTicks() + idleTicks;
+        primitiveLeaseWorld = ai.getWorldId();
+        return new Submission(true, "");
+    }
+
+    boolean hasPrimitiveControl() { return primitiveLease || controlledProgram != null; }
+
+    private void interruptTeacherForPrimitiveControl() {
+        if (plan != null) plan.cancel(ai);
+        journal.planEnded(ai.getTicks(), Experience.Outcome.INTERRUPTED, "explicit primitive control");
+        // Prepared/external control is never appended to an autonomous Teacher episode.
+        journal.endEpisode(Experience.EndReason.STOPPED);
+        journal.reset();
+        ai.getNavigation().stop();
+        ai.getBody().clearInputs();
+        activeTrace = null;
+        currentGoal = GoalType.IDLE;
+        plan = null;
+    }
+
+    @Nullable PrimitiveResult primitiveResult() {
+        return controlledProgram == null ? lastPrimitiveResult : controlledProgram.result();
+    }
+
+    boolean cancelPrimitiveProgram(String reason, boolean resumeJournal) {
+        if (controlledProgram == null && !primitiveLease) return false;
+        if (controlledProgram != null) {
+            controlledProgram.cancel(ai, reason);
+            lastPrimitiveResult = controlledProgram.result();
+        }
+        controlledProgram = null;
+        primitiveLease = false;
+        primitiveLeaseWorld = null;
+        plan = null;
+        if (resumeJournal) journal.beginEpisode(Experience.StartReason.START);
+        return true;
     }
 
     GoalType getCurrentGoal() {
@@ -148,6 +232,7 @@ final class AIBrain {
     }
 
     void setForcedGoal(@Nullable GoalType goal) {
+        cancelPrimitiveProgram("forced goal changed", true);
         forcedGoal = goal;
         goals.clearCooldowns();
         recovery.reset();
@@ -163,6 +248,7 @@ final class AIBrain {
      * 위험을 피하거나 싸우는 중이 아니면 하던 계획을 접고 바로 부탁한 일로 넘어간다.
      */
     void setDirective(@Nullable Directive directive) {
+        cancelPrimitiveProgram("directive changed", true);
         this.directive = directive;
         ai.debug(directive == null ? "Directive cleared" : "Directive: " + directive.kind() + " " + directive.subject() + " from " + directive.requestedBy());
         if (directive != null && plan != null && !isCombatGoal(currentGoal)) {
@@ -364,6 +450,25 @@ final class AIBrain {
     private void runAction(long now) {
         Action action = plan == null ? null : plan.current();
         if (action == null) return;
+
+        if (controlledProgram != null) {
+            action.update(ai);
+            if (action.getStatus() == ActionStatus.SUCCESS || action.getStatus() == ActionStatus.FAILED) {
+                lastPrimitiveResult = controlledProgram.result();
+                controlledProgram = null;
+                plan = null;
+                if (primitiveLease && (lastPrimitiveResult.status().equals("SUCCEEDED")
+                        || lastPrimitiveResult.status().equals("FAILED")
+                        || lastPrimitiveResult.status().equals("OBJECTIVE_NOT_REACHED"))) {
+                    primitiveIdleUntil = now + primitiveIdleTicks;
+                } else {
+                    primitiveLease = false;
+                    primitiveLeaseWorld = null;
+                    journal.beginEpisode(Experience.StartReason.START);
+                }
+            }
+            return;
+        }
 
         if (action.getStatus() == ActionStatus.READY) {
             ai.debug("Action started: " + action.getName());

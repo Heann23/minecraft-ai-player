@@ -7,6 +7,7 @@ import me.herry.minecraftAI.ai.memory.MemoryType;
 import me.herry.minecraftAI.ai.primitive.PrimitiveAction;
 import me.herry.minecraftAI.ai.primitive.PrimitiveTarget;
 import me.herry.minecraftAI.ai.primitive.PrimitiveType;
+import me.herry.minecraftAI.ai.primitive.control.ToolChoice;
 import me.herry.minecraftAI.ai.util.BlockPoint;
 import me.herry.minecraftAI.ai.util.Positions;
 import me.herry.minecraftAI.ai.world.Base;
@@ -17,6 +18,7 @@ import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockFace;
 import org.bukkit.entity.Player;
+import org.bukkit.inventory.ItemStack;
 import org.bukkit.util.RayTraceResult;
 import org.bukkit.util.Vector;
 import org.jetbrains.annotations.Nullable;
@@ -47,6 +49,10 @@ public final class BreakBlockAction extends AbstractAction implements PrimitiveA
     // 물에 닿은 블록은 캐지 않을지. 광석을 캘 때 쓴다. 물 옆의 블록을 캐면 굴에 물이 차서 떠 있는 채로 아무것도 못 하게 된다.
     private final boolean avoidWater;
     private final boolean underWater;
+    private final boolean exactTarget;
+    private final @Nullable ToolChoice chosenTool;
+    private final boolean sneak;
+    private ItemStack heldTool;
     private World world;
     private Material expected;
     // 지금 실제로 캐고 있는 블록. 목표 블록이 다른 블록에 가려져 있으면 가리고 있는 블록이 된다.
@@ -73,11 +79,28 @@ public final class BreakBlockAction extends AbstractAction implements PrimitiveA
     }
 
     private BreakBlockAction(BlockPoint target, boolean homeAllowed, boolean avoidWater, boolean underWater) {
+        this(target, homeAllowed, avoidWater, underWater, false, null, false);
+    }
+
+    private BreakBlockAction(BlockPoint target, boolean homeAllowed, boolean avoidWater, boolean underWater,
+                             boolean exactTarget, @Nullable ToolChoice chosenTool, boolean sneak) {
         super("BreakBlock", TIMEOUT);
         this.target = target;
         this.homeAllowed = homeAllowed;
         this.avoidWater = avoidWater;
         this.underWater = underWater;
+        this.exactTarget = exactTarget;
+        this.chosenTool = chosenTool;
+        this.sneak = sneak;
+    }
+
+    /** A controlled primitive mines only this block, with the explicitly observed stack. */
+    public static BreakBlockAction withTool(BlockPoint target, ToolChoice tool) {
+        return withTool(target, tool, false);
+    }
+
+    public static BreakBlockAction withTool(BlockPoint target, ToolChoice tool, boolean sneak) {
+        return new BreakBlockAction(target, false, false, false, true, java.util.Objects.requireNonNull(tool, "tool"), sneak);
     }
 
     /**
@@ -109,7 +132,8 @@ public final class BreakBlockAction extends AbstractAction implements PrimitiveA
         expected = block.getType();
         // 앞선 행동이 가린 블록을 치우다가 이미 캐 버렸으면 할 일이 없다. 실패로 세면 멀쩡한 계획을 버리게 된다.
         if (expected.isAir()) {
-            succeed();
+            if (exactTarget) fail("target disappeared");
+            else succeed();
             return;
         }
         if (block.isLiquid()) {
@@ -119,12 +143,28 @@ public final class BreakBlockAction extends AbstractAction implements PrimitiveA
 
         ai.getBody().inputMove(0.0F, 0.0F);
         ai.getBody().inputSprint(false);
+        if (exactTarget) {
+            if (!ai.getBody().isUsable()) {
+                fail("body unavailable");
+                return;
+            }
+            if (player.getEyeLocation().distance(Positions.center(world, target)) > MAX_REACH) {
+                fail("out of reach");
+                return;
+            }
+            ai.getBody().inputSneak(sneak);
+        }
         selectCurrent(ai, player);
     }
 
     @Override
     protected void onTick(AIPlayer ai) {
         Player player = ai.getPlayer();
+        if (exactTarget && (!ai.getBody().isUsable()
+                || heldTool == null || !heldTool.isSimilar(player.getInventory().getItemInMainHand()))) {
+            fail("body unavailable or tool changed");
+            return;
+        }
         if (!player.getWorld().equals(world)) {
             fail("world changed");
             return;
@@ -145,6 +185,10 @@ public final class BreakBlockAction extends AbstractAction implements PrimitiveA
 
         Block block = Positions.block(world, current);
         if (block.getType() != currentType) {
+            if (exactTarget) {
+                fail("target disappeared");
+                return;
+            }
             // 가리고 있던 블록이 다른 이유로 사라졌으면 다시 조준한다.
             selectCurrent(ai, player);
             return;
@@ -157,6 +201,13 @@ public final class BreakBlockAction extends AbstractAction implements PrimitiveA
         }
 
         ai.getBody().lookAt(center.getX(), center.getY(), center.getZ());
+        if (exactTarget) {
+            if (findObstruction(player) != null) {
+                fail("target not visible");
+                return;
+            }
+            ai.getBody().inputSneak(sneak);
+        }
         ai.getBody().inputJump(player.isInWater());
         boolean aimed = ai.getBody().isFacing(center.getX(), center.getY(), center.getZ(), FACING_TOLERANCE);
         if (!aimed && ++aimTicks < MAX_AIM_TICKS) return;
@@ -181,7 +232,7 @@ public final class BreakBlockAction extends AbstractAction implements PrimitiveA
         ai.onBlockBroken(current, currentType);
         if (current.equals(target)) {
             forgetResource(ai);
-            if (refills < MAX_REFILLS && Positions.block(world, target.offset(0, 1, 0)).getType().hasGravity()) settleTicks = 0;
+            if (!exactTarget && refills < MAX_REFILLS && Positions.block(world, target.offset(0, 1, 0)).getType().hasGravity()) settleTicks = 0;
             else succeed();
         } else {
             obstructionsCleared++;
@@ -192,6 +243,7 @@ public final class BreakBlockAction extends AbstractAction implements PrimitiveA
     @Override
     protected void onEnd(AIPlayer ai) {
         ai.getBody().inputJump(false);
+        if (exactTarget) ai.getBody().inputSneak(false);
         if (crackShown && world != null && current != null) showCrack(ai.getPlayer(), Positions.center(world, current), 0.0F);
     }
 
@@ -216,6 +268,10 @@ public final class BreakBlockAction extends AbstractAction implements PrimitiveA
         BlockPoint next = target;
         Block obstruction = findObstruction(player);
         if (obstruction != null) {
+            if (exactTarget) {
+                fail("target not visible");
+                return;
+            }
             if (obstructionsCleared >= MAX_OBSTRUCTIONS) {
                 fail("target not visible");
                 return;
@@ -268,6 +324,19 @@ public final class BreakBlockAction extends AbstractAction implements PrimitiveA
         currentType = block.getType();
         progress = 0.0F;
         aimTicks = 0;
+        if (exactTarget) {
+            if (chosenTool.slot() < 0 || chosenTool.slot() >= 36
+                    || !ToolChoiceItems.matches(player.getInventory().getItem(chosenTool.slot()), chosenTool)) {
+                fail("tool changed");
+                return;
+            }
+            if (!ai.getInventory().equipSlot(chosenTool.slot())) {
+                fail("tool unavailable");
+                return;
+            }
+            heldTool = player.getInventory().getItemInMainHand().clone();
+            return;
+        }
         int toolSlot = ai.getInventory().bestToolSlot(block);
         // 맨손보다 빨리 캐는 도구가 없으면, 들고 있던 도구가 쓸데없이 닳지 않게 내려놓고 캔다.
         if (toolSlot >= 0) ai.getInventory().equipSlot(toolSlot);

@@ -51,6 +51,7 @@ public final class AttackEntityAction extends AbstractAction implements Primitiv
     // 싸우는 도중에 더 가까이에서 때린 몬스터가 있으면 그쪽으로 바뀐다.
     private LivingEntity target;
     private final HandPolicy.Purpose purpose;
+    private final boolean exactTarget;
     private EntityChaser chaser;
     private int ticksWithoutHit;
     private boolean holding;
@@ -66,10 +67,20 @@ public final class AttackEntityAction extends AbstractAction implements Primitiv
     }
 
     public AttackEntityAction(LivingEntity target, HandPolicy.Purpose purpose) {
+        this(target, purpose, false);
+    }
+
+    private AttackEntityAction(LivingEntity target, HandPolicy.Purpose purpose, boolean exactTarget) {
         super("AttackEntity", TIMEOUT);
         this.target = target;
         this.purpose = purpose;
+        this.exactTarget = exactTarget;
         this.chaser = newChaser();
+    }
+
+    /** Keeps the chosen entity identity even when another monster attacks during execution. */
+    public static AttackEntityAction exactTarget(LivingEntity target) {
+        return new AttackEntityAction(target, HandPolicy.Purpose.FIGHT, true);
     }
 
     // 몬스터는 급하게 쫓고, 사냥감은 허기를 아끼며 쫓는다.
@@ -89,6 +100,10 @@ public final class AttackEntityAction extends AbstractAction implements Primitiv
     @Override
     protected void onTick(AIPlayer ai) {
         Player player = ai.getPlayer();
+        if (exactTarget && !ai.getBody().isUsable()) {
+            fail("body unavailable");
+            return;
+        }
         if (target.isDead()) {
             succeed();
             return;
@@ -103,7 +118,7 @@ public final class AttackEntityAction extends AbstractAction implements Primitiv
         }
         // 아직 손이 닿지 않는 상대를 쫓거나 기다리는 동안 더 가까운 몬스터에게 맞았으면 그쪽으로 돌아선다.
         // 행동을 실패로 끝내고 다시 계획하게 하면, 둘러싸였을 때 맞을 때마다 실패가 쌓여서 한 대도 치지 못한다.
-        if (purpose == HandPolicy.Purpose.FIGHT) {
+        if (!exactTarget && purpose == HandPolicy.Purpose.FIGHT) {
             LivingEntity attacker = closerAttacker(ai, player);
             if (attacker != null) switchTo(ai, player, attacker);
         }
@@ -144,6 +159,7 @@ public final class AttackEntityAction extends AbstractAction implements Primitiv
     protected void onEnd(AIPlayer ai) {
         lowerShield(ai.getPlayer());
         ai.getNavigation().stop();
+        if (exactTarget) ai.getBody().clearInputs();
     }
 
     // 이 행동을 시작한(또는 상대를 바꾼) 뒤에 나를 때린 몬스터 가운데, 지금 상대 대신 상대해야 할 것. 없으면 null.

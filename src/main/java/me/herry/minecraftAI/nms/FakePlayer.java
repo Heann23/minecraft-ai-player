@@ -68,6 +68,9 @@ final class FakePlayer extends ServerPlayer {
         this.zza = this.inputForward;
         this.setJumping(this.inputJump);
         if (this.isSprinting() != this.inputSprint) this.setSprinting(this.inputSprint);
+        // A connected client's movement loop applies the crouch key's water descent.
+        // This body owns that loop, so use the same vanilla fluid physics here too.
+        if (this.isShiftKeyDown() && this.isInWater()) this.goDownInWater();
     }
 
     void setMoveInput(float forward, float strafe) {
@@ -104,6 +107,12 @@ final class FakePlayer extends ServerPlayer {
         this.inputStrafe = 0.0F;
         this.inputJump = false;
         this.inputSprint = false;
+        // Stopping is also observable before the next entity tick. Release the
+        // already-applied key state now while retaining ordinary movement momentum.
+        this.xxa = 0.0F;
+        this.zza = 0.0F;
+        this.setJumping(false);
+        if (this.isSprinting()) this.setSprinting(false);
         setSneakInput(false);
         syncLookTarget();
     }

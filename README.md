@@ -205,3 +205,83 @@ Discord 연결이나 로컬 제공자가 실패해도 게임 AI는 계속 실행
 백업에서도 삭제 기록을 우선 적용합니다. `audio.minimum-rms`는 초기 잡음 구분 값이며 실제 마이크로 조정해야 합니다.
 `audio.end-silence-millis`는 발화 종료까지 기다리는 무음 시간(기본 1000ms)입니다.
 문장 사이에서 호출어가 잘리면 늘리고, 응답이 늦으면 줄여 보세요. 완전한 음성 활동 감지는 아직 후속 시험이 필요합니다.
+
+## 행동 조합 API (개발용)
+
+`AIPlayer`의 행동 제어 API는 정책이 관측을 읽고 행동과 도구를 골라 순서대로 실행할 수 있도록 만든 기반입니다.
+모델을 훈련하거나 불러오지 않으며, 별도 요청이 없으면 기존 규칙 판단이 계속 실행됩니다.
+프로그램은 기존 행동 실행 경로 하나를 사용하고, 기본적으로 완료·취소 후에는 규칙 판단으로 돌아갑니다.
+게임의 생존 규칙·아이템 소비·도구 내구도·실제 이동과 채굴은 유지합니다.
+
+| API | 역할 |
+|---|---|
+| `primitiveSnapshot()` | 월드·좌표·생존 상태·슬롯별 아이템과 내구도·인챈트를 값으로 읽기 |
+| `primitiveContext()` | 기존 주변 인식에서 확인한 블록·엔티티의 제한된 목록과 관측 읽기 |
+| `inspectPrimitiveTargets(positions)` | 정책이 고른 주변 블록 좌표를 제한된 개수만 추가 관측 |
+| `checkPrimitiveCommand(command)` | 현재 상태에서 해당 명령이 가능한지와 거절 이유 확인 |
+| `submitPrimitiveProgram(program)` | 버전·월드·관측 시점·시간 제한을 가진 행동 순서 제출 |
+| `primitiveResult()` | 마지막 프로그램 결과와 각 행동 전후 상태·실제 목표 달성 여부 읽기 |
+| `cancelPrimitiveProgram(reason)` | 진행 중인 프로그램을 취소하고 입력 정리 |
+| `beginPrimitiveControl(idleTicks)` | 다음 정책 결정을 기다리는 제한된 제어 구간 시작 (`1..100` AI 틱) |
+| `hasPrimitiveControl()` | 제한된 제어 구간이 아직 유지되는지 확인 |
+| `endPrimitiveControl(reason)` | 제어 구간을 끝내고 규칙 판단으로 복귀 |
+
+이 API의 호출은 서버 메인 스레드에서 합니다. 관측·명령·결과 객체에는 살아 있는 Bukkit 객체가 없으므로,
+관측을 복사한 뒤 정책 계산만 다른 스레드에서 할 수 있습니다. 제출은 다시 서버 메인 스레드로 돌아와서 합니다.
+각 행동 시작 직전에 같은 실행 조건을 다시 확인하므로, 이전에 가능했던 명령도 월드나 인벤토리가 바뀌면 거절될 수 있습니다.
+
+기본적으로 한 프로그램이 끝나면 규칙 판단을 재개합니다. 여러 번 새 관측으로 행동을 선택하려면
+먼저 `beginPrimitiveControl(idleTicks)`를 호출합니다. 이 제어 구간은 결과를 읽고 다음 정책 결정을 계산하는 동안
+규칙 판단의 개입을 잠시 보류합니다. 계산은 다른 스레드에서 하더라도 다음 제출은 메인 스레드에서 하며,
+제출 전에 `hasPrimitiveControl()`과 새 관측을 확인합니다. 대기 시간 만료·생존 위험·생명주기 변경·명시적 지시로
+제어가 끝날 수 있고, 작업이 끝나면 `endPrimitiveControl(reason)`으로 해제합니다. 모델 실행이나 학습을 자동으로 시작하지 않습니다.
+
+아래는 확인한 광석까지 이동하고, 선택한 섬세한 손길 곡괭이로 캐고, 드롭을 회수하는 예시입니다.
+`ore`는 주변에서 확인한 광석 좌표이고, `oreDrop`은 그 광석의 아이템 이름입니다(예: `DIAMOND_ORE`).
+`AIPlayer`, `BlockPoint`, `PrimitiveProgram`, `PrimitiveCommand`, `ToolChoice`, `TaskObjective`, `Submission`은 프로젝트의 Java API입니다.
+
+```java
+void mineKnownOre(AIPlayer ai, BlockPoint ore, String oreDrop) {
+    var observed = ai.primitiveSnapshot();
+    var slot = observed.inventory().stream()
+            .filter(item -> item.material().equals("DIAMOND_PICKAXE"))
+            .filter(item -> item.enchantments().getOrDefault("minecraft:silk_touch", 0) > 0)
+            .findFirst().orElseThrow();
+    var tool = new ToolChoice(slot.slot(), slot.material(), slot.enchantments());
+    var program = new PrimitiveProgram(
+            PrimitiveProgram.CURRENT_SCHEMA_VERSION,
+            java.util.UUID.randomUUID(), observed.worldId(), observed.tick(),
+            1800, "manual-policy-example",
+            java.util.List.of(
+                    new PrimitiveCommand.MoveTo(ore, 2.5),
+                    new PrimitiveCommand.BreakBlock(ore, tool, true),
+                    new PrimitiveCommand.Pickup(6.0)),
+            new TaskObjective.AcquireItem(oreDrop, observed.itemCount(oreDrop) + 1));
+    Submission submission = ai.submitPrimitiveProgram(program);
+    if (!submission.accepted()) {
+        // submission.reason()을 호출자에게 전달하거나 새 관측으로 다시 판단합니다.
+    }
+}
+```
+
+도구는 슬롯·재료·인챈트가 일치하는 아이템을 명시적으로 선택합니다. 같은 다이아몬드 곡괭이라도
+섬세한 손길과 행운을 구분하며, 지정한 아이템이 바뀌면 다른 도구로 몰래 대체하지 않습니다.
+빈 슬롯은 `AIR`·수량 `0`입니다. 장착이나 아이템 이동 후에는 슬롯이 바뀔 수 있으므로 새 관측으로 도구를 다시 고릅니다.
+예시의 `BreakBlock(..., true)`는 채굴하는 동안 웅크리기를 유지합니다.
+
+지원하는 명령은 이동·시선·점프·채굴·지정 위치 설치·음식 먹기·공격·드롭 회수·도구 장착·핫바 선택·제작·대기·웅크리기·수영·불필요한 아이템 버리기입니다.
+프로그램은 스키마 버전 `1`, 최대 `32`개 행동, 최대 `2400`틱이며 제출할 관측은 `40` AI 틱 이내여야 합니다.
+실행 시 이동 도착 반경은 `0.25..4`, 회수 반경은 `0.5..12`, 대기는 최대 `200`틱,
+웅크리기는 최대 `200`틱, 수영은 최대 `400`틱, 수영 목표 거리는 최대 `16`블록으로 제한합니다.
+실제 월드 접근과 생존 조건도 제한하며,
+제출 성공은 행동이나 목표 달성 성공을 뜻하지 않습니다.
+
+결과는 행동 상태와 실제 목표를 따로 기록합니다. 광석 블록을 부쉈더라도 아이템을 받지 못하면
+`AcquireItem` 목표는 달성되지 않습니다. `OutcomeSignals`에는 경과 틱·전후 체력의 감소·사망·아이템 증감·목표 달성이 들어갑니다.
+단일 보상 점수나 기존 규칙의 목표와 얼마나 같은 판단을 했는지를 성공 기준으로 정하지 않습니다.
+
+상자 입출고·화로 투입과 회수·침대·동료 상호작용은 이 명령 API에 아직 연결하지 않았습니다.
+양동이·활 등 모든 아이템 사용을 지원하지 않으며, `Eat`은 음식 먹기입니다.
+제작·공격·드롭 회수는 기존 Action의 내부 판단을 사용하므로 모든 메뉴 조작이나 움직임을 정책이 직접 선택하는 단계는 아닙니다.
+섬세한 손길 채굴 → 귀가 → 행운 처리 → 상자 보관과 같은 전체 인벤토리 작업 흐름을 자유롭게 학습하려면
+남은 상호작용 계약과 실제 결과 시험이 더 필요합니다. 이 API 자체는 학습·데이터 수집·모델 실행 권한을 자동으로 켜지 않습니다.

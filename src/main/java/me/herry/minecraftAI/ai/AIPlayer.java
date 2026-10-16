@@ -12,6 +12,14 @@ import me.herry.minecraftAI.ai.crafting.FurnaceJob;
 import me.herry.minecraftAI.ai.goal.GoalType;
 import me.herry.minecraftAI.ai.goal.Milestone;
 import me.herry.minecraftAI.ai.goal.Situation;
+import me.herry.minecraftAI.ai.primitive.control.PrimitiveCommand;
+import me.herry.minecraftAI.ai.primitive.control.PrimitiveCheck;
+import me.herry.minecraftAI.ai.primitive.control.PrimitiveProgram;
+import me.herry.minecraftAI.ai.primitive.control.PrimitiveResult;
+import me.herry.minecraftAI.ai.primitive.control.PrimitiveSnapshot;
+import me.herry.minecraftAI.ai.primitive.control.Submission;
+import me.herry.minecraftAI.ai.primitive.runtime.PrimitiveAdapter;
+import me.herry.minecraftAI.ai.primitive.runtime.PrimitiveContext;
 
 import me.herry.minecraftAI.ai.inventory.InventorySystem;
 import me.herry.minecraftAI.ai.memory.MemorySystem;
@@ -32,6 +40,7 @@ import me.herry.minecraftAI.ai.world.WorldModel;
 import me.herry.minecraftAI.config.AIConfig;
 import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.Material;
+import org.bukkit.Bukkit;
 import org.bukkit.Tag;
 import org.bukkit.World;
 import org.bukkit.block.BlockFace;
@@ -133,6 +142,68 @@ public final class AIPlayer {
         brain.getJournal().beginEpisode(Experience.StartReason.START);
         getTeam().say(this, Phrases.hello(getTeam().teamSize()), true);
         return true;
+    }
+
+    /** Explicit development/policy boundary; no model is trained or loaded by this API. */
+    public Submission submitPrimitiveProgram(PrimitiveProgram program) {
+        requireMainThread();
+        java.util.Objects.requireNonNull(program, "program");
+        if (state != AIState.RUNNING || !body.isUsable()) return new Submission(false, "AI is not running");
+        return brain.submitPrimitiveProgram(program);
+    }
+
+    /** Keeps the single action lane idle while an independent policy calculates its next step. */
+    public Submission beginPrimitiveControl(int idleTicks) {
+        requireMainThread();
+        if (state != AIState.RUNNING || !body.isUsable()) return new Submission(false, "AI is not running");
+        return brain.beginPrimitiveControl(idleTicks);
+    }
+
+    public boolean hasPrimitiveControl() {
+        requireMainThread();
+        return brain.hasPrimitiveControl();
+    }
+
+    public boolean endPrimitiveControl(String reason) { return cancelPrimitiveProgram(reason); }
+
+    public PrimitiveSnapshot primitiveSnapshot() {
+        requireMainThread();
+        return PrimitiveAdapter.capture(this);
+    }
+
+    public PrimitiveContext primitiveContext() {
+        requireMainThread();
+        return PrimitiveAdapter.context(this);
+    }
+
+    public PrimitiveContext inspectPrimitiveTargets(java.util.List<BlockPoint> targets) {
+        requireMainThread();
+        return PrimitiveAdapter.inspect(this, targets);
+    }
+
+    /** Availability and execution use the same preconditions; rechecked before each step. */
+    public PrimitiveCheck checkPrimitiveCommand(PrimitiveCommand command) {
+        requireMainThread();
+        return PrimitiveAdapter.check(this, command);
+    }
+
+    public me.herry.minecraftAI.ai.perf.WorkBudget getWorkBudget() {
+        return services.budget();
+    }
+
+    public @Nullable PrimitiveResult primitiveResult() {
+        requireMainThread();
+        return brain.primitiveResult();
+    }
+
+    public boolean cancelPrimitiveProgram(String reason) {
+        requireMainThread();
+        if (reason == null || reason.isBlank() || reason.length() > 160) throw new IllegalArgumentException("invalid cancellation reason");
+        return brain.cancelPrimitiveProgram(reason, state == AIState.RUNNING);
+    }
+
+    private static void requireMainThread() {
+        if (!Bukkit.isPrimaryThread()) throw new IllegalStateException("primitive control requires the server main thread");
     }
 
     public boolean stop() {
