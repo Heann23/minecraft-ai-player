@@ -7,7 +7,7 @@ import uuid
 
 import numpy as np
 
-from rl_actor import ActorCritic, inputs, generalized_advantages
+from rl_actor import ActorCritic, inputs, generalized_advantages, STATE_SIZE, ACTION_SIZE
 from train_paper_ppo import PaperTrainer, SCHEMA
 
 
@@ -16,7 +16,7 @@ def frame():
     state[0] = 0.3
     actions = []
     for name, value in (("left", -0.5), ("right", 0.5)):
-        features = [0.0] * 64
+        features = [0.0] * ACTION_SIZE
         features[0] = value
         actions.append({"id": name, "features": features})
     return {"world": str(uuid.UUID(int=1)), "serverTick": 10, "state": state, "options": actions, "complete": True}
@@ -28,7 +28,8 @@ def row(model, session="a", sequence=0, reward=1, terminal=True):
     return {"session": session, "sequence": sequence, "frame": observed, "index": 1,
             "logProbability": math.log(float(probabilities[1])), "value": value,
             "modelVersion": model.version, "reward": reward, "elapsedTicks": 5,
-            "terminated": terminal, "truncated": False, "nextValue": 0}
+            "terminated": terminal, "truncated": False, "nextValue": 0,
+            "appliedTick": observed["serverTick"], "nextWorld": observed["world"], "nextState": observed["state"]}
 
 
 class ActorTests(unittest.TestCase):
@@ -80,7 +81,7 @@ class ActorTests(unittest.TestCase):
     def test_invalid_or_future_label_features_are_not_actor_inputs(self):
         observed = frame()
         state, x = inputs(observed)
-        self.assertEqual(x.shape, (2, 128))
+        self.assertEqual(x.shape, (2, STATE_SIZE + ACTION_SIZE))
         observed["options"][1]["id"] = "left"
         with self.assertRaises(ValueError):
             inputs(observed)
@@ -109,7 +110,7 @@ class BridgeProtocolTests(unittest.TestCase):
             try:
                 transition = row(trainer.model, session=str(uuid.uuid4()))
                 transition.pop("nextValue")
-                packet = {"schema": SCHEMA, "environment": "minecraft-paper", "id": str(uuid.uuid4()), "frame": frame(), "previous": transition}
+                packet = {"schema": SCHEMA, "environment": "minecraft-paper", "id": str(uuid.uuid4()), "frame": frame(), "transitions": [transition]}
                 trainer.handle(packet)
                 packet["id"] = str(uuid.uuid4())
                 trainer.handle(packet)

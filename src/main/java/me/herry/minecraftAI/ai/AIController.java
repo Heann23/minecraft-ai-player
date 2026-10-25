@@ -70,6 +70,7 @@ public final class AIController {
     private final TeamChat team;
     private final WorkBudget budget;
     private final AIServices services;
+    private final me.herry.minecraftAI.ai.learned.PpoBridge trainingBridge;
     private final SkinFetcher skins;
     private final InventoryViews views = new InventoryViews();
     private final @Nullable AIStateStore store;
@@ -95,17 +96,26 @@ public final class AIController {
         this.budget = new WorkBudget(config.tickBudgetNanos);
         this.experience = !config.recordExperience ? null : new JsonlExperienceWriter(
                 plugin.getDataFolder().toPath().resolve("training-data"), config.experienceMaxBytes, plugin.getLogger()::warning);
+        this.trainingBridge = loadTrainingBridge();
         this.services = new AIServices(config, debugger, crafting,
                 new CombatSystem(config.engageRange, config.criticalHealth),
                 new SurvivalSystem(config.lowHealth, config.criticalHealth, config.eatBelow),
                 new Planner(), team, budget, experience == null ? ExperienceSink.NONE : experience,
-                plugin.getPluginMeta().getVersion(), plugin.getLogger()::warning, loadLearnedPolicy());
+                plugin.getPluginMeta().getVersion(), plugin.getLogger()::warning, loadLearnedPolicy(), trainingBridge);
         this.skins = new SkinFetcher(plugin.getLogger());
         crafting.warmUp();
     }
 
+    private me.herry.minecraftAI.ai.learned.PpoBridge loadTrainingBridge() {
+        if (!config.trainingControl) return null;
+        try { return new me.herry.minecraftAI.ai.learned.PpoBridge(plugin.getDataFolder().toPath().resolve(config.trainingChannel)); }
+        catch (java.io.IOException failure) {
+            plugin.getLogger().warning("Training bridge unavailable; no Teacher fallback: " + failure.getMessage()); return null;
+        }
+    }
+
     private me.herry.minecraftAI.ai.learned.PolicyWeights loadLearnedPolicy() {
-        if (!config.learnedControl) return null;
+        if (!config.learnedControl || config.trainingControl) return null;
         try {
             var model = me.herry.minecraftAI.ai.learned.PolicyWeights.load(plugin.getDataFolder().toPath().resolve(config.learnedModelFile));
             plugin.getLogger().info("Learned policy: " + model.sha256() + ", Paper environment steps=" + model.environmentSteps());
@@ -388,6 +398,7 @@ public final class AIController {
         refreshTickList();
         // 남은 기록을 다 쓰고 파일을 닫는다. 오래 걸리면 기다리지 않는다 (서버 종료를 붙잡지 않는다).
         if (experience != null) experience.close();
+        if (trainingBridge != null) trainingBridge.close();
     }
 
     private void respawn(Entry entry) {

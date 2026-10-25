@@ -12,16 +12,24 @@ public final class PpoBridge implements AutoCloseable {
     public static final String SCHEMA = "minecraft-paper-ppo/v1";
     public record Transition(String session, long sequence, PolicyFrame frame, int index,
                              double logProbability, double value, long modelVersion, double reward,
-                             int elapsedTicks, boolean terminated, boolean truncated) {
+                             int elapsedTicks, boolean terminated, boolean truncated, long appliedTick, String nextWorld, double[] nextState) {
         public Transition {
-            UUID.fromString(session);
+            UUID.fromString(session); UUID.fromString(nextWorld);
+            if (appliedTick < frame.serverTick() || appliedTick > 0xffff_ffffL || nextState.length != PolicyFrame.STATE_SIZE)
+                throw new IllegalArgumentException("invalid applied tick/next state");
+            nextState = nextState.clone();
+            for (double feature : nextState) if (!Double.isFinite(feature) || Math.abs(feature) > 16)
+                throw new IllegalArgumentException("invalid actual next state");
             if (sequence < 0 || index < 0 || index >= frame.options().size() || modelVersion < 0
-                    || elapsedTicks < 1 || elapsedTicks > 2400 || !Double.isFinite(logProbability) || logProbability > 0
+                    || elapsedTicks < 0 || elapsedTicks > 2400 || !Double.isFinite(logProbability) || logProbability > 0
                     || !Double.isFinite(value) || !Double.isFinite(reward) || Math.abs(reward) > 100)
                 throw new IllegalArgumentException("invalid actual PPO transition");
         }
+        @Override public double[] nextState() { return nextState.clone(); }
     }
-    public record Query(String schema, String environment, String id, PolicyFrame frame, Transition previous) {}
+    public record Query(String schema, String environment, String id, PolicyFrame frame, java.util.List<Transition> transitions) {
+        public Query { transitions = java.util.List.copyOf(transitions); if (transitions.size() > 16) throw new IllegalArgumentException("transition batch too large"); }
+    }
     public record Response(String schema, String id, int index, String candidate, double logProbability,
                            double value, long modelVersion, long environmentSteps) {}
     private final Path directory;
@@ -36,9 +44,9 @@ public final class PpoBridge implements AutoCloseable {
         Files.createDirectories(this.directory);
     }
 
-    public CompletableFuture<Response> request(PolicyFrame frame, Transition previous) {
+    public CompletableFuture<Response> request(PolicyFrame frame, java.util.List<Transition> transitions) {
         String id = UUID.randomUUID().toString();
-        String payload = gson.toJson(new Query(SCHEMA, "minecraft-paper", id, frame, previous));
+        String payload = gson.toJson(new Query(SCHEMA, "minecraft-paper", id, frame, transitions));
         return CompletableFuture.supplyAsync(() -> exchange(id, payload, frame), io);
     }
 

@@ -21,10 +21,11 @@ import java.util.function.Consumer;
 public record AIServices(AIConfig config, AIDebugger debugger, CraftingSystem crafting, CombatSystem combat,
                          SurvivalSystem survival, Planner planner, TeamChat team, WorkBudget budget,
                          ExperienceSink experience, String pluginVersion, Consumer<String> warn,
-                         me.herry.minecraftAI.ai.learned.PolicyWeights learnedPolicy) {
+                         me.herry.minecraftAI.ai.learned.PolicyWeights learnedPolicy,
+                         me.herry.minecraftAI.ai.learned.PpoBridge trainingBridge) {
     public AIServices(AIConfig config, AIDebugger debugger, CraftingSystem crafting, CombatSystem combat,
                       SurvivalSystem survival, Planner planner, TeamChat team, WorkBudget budget,
                       ExperienceSink experience, String pluginVersion, Consumer<String> warn) {
-        this(config, debugger, crafting, combat, survival, planner, team, budget, experience, pluginVersion, warn, null);
+        this(config, debugger, crafting, combat, survival, planner, team, budget, experience, pluginVersion, warn, null, null);
     }
 }

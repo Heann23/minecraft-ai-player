@@ -26,16 +26,21 @@ def write_atomic(path: Path, value: dict):
 
 def validate_transition(row: dict):
     required = {"session", "sequence", "frame", "index", "logProbability", "value", "modelVersion", "reward",
-                "elapsedTicks", "terminated", "truncated"}
+                "elapsedTicks", "terminated", "truncated", "appliedTick", "nextWorld", "nextState"}
     if set(row) != required:
         raise ValueError("transition schema mismatch; Teacher labels are not accepted")
     uuid.UUID(row["session"])
+    uuid.UUID(row["nextWorld"])
+    if not isinstance(row["appliedTick"], int) or not row["frame"]["serverTick"] <= row["appliedTick"] <= 0xffff_ffff:
+        raise ValueError("invalid actual application tick")
+    if len(row["nextState"]) != 64 or any(not isinstance(x, (int, float)) or not math.isfinite(x) or abs(x) > 16 for x in row["nextState"]):
+        raise ValueError("invalid actual next state")
     inputs(row["frame"])
     if not isinstance(row["sequence"], int) or row["sequence"] < 0 or not isinstance(row["modelVersion"], int) or row["modelVersion"] < 0:
         raise ValueError("invalid sequence/model version")
     if not isinstance(row["index"], int) or not 0 <= row["index"] < len(row["frame"]["options"]):
         raise ValueError("invalid actual executed candidate")
-    if not isinstance(row["elapsedTicks"], int) or not 1 <= row["elapsedTicks"] <= 2400:
+    if not isinstance(row["elapsedTicks"], int) or not 0 <= row["elapsedTicks"] <= 2400:
         raise ValueError("invalid elapsed game ticks")
     for key in ("logProbability", "value", "reward"):
         if not isinstance(row[key], (int, float)) or not math.isfinite(row[key]):
@@ -61,12 +66,13 @@ class PaperTrainer:
         write_atomic(output / "run.json", {"schema": SCHEMA, "contract": CONTRACT, "algorithm": "ppo",
                      "environment": "minecraft-paper", "run": self.run, "seed": seed,
                      "maxTransitions": maximum, "rolloutSize": rollout_size, "teacherLabels": False,
-                     "trained": False, "evaluationComplete": False})
+                     "initialWeights": "random", "gammaPerServerTick": 0.99997, "gaeLambda": 0.95,
+                     "ppoClip": 0.2, "epochsPerUpdate": 4, "trained": False, "evaluationComplete": False})
 
     def handle(self, packet: dict) -> dict:
         if packet.get("schema") != SCHEMA or packet.get("environment") != "minecraft-paper":
             raise ValueError("only actual Paper bridge schema accepted")
-        if set(packet) - {"schema", "environment", "id", "frame", "previous"}:
+        if set(packet) - {"schema", "environment", "id", "frame", "transitions"}:
             raise ValueError("unexpected query data")
         uuid.UUID(packet["id"])
         frame = packet["frame"]
@@ -74,8 +80,10 @@ class PaperTrainer:
         uuid.UUID(frame["world"])
         if not isinstance(frame["serverTick"], int) or not 0 <= frame["serverTick"] <= 0xffff_ffff:
             raise ValueError("invalid captured game clock")
-        previous = packet.get("previous")
-        if previous is not None:
+        transitions = packet.get("transitions", [])
+        if not isinstance(transitions, list) or len(transitions) > 16:
+            raise ValueError("invalid transition batch")
+        for previous in transitions:
             validate_transition(previous)
             session, sequence = previous["session"], previous["sequence"]
             if sequence > self.last_sequence.get(session, -1):
@@ -83,10 +91,10 @@ class PaperTrainer:
                 if previous["modelVersion"] != self.model.version:
                     self.discarded_off_policy += 1
                 elif self.steps < self.maximum:
-                    _, next_value, _ = self.model.evaluate(frame)
+                    next_value, _ = self.model.value(previous["nextState"])
                     row = dict(previous)
                     # A cross-world boundary is not bootstrapped from an unrelated world's body state.
-                    row["nextValue"] = 0 if row["terminated"] or frame["world"] != row["frame"]["world"] else next_value
+                    row["nextValue"] = 0 if row["terminated"] or row["nextWorld"] != row["frame"]["world"] else next_value
                     encoded = (json.dumps(row, ensure_ascii=False, allow_nan=False, separators=(",", ":")) + "\n").encode()
                     if self.bytes + len(encoded) > self.max_bytes:
                         raise RuntimeError("raw Paper rollout byte budget exhausted")

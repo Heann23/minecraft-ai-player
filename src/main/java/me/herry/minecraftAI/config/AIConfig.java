@@ -54,6 +54,8 @@ public final class AIConfig {
     public final boolean debugEnabled;
     public final boolean learnedControl;
     public final String learnedModelFile;
+    public final boolean trainingControl;
+    public final String trainingChannel;
 
     /**
      * @param warn 관계가 맞지 않는 값을 고쳤을 때 그 내용을 받는다 (보통 플러그인 로거의 warning)
@@ -105,14 +107,22 @@ public final class AIConfig {
 
         debugEnabled = config.getBoolean("debug.enabled", false);
         String policyMode = config.getString("policy.mode", "learned");
-        if (!java.util.Set.of("learned", "teacher").contains(policyMode)) {
+        if (!java.util.Set.of("learned", "teacher", "training").contains(policyMode)) {
             warn.accept("Unknown policy.mode; learned mode remains stopped until a compatible trained model is available");
             policyMode = "learned";
         }
-        learnedControl = policyMode.equals("learned");
+        if (policyMode.equals("training") && !config.getBoolean("policy.allow-training", false)) {
+            warn.accept("Training mode requires explicit policy.allow-training; learned inference remains idle without a model");
+            policyMode = "learned";
+        }
+        trainingControl = policyMode.equals("training");
+        learnedControl = !policyMode.equals("teacher");
+        java.nio.file.Path channel = java.nio.file.Path.of(config.getString("policy.training-channel", "training-session/channel")).normalize();
+        if (channel.toString().isBlank() || channel.isAbsolute() || channel.startsWith("..")) throw new IllegalArgumentException("training channel must stay inside plugin directory");
+        trainingChannel = channel.toString();
         String modelFile = config.getString("policy.model", "models/minecraft-rl-actor.json");
         java.nio.file.Path modelPath = java.nio.file.Path.of(modelFile).normalize();
-        if (modelPath.isAbsolute() || modelPath.startsWith("..")) throw new IllegalArgumentException("policy.model must stay inside the plugin data directory");
+        if (modelPath.toString().isBlank() || modelPath.isAbsolute() || modelPath.startsWith("..")) throw new IllegalArgumentException("policy.model must stay inside the plugin data directory");
         learnedModelFile = modelPath.toString();
     }
 

@@ -123,7 +123,8 @@ public final class AIPlayer {
             return;
         }
         if (state == AIState.RUNNING) {
-            String text = brain.getCurrentGoal().name() + (brain.getForcedGoal() != null ? " (고정)" : "");
+            String text = services.config().learnedControl ? (services.config().trainingControl ? "학습 모드" : "자율 플레이")
+                    : brain.getCurrentGoal().name() + (brain.getForcedGoal() != null ? " (고정)" : "");
             label.update(body.getPlayer(), text, NamedTextColor.YELLOW);
         } else {
             label.update(body.getPlayer(), state.name(), NamedTextColor.GRAY);
@@ -141,9 +142,10 @@ public final class AIPlayer {
 
     public boolean start() {
         if (state != AIState.STOPPED) return false;
+        if (services.config().learnedControl && services.learnedPolicy() == null && services.trainingBridge() == null) return false;
         state = AIState.RUNNING;
         debug("Autonomous behavior started");
-        brain.getJournal().beginEpisode(Experience.StartReason.START);
+        if (!services.config().learnedControl) brain.getJournal().beginEpisode(Experience.StartReason.START);
         getTeam().say(this, Phrases.hello(getTeam().teamSize()), true);
         return true;
     }
@@ -270,7 +272,7 @@ public final class AIPlayer {
         state = resumeAfterRespawn ? AIState.RUNNING : AIState.STOPPED;
         debug("Respawned");
         if (state != AIState.RUNNING) return;
-        brain.getJournal().beginEpisode(Experience.StartReason.RESPAWN);
+        if (!services.config().learnedControl) brain.getJournal().beginEpisode(Experience.StartReason.RESPAWN);
         getTeam().say(this, Phrases.respawned(), true);
     }
 
@@ -527,6 +529,19 @@ public final class AIPlayer {
     // 지금 하고 있는 일과 그 이유. 아직 한 번도 판단하지 않았으면 null.
     public @Nullable DecisionTrace getDecision() {
         return brain.currentTrace();
+    }
+
+    public boolean acceptsLegacyGoals() { return !services.config().learnedControl; }
+
+    public String policyStatus() {
+        if (!services.config().learnedControl) return "기존 규칙 정책 (명시적 teacher 모드)";
+        if (services.config().trainingControl) return services.trainingBridge() == null ? "학습 연결 준비 안 됨" : "강화학습 연결 모드 (학습 완료와 구분)";
+        return services.learnedPolicy() == null ? "호환 학습 모델 없음 — 자율 실행 중지"
+                : "학습 가중치 추론 " + services.learnedPolicy().sha256().substring(0, 12);
+    }
+
+    public void recordLearningObjective(double actualReward) {
+        requireMainThread(); brain.recordLearningObjective(actualReward);
     }
 
     public DecisionLog getDecisionLog() {

@@ -21,7 +21,15 @@ import java.util.*;
 /** Enumerates supported concrete inputs. No Goal score, utility, progression order, best-food/tool or Teacher selection. */
 public final class PolicyCandidates {
     public record Candidate(String id, PrimitiveCommand command, RecipeOption recipe, SurvivalObservation.Item consumable,
-                            PolicyFrame.Option encoded) {
+                            PolicyFrame.Option encoded, int commitmentTicks, String inputId) {
+        public Candidate(String id, PrimitiveCommand command, RecipeOption recipe, SurvivalObservation.Item consumable, PolicyFrame.Option encoded) {
+            this(id, command, recipe, consumable, encoded, 0, id);
+        }
+        public Candidate committed(int ticks) {
+            double[] features = encoded.features(); features[30] = ticks / 600.0;
+            String choice = inputId + "@" + ticks;
+            return new Candidate(choice, command, recipe, consumable, new PolicyFrame.Option(choice, features), ticks, inputId);
+        }
         public Action create(AIPlayer ai) {
             if (recipe != null) return new CraftItemAction(Material.valueOf(recipe.result()), recipe.resultAmount(), recipe.id());
             if (consumable != null) return new ConsumeExactAction(ai.getWorldId(), consumable);
@@ -37,7 +45,13 @@ public final class PolicyCandidates {
     private int recipeCursor;
     private long recipeRevision = Long.MIN_VALUE;
 
-    public Capture capture(AIPlayer ai, Candidate active, int activeTicks) {
+    public record Observed(me.herry.minecraftAI.ai.primitive.control.PrimitiveSnapshot snapshot,
+                           SurvivalObservation.Body body, Map<String, Integer> stock, double[] features) {
+        public Observed { stock = Map.copyOf(stock); features = features.clone(); }
+        @Override public double[] features() { return features.clone(); }
+    }
+
+    public static Observed observe(AIPlayer ai, Candidate active, int activeTicks) {
         var state = PrimitiveAdapter.capture(ai);
         double[] body = new double[PolicyFrame.STATE_SIZE];
         var p = ai.getPlayer();
@@ -58,6 +72,17 @@ public final class PolicyCandidates {
         body[32 + bucket(p.getInventory().getItemInMainHand().getType().name(), 8)] = 1;
         for (var item : state.inventory()) body[48 + bucket(item.material(), 16)] += item.amount() / 64.0;
         for (int i = 0; i < body.length; i++) body[i] = Math.clamp(body[i], -16, 16);
+        Map<String, Integer> counts = new HashMap<>();
+        for (var item : state.inventory()) if (item.amount() > 0) counts.merge(item.material(), item.amount(), Integer::sum);
+        return new Observed(state, survival, counts, body);
+    }
+
+    public Capture capture(AIPlayer ai, Candidate active, int activeTicks) {
+        var observed = observe(ai, active, activeTicks);
+        var state = observed.snapshot();
+        var survival = observed.body();
+        var body = observed.features();
+        var p = ai.getPlayer();
         Map<String, Candidate> found = new LinkedHashMap<>();
         // Waiting is always a legal input choice, without awarding it any hand-written priority.
         add(ai, found, "wait:5", new PrimitiveCommand.Wait(5), null, null, 0, 0, 0, "", false);
@@ -137,12 +162,17 @@ public final class PolicyCandidates {
             if (add(ai, found, "craft:" + recipe.id(), null, recipe, null, 0, 0, 0, recipe.id(), false)) crafted++;
         }
         // Fair category interleaving prevents an inventory full of block variants from hiding every recipe.
-        var candidates = selectFair(List.copyOf(found.values()), active == null ? "" : active.id());
+        List<Candidate> expanded = new ArrayList<>();
+        for (Candidate candidate : found.values()) {
+            if (candidate.commitmentTicks() > 0) expanded.add(candidate);
+            else for (int ticks : new int[]{5, 20, 80, 600}) expanded.add(candidate.committed(ticks));
+        }
+        var candidates = selectFair(expanded, active == null ? "" : active.id());
         Map<String, Integer> stockCounts = new HashMap<>();
         for (var item : state.inventory()) if (item.amount() > 0) stockCounts.merge(item.material(), item.amount(), Integer::sum);
         return new Capture(new PolicyFrame(ai.getWorldId(), Integer.toUnsignedLong(Bukkit.getCurrentTick()), body,
                 candidates.stream().map(Candidate::encoded).toList(), inspected.complete() && !ai.getWorkBudget().isExhausted()
-                && recipeCursor >= Material.values().length && found.size() <= PolicyFrame.MAX_OPTIONS), candidates, survival, stockCounts);
+                && recipeCursor >= Material.values().length && expanded.size() <= PolicyFrame.MAX_OPTIONS), candidates, survival, stockCounts);
     }
 
     private void advanceRecipes(AIPlayer ai) {
@@ -164,9 +194,27 @@ public final class PolicyCandidates {
         PrimitiveType type = recipe != null ? PrimitiveType.CRAFT_ITEM : consumable != null ? PrimitiveType.USE_ITEM : command.type();
         features[type.ordinal()] = 1;
         features[24] = Math.clamp(dx / 16, -1, 1); features[25] = Math.clamp(dy / 16, -1, 1); features[26] = Math.clamp(dz / 16, -1, 1);
-        if (consumable != null) { features[27] = consumable.amount() / 64.0; features[28] = consumable.consumption().useTicks() / 200.0; features[29] = consumable.slot() / 35.0; }
+        features[32 + bucket(identity, 16)] = 1; features[48 + bucket(id, 8)] = 1;
+        if (consumable != null) {
+            var use = consumable.consumption();
+            features[27] = Math.min(16, consumable.amount() / 64.0); features[28] = use.useTicks() / 200.0;
+            features[29] = consumable.slot() / 35.0; features[31] = use.nutrition() / 20.0;
+            features[57] = Math.clamp(use.saturation() / 20.0, 0, 16); features[58] = use.clearsEffects() ? 1 : 0;
+            features[59] = use.randomTeleport() ? 1 : 0; features[60] = use.canAlwaysEat() ? 1 : 0;
+            features[61] = use.removedEffects().isEmpty() ? 0 : 1; features[63] = 1;
+            EffectEncoding.encode(features, use.effects());
+        }
+        if (command instanceof PrimitiveCommand.BreakBlock mine) {
+            var tool = ai.getPlayer().getInventory().getItem(mine.tool().slot());
+            if (tool != null && !tool.isEmpty()) {
+                Integer damage = tool.getData(io.papermc.paper.datacomponent.DataComponentTypes.DAMAGE);
+                Integer maximum = tool.getData(io.papermc.paper.datacomponent.DataComponentTypes.MAX_DAMAGE);
+                features[56] = maximum == null || maximum <= 0 ? 0 : Math.clamp((damage == null ? 0 : damage) / (double) maximum, 0, 1);
+            }
+            var actualTool = tool == null ? org.bukkit.inventory.ItemStack.empty() : tool;
+            features[57] = Math.clamp(Positions.block(ai.getPlayer().getWorld(), mine.target()).getBlockData().getDestroySpeed(actualTool, true) / 32.0, 0, 16);
+        }
         if (recipe != null) features[27] = recipe.resultAmount() / 64.0;
-        features[32 + bucket(identity, 16)] = 1; features[48 + bucket(id, 16)] = 1;
         found.put(id, new Candidate(id, command, recipe, consumable, new PolicyFrame.Option(id, features)));
         return true;
     }

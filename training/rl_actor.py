@@ -5,7 +5,8 @@ import math
 import numpy as np
 
 CONTRACT = "minecraft-primitive-candidates/v1"
-STATE_SIZE, ACTION_SIZE, MAX_OPTIONS = 64, 64, 128
+STATE_SIZE, ACTION_SIZE, MAX_OPTIONS = 64, 256, 128
+INPUT_SIZE = STATE_SIZE + ACTION_SIZE
 
 
 def inputs(frame: dict) -> tuple[np.ndarray, np.ndarray]:
@@ -30,7 +31,7 @@ class ActorCritic:
             raise ValueError("hidden size must be 1..256")
         self.rng = np.random.default_rng(seed)
         self.params = {
-            "actor_w": self.rng.normal(0, 1 / math.sqrt(128), (hidden, 128)),
+            "actor_w": self.rng.normal(0, 1 / math.sqrt(INPUT_SIZE), (hidden, INPUT_SIZE)),
             "actor_b": np.zeros(hidden),
             "actor_out": self.rng.normal(0, 0.01, hidden),
             "actor_bias": np.zeros(1),
@@ -52,9 +53,15 @@ class ActorCritic:
         logits -= logits.max()
         probabilities = np.exp(logits)
         probabilities /= probabilities.sum()
-        value_hidden = np.tanh(p["value_w"] @ state + p["value_b"])
-        value = float(p["value_out"] @ value_hidden + p["value_bias"][0])
+        value, value_hidden = self.value(state)
         return probabilities, value, (state, x, hidden, value_hidden)
+
+    def value(self, state):
+        state = np.asarray(state, dtype=np.float64)
+        if state.shape != (STATE_SIZE,) or not np.isfinite(state).all() or np.abs(state).max() > 16:
+            raise ValueError("invalid actual next-state value input")
+        hidden = np.tanh(self.params["value_w"] @ state + self.params["value_b"])
+        return float(self.params["value_out"] @ hidden + self.params["value_bias"][0]), hidden
 
     def sample(self, frame: dict) -> dict:
         probabilities, value, _ = self.evaluate(frame)
@@ -144,14 +151,14 @@ class ActorCritic:
                 "outputWeights": p["actor_out"].tolist(), "outputBias": float(p["actor_bias"][0])}
 
 
-def generalized_advantages(rows: list[dict], gamma_tick: float = 0.999, gae_lambda: float = 0.95):
+def generalized_advantages(rows: list[dict], gamma_tick: float = 0.99997, gae_lambda: float = 0.95):
     """SMDP discount uses actual elapsed server ticks; gaps/episodes never share an advantage tail."""
     advantages = np.zeros(len(rows), dtype=np.float64)
     tails = {}
     for index in reversed(range(len(rows))):
         row = rows[index]
         ticks = row["elapsedTicks"]
-        if not isinstance(ticks, int) or not 1 <= ticks <= 2400:
+        if not isinstance(ticks, int) or not 0 <= ticks <= 2400:
             raise ValueError("invalid actual elapsed ticks")
         discount = gamma_tick ** ticks
         terminal = row["terminated"]

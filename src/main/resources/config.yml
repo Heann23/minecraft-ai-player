@@ -83,3 +83,6 @@ debug:
 policy:
   mode: learned
   model: models/minecraft-rl-actor.json
+  # Development only: training mode additionally requires explicit opt-in. User products use learned inference.
+  allow-training: false
+  training-channel: training-session/channel

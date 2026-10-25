@@ -91,9 +91,11 @@ final class AIBrain {
     private final OverworldAutonomy autonomy = new OverworldAutonomy();
     private final me.herry.minecraftAI.ai.learned.PolicyCandidates learnedCandidates = new me.herry.minecraftAI.ai.learned.PolicyCandidates();
     private final me.herry.minecraftAI.ai.learned.PolicyWeights learnedPolicy;
+    private final me.herry.minecraftAI.ai.learned.TrainingControl trainingControl;
     private me.herry.minecraftAI.ai.learned.PolicyCandidates.Candidate activeLearned;
     private java.util.UUID learnedWorld;
     private long learnedStartedAt;
+    private long learnedNextChoiceAt;
     private boolean learnedLane;
     private @Nullable OverworldAutonomy.Decision activeAutonomy;
     private boolean autonomyPreparation;
@@ -124,6 +126,8 @@ final class AIBrain {
         this.ai = ai;
         this.planner = services.planner();
         this.learnedPolicy = services.learnedPolicy();
+        this.trainingControl = services.trainingBridge() == null ? null
+                : new me.herry.minecraftAI.ai.learned.TrainingControl(services.trainingBridge(), services.warn());
         this.journal = DecisionJournal.create(ai, services);
     }
 
@@ -147,13 +151,14 @@ final class AIBrain {
             // 새로 훑어본 결과를 근처의 동료와 나눈다 (동료가 있을 때만).
             ai.getTeam().shareDiscoveries(ai);
         }
-        if (ai.getConfig().learnedControl && controlledProgram == null && !primitiveLease && forcedGoal == null && directive == null) {
+        if (ai.getConfig().learnedControl && controlledProgram == null && !primitiveLease) {
             tickLearned(now);
             profiler.end(TickProfiler.Section.TOTAL, tickStarted);
             profiler.endTick();
             return;
         }
         if (learnedLane) {
+            if (trainingControl != null) trainingControl.end(ai, activeLearned, (int) Math.min(2400, now - learnedStartedAt));
             if (plan != null) plan.cancel(ai);
             plan = null; activeLearned = null; learnedLane = false;
         }
@@ -171,6 +176,7 @@ final class AIBrain {
 
     // 진행 중인 행동과 계획을 모두 버리고 처음 상태로 돌아간다.
     void reset() {
+        if (trainingControl != null) trainingControl.end(ai, activeLearned, (int) Math.min(2400, ai.getTicks() - learnedStartedAt));
         cancelPrimitiveProgram("lifecycle reset", false);
         if (plan != null) plan.cancel(ai);
         plan = null;
@@ -227,6 +233,9 @@ final class AIBrain {
     boolean hasPrimitiveControl() { return primitiveLease || controlledProgram != null; }
 
     private void interruptTeacherForPrimitiveControl() {
+        if (learnedLane && trainingControl != null)
+            trainingControl.end(ai, activeLearned, (int) Math.min(2400, ai.getTicks() - learnedStartedAt));
+        learnedLane = false; activeLearned = null;
         if (plan != null) plan.cancel(ai);
         journal.planEnded(ai.getTicks(), Experience.Outcome.INTERRUPTED, "explicit primitive control");
         // Prepared/external control is never appended to an autonomous Teacher episode.
@@ -255,7 +264,7 @@ final class AIBrain {
         primitiveLease = false;
         primitiveLeaseWorld = null;
         plan = null;
-        if (resumeJournal) journal.beginEpisode(Experience.StartReason.START);
+        if (resumeJournal) if (!ai.getConfig().learnedControl) journal.beginEpisode(Experience.StartReason.START);
         return true;
     }
 
@@ -281,6 +290,9 @@ final class AIBrain {
     }
 
     void setForcedGoal(@Nullable GoalType goal) {
+        if (ai.getConfig().learnedControl && goal != null) {
+            ai.debug("Legacy forced goals are not policy-conditioned learned requests"); return;
+        }
         cancelPrimitiveProgram("forced goal changed", true);
         forcedGoal = goal;
         activeAutonomy = null;
@@ -299,6 +311,9 @@ final class AIBrain {
      * 위험을 피하거나 싸우는 중이 아니면 하던 계획을 접고 바로 부탁한 일로 넘어간다.
      */
     void setDirective(@Nullable Directive directive) {
+        if (ai.getConfig().learnedControl && directive != null) {
+            ai.debug("Legacy directives do not switch learned execution to Teacher"); return;
+        }
         cancelPrimitiveProgram("directive changed", true);
         this.directive = directive;
         autonomy.invalidate();
@@ -403,23 +418,25 @@ final class AIBrain {
     /** Learned mode owns the same Plan/input lane; GoalSystem, heuristic utilities and Teacher are not consulted. */
     private void tickLearned(long now) {
         if (!learnedLane || !ai.getWorldId().equals(learnedWorld)) {
+            if (trainingControl != null && learnedLane) trainingControl.end(ai, activeLearned, (int) Math.min(2400, now - learnedStartedAt));
             if (plan != null) plan.cancel(ai);
             plan = null; activeLearned = null; activeAutonomy = null; activeTrace = null;
             currentGoal = GoalType.IDLE;
             journal.endEpisode(Experience.EndReason.STOPPED);
             learnedLane = true; learnedWorld = ai.getWorldId();
         }
-        if (learnedPolicy == null) { ai.getNavigation().stop(); ai.getBody().clearInputs(); return; }
+        if (learnedPolicy == null && trainingControl == null) { ai.getNavigation().stop(); ai.getBody().clearInputs(); return; }
         if (now % ai.getConfig().updateInterval == 0) {
             ai.getPerceptionSystem().update();
             ai.getMemory().recordVisit(ai.getWorldId(), ai.getPosition());
             ai.getWorldModel().markExplored(ai.getWorldId(), ai.getPosition().x() >> 4, ai.getPosition().z() >> 4);
-            if (!ai.getWorkBudget().isExhausted()) {
+            if (trainingControl == null && !ai.getWorkBudget().isExhausted()
+                    && (plan == null || plan.isFinished() || now >= learnedNextChoiceAt)) {
                 try {
                     var captured = learnedCandidates.capture(ai, activeLearned, (int) Math.min(2400, now - learnedStartedAt));
                     var predicted = learnedPolicy.predict(captured.frame());
                     var selected = captured.candidates().get(predicted.index());
-                    if (activeLearned == null || !selected.id().equals(activeLearned.id()) || plan == null || plan.isFinished()) {
+                    if (activeLearned == null || !selected.inputId().equals(activeLearned.inputId()) || plan == null || plan.isFinished()) {
                         if (plan != null) plan.cancel(ai);
                         plan = null; activeLearned = null;
                         var action = selected.create(ai);
@@ -427,11 +444,33 @@ final class AIBrain {
                         activeLearned = selected; learnedStartedAt = now;
                         ai.debug("Model " + predicted.modelSha256() + " selected " + predicted.candidate());
                     }
+                    activeLearned = selected; learnedNextChoiceAt = now + selected.commitmentTicks();
                 } catch (RuntimeException failure) {
                     if (plan != null) plan.cancel(ai);
                     plan = null; activeLearned = null;
                     ai.getBody().clearInputs();
                     ai.debug("Learned execution unavailable: " + failure.getClass().getSimpleName());
+                }
+            }
+        }
+        if (trainingControl != null) {
+            var decision = trainingControl.poll(ai, activeLearned, (int) Math.min(2400, now - learnedStartedAt),
+                    now % ai.getConfig().updateInterval == 0 && (plan == null || plan.isFinished() || now >= learnedNextChoiceAt));
+            if (decision != null) {
+                try {
+                    var selected = decision.selected();
+                    if (activeLearned == null || !selected.inputId().equals(activeLearned.inputId()) || plan == null || plan.isFinished()) {
+                        if (plan != null) plan.cancel(ai);
+                        plan = null; activeLearned = null;
+                        plan = new Plan(GoalType.IDLE, List.of(selected.create(ai)));
+                        activeLearned = selected; learnedStartedAt = now;
+                    }
+                    activeLearned = selected; learnedNextChoiceAt = now + selected.commitmentTicks();
+                    trainingControl.applied(decision);
+                } catch (RuntimeException failure) {
+                    if (plan != null) plan.cancel(ai);
+                    plan = null; activeLearned = null; ai.getBody().clearInputs();
+                    ai.debug("Training decision not executed: " + failure.getClass().getSimpleName());
                 }
             }
         }
@@ -448,6 +487,10 @@ final class AIBrain {
      * 이번에 할 단기 목표를 정한다. 관리자가 고정한 목표가 가장 먼저이고, 그다음이 긴급 목표,
      * 그다음이 사람이 부탁한 일, 마지막이 스스로 고른 목표다.
      */
+    void recordLearningObjective(double actualReward) {
+        if (learnedLane && trainingControl != null) trainingControl.objective(actualReward);
+    }
+
     private Choice choose(Situation situation, long now) {
         if (forcedGoal != null) return new Choice(forcedGoal, Double.MAX_VALUE, DecisionTrace.Origin.FORCED);
 
@@ -614,7 +657,7 @@ final class AIBrain {
                 } else {
                     primitiveLease = false;
                     primitiveLeaseWorld = null;
-                    journal.beginEpisode(Experience.StartReason.START);
+                    if (!ai.getConfig().learnedControl) journal.beginEpisode(Experience.StartReason.START);
                 }
             }
             return;

@@ -200,7 +200,7 @@ public class AICommand implements TabExecutor {
         AIPlayer ai = resolve(sender, args, 1);
         if (ai == null) return;
         if (ai.start()) info(sender, "AI '" + ai.getName() + "' 의 자율 행동을 시작했습니다.");
-        else error(sender, "AI '" + ai.getName() + "' 은(는) 지금 시작할 수 없습니다. (상태: " + ai.getState() + ")");
+        else error(sender, "AI '" + ai.getName() + "' 은(는) 지금 시작할 수 없습니다. (상태: " + ai.getState() + ", " + ai.policyStatus() + ")");
     }
 
     private void stop(CommandSender sender, String[] args) {
@@ -219,6 +219,7 @@ public class AICommand implements TabExecutor {
         GoalType forced = ai.getForcedGoal();
         line(sender, "AI 이름", ai.getName());
         line(sender, "AI 상태", ai.getState().name());
+        line(sender, "판단 방식", ai.policyStatus());
         line(sender, "현재 목표", ai.getCurrentGoal().name() + (forced != null ? " (강제 지정)" : ""));
         line(sender, "현재 행동", ai.getCurrentActionName());
         line(sender, "위치", location.getBlockX() + ", " + location.getBlockY() + ", " + location.getBlockZ() + " (" + player.getWorld().getName() + ")");
@@ -256,6 +257,10 @@ public class AICommand implements TabExecutor {
             goal = GoalType.valueOf(args[1].toUpperCase(Locale.ROOT));
         } catch (IllegalArgumentException e) {
             error(sender, "알 수 없는 목표입니다: " + args[1]);
+            return;
+        }
+        if (!ai.acceptsLegacyGoals()) {
+            error(sender, "학습 정책에서는 이전 목표 고정 기능을 사용하지 않습니다. 사용자 목표를 모델 입력으로 전달하는 기능은 준비 중입니다.");
             return;
         }
         ai.setForcedGoal(goal);

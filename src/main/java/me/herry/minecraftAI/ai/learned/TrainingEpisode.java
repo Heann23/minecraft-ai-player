@@ -16,19 +16,20 @@ public final class TrainingEpisode {
     private PolicyFrame before;
     private SurvivalObservation.Body beforeBody;
     private PpoBridge.Response chosen;
+    private long appliedTick;
 
-    public void begin(PolicyCandidates.Capture captured, PpoBridge.Response response) {
+    public void begin(PolicyCandidates.Capture captured, PpoBridge.Response response, PolicyCandidates.Observed actual, long now) {
         if (before != null) throw new IllegalStateException("previous policy transition not closed");
-        before = captured.frame(); beforeBody = captured.body(); chosen = response;
-        if (sequence == 0) observedItems.addAll(captured.stock().keySet());
+        before = captured.frame(); beforeBody = actual.body(); chosen = response; appliedTick = now;
+        if (sequence == 0) observedItems.addAll(actual.stock().keySet());
     }
 
     public PpoBridge.Transition finish(PolicyFrame next, SurvivalObservation.Body body, Map<String, Integer> stock,
                                        boolean terminated, boolean truncated, double actualObjectiveReward) {
         if (before == null) return null;
-        long elapsed = next.serverTick() - before.serverTick();
-        if (elapsed <= 0 || elapsed > 2400) {
-            // Same-tick/no-tick execution or an invalidated clock is not manufactured into a valid game step.
+        long elapsed = next.serverTick() - appliedTick;
+        if (elapsed < 0 || elapsed > 2400) {
+            // An invalidated clock is not manufactured into a valid game step. Same-tick terminal events retain their actual zero duration.
             before = null; beforeBody = null; chosen = null; return null;
         }
         int discoveries = 0;
@@ -38,7 +39,7 @@ public final class TrainingEpisode {
                 + discoveries * 0.2 + actualObjectiveReward - (terminated ? 10 : 0);
         reward = Math.clamp(reward, -100, 100);
         var transition = new PpoBridge.Transition(session, sequence++, before, chosen.index(), chosen.logProbability(),
-                chosen.value(), chosen.modelVersion(), reward, (int) elapsed, terminated, truncated);
+                chosen.value(), chosen.modelVersion(), reward, (int) elapsed, terminated, truncated, appliedTick, next.world().toString(), next.state());
         before = null; beforeBody = null; chosen = null;
         return transition;
     }

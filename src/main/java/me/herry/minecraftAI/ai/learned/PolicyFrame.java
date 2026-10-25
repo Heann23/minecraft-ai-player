@@ -8,7 +8,7 @@ import java.util.UUID;
 public record PolicyFrame(UUID world, long serverTick, double[] state, List<Option> options, boolean complete) {
     public static final String CONTRACT = "minecraft-primitive-candidates/v1";
     public static final int STATE_SIZE = 64;
-    public static final int ACTION_SIZE = 64;
+    public static final int ACTION_SIZE = 256;
     public static final int INPUT_SIZE = STATE_SIZE + ACTION_SIZE;
     public static final int MAX_OPTIONS = 128;
 
