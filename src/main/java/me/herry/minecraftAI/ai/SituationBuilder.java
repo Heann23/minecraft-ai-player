@@ -86,7 +86,8 @@ final class SituationBuilder {
         situation.healthState = survival.healthState(situation.health);
         situation.shouldEat = survival.shouldEat(situation.food, situation.health, situation.maxHealth);
         situation.starving = survival.isStarving(situation.food);
-        situation.canRegenerate = survival.canRegenerate(situation.food);
+        situation.canRegenerate = survival.canRegenerate(situation.food)
+                && me.herry.minecraftAI.ai.plan.RecoveryPlans.naturalRegeneration(ai);
 
         situation.inLava = perception.isInLava();
         situation.standingInDanger = perception.isStandingInDanger();

@@ -13,7 +13,6 @@ import me.herry.minecraftAI.ai.action.ExploreAreaAction;
 import me.herry.minecraftAI.ai.action.GiveFoodAction;
 import me.herry.minecraftAI.ai.action.PickupItemAction;
 import me.herry.minecraftAI.ai.action.RunAwayAction;
-import me.herry.minecraftAI.ai.action.WaitAction;
 import me.herry.minecraftAI.ai.combat.CombatMemory;
 import me.herry.minecraftAI.ai.combat.TargetRules;
 import me.herry.minecraftAI.ai.memory.MemorySystem;
@@ -40,7 +39,6 @@ import java.util.UUID;
  * 위험 대응, 전투, 음식처럼 생존과 직결된 목표의 행동 계획.
  */
 public final class SurvivalPlans {
-    private static final int REST_TICKS = 60;
     private static final double DROP_RADIUS = 8.0;
 
     private SurvivalPlans() {
@@ -78,7 +76,7 @@ public final class SurvivalPlans {
         }
         List<Action> chosen = RecoveryPlans.choose(ai);
         if (!chosen.isEmpty()) return chosen;
-        return List.of(new WaitAction(REST_TICKS));
+        return List.of(); // No unsupported or unobserved recovery is turned into a successful timed wait.
     }
 
     static List<Action> fightHostile(AIPlayer ai) {

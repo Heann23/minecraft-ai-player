@@ -10,6 +10,7 @@ import static me.herry.minecraftAI.ai.observation.SurvivalObservation.*;
 /** Relative recovery utility, not a promise of applied healing. Item names are not a recovery policy. */
 public final class RecoveryChoices {
     public record Choice(Item item, double value, String reason) {}
+    public record Rest(int ticks, double value, String reason) {}
 
     private RecoveryChoices() {}
 
@@ -36,6 +37,24 @@ public final class RecoveryChoices {
         return selected.amount() == 1 && (hand.amount() == 0
                 || !selected.consumption().remainderMaterial().isEmpty()
                 && hand.material().equals(selected.consumption().remainderMaterial()) && hand.amount() == 1);
+    }
+
+    /** A bounded opportunity to recover; the action must observe healing rather than awarding it for elapsed time. */
+    public static Rest rest(Body body, List<Effect> active, boolean naturalRegeneration, boolean safeToPause) {
+        double missing = body.maxHealth() - body.health();
+        if (!safeToPause || missing <= 0 || active.stream().anyMatch(e -> e.category().equals("HARMFUL"))) return null;
+        int ticks = naturalRegeneration && body.foodLevel() >= 18 ? (body.foodLevel() == 20 && body.saturation() > 0 ? 40 : 100) : 0;
+        for (Effect effect : active) {
+            if (!effect.key().equals("minecraft:regeneration") || !effect.durationKnown()
+                    || !effect.infinite() && effect.durationTicks() < 20) continue;
+            int window = effect.infinite() ? 100 : Math.min(100, effect.durationTicks());
+            ticks = ticks == 0 ? window : Math.min(ticks, window);
+        }
+        if (ticks == 0) return null;
+        double conservation = body.health() >= body.maxHealth() * 0.5 ? 8 : 0.2;
+        return new Rest(ticks, missing * conservation / (1 + ticks / 20.0),
+                "bounded recovery opportunity; naturalRegeneration=" + naturalRegeneration + ", ticks=" + ticks
+                        + "; observed healing required; conservative relative time/resource utility");
     }
 
     private static Choice evaluate(Item item, Body body, List<Effect> active) {
