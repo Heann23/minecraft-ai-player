@@ -2,6 +2,9 @@ package me.herry.minecraftAI.ai.plan;
 
 import me.herry.minecraftAI.ai.AIPlayer;
 import me.herry.minecraftAI.ai.action.Action;
+import me.herry.minecraftAI.ai.action.RestForRecoveryAction;
+import me.herry.minecraftAI.ai.observation.SurvivalCapture;
+import org.bukkit.GameRules;
 import me.herry.minecraftAI.ai.action.UseObservedItemAction;
 import me.herry.minecraftAI.ai.navigation.BlockClass;
 import me.herry.minecraftAI.ai.navigation.BukkitTerrainView;
@@ -52,13 +55,30 @@ public final class RecoveryPlans {
 
     public static boolean available(AIPlayer ai) {
         if (!canPause(ai)) return false;
-        return !RecoveryChoices.rank(ai.survivalObservation(), true).isEmpty();
+        var observed = ai.survivalObservation();
+        return !RecoveryChoices.rank(observed, true).isEmpty()
+                || RecoveryChoices.rest(observed.body(), observed.activeEffects(), naturalRegeneration(ai), true) != null;
+    }
+
+    public static boolean naturalRegeneration(AIPlayer ai) {
+        return Boolean.TRUE.equals(ai.getPlayer().getWorld().getGameRuleValue(GameRules.NATURAL_HEALTH_REGENERATION));
+    }
+
+    /** Caller must independently hold/refresh canPause permission. */
+    public static RecoveryChoices.Rest rest(AIPlayer ai) {
+        return RecoveryChoices.rest(SurvivalCapture.body(ai.getPlayer()), SurvivalCapture.effects(ai.getPlayer()),
+                naturalRegeneration(ai), true);
     }
 
     public static List<Action> choose(AIPlayer ai) {
         if (!canPause(ai)) return List.of();
         var observed = ai.survivalObservation();
         var choices = RecoveryChoices.rank(observed, true);
+        var rest = RecoveryChoices.rest(observed.body(), observed.activeEffects(), naturalRegeneration(ai), true);
+        if (rest != null && (choices.isEmpty() || rest.value() >= choices.getFirst().value())) {
+            ai.debug("Recovery rest: " + rest.reason());
+            return List.of(new RestForRecoveryAction(observed.worldId(), observed.serverTick(), rest.ticks()));
+        }
         if (choices.isEmpty()) return List.of();
         var chosen = choices.getFirst();
         ai.debug("Recovery slot=" + chosen.item().slot() + ": " + chosen.reason()

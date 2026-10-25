@@ -98,4 +98,32 @@ class RecoveryChoicesTest {
         var body = snapshot(4, 20, List.of(), List.of()).body();
         assertFalse(RecoveryChoices.benefitObserved(stack, body, List.of(), body, List.of()));
     }
+
+    @Test void naturalRecoveryNeedsTheActualRuleWhileRegenerationCanOfferAnIndependentWait() {
+        var body = snapshot(12, 20, List.of(), List.of()).body();
+        assertNull(RecoveryChoices.rest(body, List.of(), false, true));
+        assertNotNull(RecoveryChoices.rest(body, List.of(), true, true));
+        assertNull(RecoveryChoices.rest(body, List.of(), true, false));
+        var hungry = snapshot(12, 5, List.of(), List.of()).body();
+        assertNull(RecoveryChoices.rest(hungry, List.of(), true, true));
+        var regen = effect("regeneration", 0, 60);
+        assertEquals(60, RecoveryChoices.rest(hungry, List.of(regen), false, true).ticks());
+        assertNull(RecoveryChoices.rest(hungry, List.of(effect("regeneration", 0, 10)), false, true));
+    }
+
+    @Test void noncriticalNaturalRecoveryCanPreserveAHealingDrinkButCriticalRecoveryCanPreferIt() {
+        var drink = item(0, "healing", 0, List.of(effect("instant_health", 0, 1)));
+        var moderate = snapshot(12, 20, List.of(drink), List.of());
+        assertTrue(RecoveryChoices.rest(moderate.body(), List.of(), true, true).value()
+                > RecoveryChoices.rank(moderate, true).getFirst().value());
+        var critical = snapshot(4, 20, List.of(drink), List.of());
+        assertTrue(RecoveryChoices.rest(critical.body(), List.of(), true, true).value()
+                < RecoveryChoices.rank(critical, true).getFirst().value());
+        assertNull(RecoveryChoices.rest(snapshot(20, 20, List.of(), List.of()).body(), List.of(), true, true));
+    }
+
+    @Test void harmfulActiveEffectsDoNotOfferAnUnconditionalSafeRecoveryWait() {
+        var poison = new Effect("minecraft:poison", 0, 100, false, false, 1, "HARMFUL", true);
+        assertNull(RecoveryChoices.rest(snapshot(12, 20, List.of(), List.of()).body(), List.of(poison), true, true));
+    }
 }
