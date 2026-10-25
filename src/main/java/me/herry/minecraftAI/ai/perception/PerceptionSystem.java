@@ -9,6 +9,7 @@ import me.herry.minecraftAI.ai.util.BlockPoint;
 import me.herry.minecraftAI.ai.util.Positions;
 import me.herry.minecraftAI.config.AIConfig;
 import org.bukkit.Location;
+import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.World;
 import org.bukkit.attribute.Attribute;
@@ -61,6 +62,8 @@ public final class PerceptionSystem {
      * 자신의 상태, 주변 엔티티, 발 주변 위험을 새로 읽는다.
      */
     public Perception update() {
+        // A previous complete stamp must not describe partially replaced lists if an update is interrupted.
+        perception.entityScanStamp = null;
         Player player = body.getPlayer();
         Location location = player.getLocation();
         World world = player.getWorld();
@@ -92,6 +95,9 @@ public final class PerceptionSystem {
             perception.standingInDanger = false;
         }
         buildThreats(player);
+        perception.entityScanStamp = new Perception.EntityScanStamp(world.getUID(),
+                Integer.toUnsignedLong(Bukkit.getCurrentTick()), config.entityRange, true,
+                location.getX(), location.getY(), location.getZ());
         return perception;
     }
 
@@ -136,6 +142,7 @@ public final class PerceptionSystem {
 
     public void reset() {
         scanner.reset();
+        perception.entityScanStamp = null;
         perception.world = null;
         perception.location = null;
         perception.heldItem = null;

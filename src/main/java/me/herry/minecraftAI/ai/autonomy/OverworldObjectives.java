@@ -36,6 +36,17 @@ public final class OverworldObjectives {
                     result.add(new AutonomyGoal("inspect-farm:" + position,
                             Map.of("known:farm-checked:" + position, 1), state.count("stock:food") < 8 ? 38 : 8));
                 });
+        boolean propagationAvailable = List.of("WHEAT_SEEDS", "CARROT", "POTATO", "BEETROOT_SEEDS").stream()
+                .anyMatch(seed -> state.count("item:" + seed) > 0);
+        boolean plantable = state.quantities().keySet().stream().anyMatch(token -> token.startsWith("known:plantable-soil:"));
+        if (propagationAvailable && !plantable && state.count("world:crop-planted") < 4) {
+            // A useful basin is a conditional enabling outcome, never a mandatory progression stage.
+            state.quantities().keySet().stream().filter(token -> token.startsWith("known:irrigation:"))
+                    .sorted().limit(8).forEach(token -> {
+                        String cell = token.substring("known:irrigation:".length());
+                        result.add(new AutonomyGoal("farm-water:" + cell, Map.of("world:irrigation:" + cell, 1), 42));
+                    });
+        }
         return List.copyOf(result);
     }
 

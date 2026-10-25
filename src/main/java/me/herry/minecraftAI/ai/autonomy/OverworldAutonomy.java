@@ -3,6 +3,7 @@ package me.herry.minecraftAI.ai.autonomy;
 import me.herry.minecraftAI.ai.AIPlayer;
 import me.herry.minecraftAI.ai.goal.Situation;
 import me.herry.minecraftAI.ai.plan.FarmingPlans;
+import me.herry.minecraftAI.ai.plan.IrrigationPlans;
 import me.herry.minecraftAI.ai.farming.CropRules;
 import me.herry.minecraftAI.ai.util.Positions;
 import org.bukkit.Material;
@@ -51,7 +52,7 @@ public final class OverworldAutonomy {
             if (!catalog.complete()) return null;
         }
         PlanningState actual = OverworldDomain.observe(ai, situation);
-        farmSurveyPending = FarmingPlans.searching(ai);
+        farmSurveyPending = FarmingPlans.searching(ai) || IrrigationPlans.searching(ai);
         boolean retryDue = failures.values().stream().anyMatch(f -> f.until() > capturedAt && f.until() <= ai.getTicks());
         if (snapshot == null || !snapshot.world().equals(ai.getWorldId()) || !actual.equals(snapshot.state())
                 || retryDue || ai.getTicks() - capturedAt >= 1200) {
@@ -142,6 +143,14 @@ public final class OverworldAutonomy {
                     && Positions.block(world, soil.offset(0, 1, 0)).getType() == CropRules.crop(decision.operation().target())) {
                 Map<String, Integer> proven = new HashMap<>(actual.quantities());
                 proven.put(FarmPlanning.planted(decision.operation().target(), soil), 1);
+                actual = new PlanningState(proven);
+            }
+        }
+        if (decision.operation().kind() == OverworldDomain.Kind.IRRIGATE && decision.world().equals(ai.getWorldId())) {
+            var cell = decision.operation().position();
+            if (cell != null && cell.distance(ai.getPosition()) <= 5 && IrrigationPlans.observedSource(ai, cell)) {
+                Map<String, Integer> proven = new HashMap<>(actual.quantities());
+                proven.put(IrrigationPlanning.water(cell), 1);
                 actual = new PlanningState(proven);
             }
         }
