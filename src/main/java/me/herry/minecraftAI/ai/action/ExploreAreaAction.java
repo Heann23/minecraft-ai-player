@@ -2,7 +2,10 @@ package me.herry.minecraftAI.ai.action;
 
 import me.herry.minecraftAI.ai.AIPlayer;
 import me.herry.minecraftAI.ai.memory.MemorySystem;
+import me.herry.minecraftAI.ai.memory.MemoryEntry;
+import me.herry.minecraftAI.ai.memory.MemoryType;
 import me.herry.minecraftAI.ai.navigation.BukkitTerrainView;
+import me.herry.minecraftAI.ai.navigation.FrontierChoice;
 import me.herry.minecraftAI.ai.navigation.GroundFinder;
 import me.herry.minecraftAI.ai.navigation.NavigationSystem;
 import me.herry.minecraftAI.ai.navigation.PathGoal;
@@ -11,9 +14,9 @@ import me.herry.minecraftAI.ai.util.Positions;
 import org.bukkit.Location;
 import org.bukkit.World;
 import org.bukkit.entity.Player;
-import org.jetbrains.annotations.Nullable;
 
 import java.util.List;
+import java.util.ArrayList;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 
@@ -22,9 +25,12 @@ import java.util.concurrent.ThreadLocalRandom;
  */
 public final class ExploreAreaAction extends AbstractAction {
     private static final int TIMEOUT = 500;
-    private static final int ATTEMPTS = 8;
-    // 이만큼도 못 움직였으면 탐험이 실패한 것으로 본다.
-    private static final double MIN_PROGRESS = 4.0;
+    private static final int SECTORS = 12;
+    private static final int RINGS = 2;
+    private static final int SAMPLES_PER_TICK = 3;
+    private static final double FAILED_TARGET_RADIUS_SQ = 16.0;
+    private static final double NEAR_FAILURE_RADIUS_SQ = 144.0;
+    private static final double RECENT_PATH_RADIUS_SQ = 64.0;
     // 지나가 본 청크가 이만큼은 쌓여야 "덜 가 본 방향"을 고를 근거가 된다.
     private static final int MIN_EXPLORED_FOR_MAP = 6;
 
@@ -32,6 +38,16 @@ public final class ExploreAreaAction extends AbstractAction {
     private final double maxDistance;
     private final boolean stayUnderground;
     private Location startLocation;
+    private UUID targetWorld;
+    private BukkitTerrainView terrain;
+    private double preferred;
+    private double sectorOffset;
+    private int sampleIndex;
+    private boolean failureRemembered;
+    private List<MemorySystem.Visit> recentPath = List.of();
+    private List<MemoryEntry> failedApproaches = List.of();
+    private final List<FrontierChoice.Candidate> candidates = new ArrayList<>();
+    private FrontierChoice.Candidate selected;
 
     public ExploreAreaAction(double minDistance, double maxDistance) {
         this(minDistance, maxDistance, false);
@@ -39,6 +55,9 @@ public final class ExploreAreaAction extends AbstractAction {
 
     private ExploreAreaAction(double minDistance, double maxDistance, boolean stayUnderground) {
         super("ExploreArea", TIMEOUT);
+        if (!Double.isFinite(minDistance) || !Double.isFinite(maxDistance) || minDistance <= 0 || maxDistance < minDistance) {
+            throw new IllegalArgumentException("invalid exploration range");
+        }
         this.minDistance = minDistance;
         this.maxDistance = maxDistance;
         this.stayUnderground = stayUnderground;
@@ -51,66 +70,114 @@ public final class ExploreAreaAction extends AbstractAction {
 
     @Override
     protected void onStart(AIPlayer ai) {
+        ai.getNavigation().stop();
         startLocation = ai.getPlayer().getLocation();
-        BlockPoint target = pickTarget(ai);
-        if (target == null) {
-            fail("nowhere to explore");
-            return;
-        }
-        ai.debug("Exploring toward " + target);
-        ai.getNavigation().navigateTo(PathGoal.arrive(target, 3.0));
+        targetWorld = ai.getWorldId();
+        terrain = new BukkitTerrainView(ai.getPlayer().getWorld());
+        preferred = preferredDirection(ai, startLocation);
+        sectorOffset = ThreadLocalRandom.current().nextDouble(-Math.PI / SECTORS, Math.PI / SECTORS);
+        recentPath = ai.getMemory().getRecentPath().stream().filter(visit -> visit.world().equals(targetWorld)).toList();
+        failedApproaches = ai.getMemory().all(MemoryType.UNREACHABLE, targetWorld, ai.getTicks());
     }
 
     @Override
     protected void onTick(AIPlayer ai) {
+        if (!ai.getWorldId().equals(targetWorld)) {
+            fail("world changed");
+            return;
+        }
+        if (selected == null) {
+            sampleTargets(ai);
+            if (sampleIndex < SECTORS * RINGS) return;
+            selected = FrontierChoice.select(candidates).orElse(null);
+            if (selected == null) {
+                fail("no safe loaded frontier endpoint in sampled area");
+                return;
+            }
+            ai.debug("Exploring toward " + selected.target() + " (visited chunk=" + selected.exploredChunk() + ")");
+            ai.getNavigation().navigateTo(PathGoal.arrive(selected.target(), 3.0));
+            terrain = null;
+            candidates.clear();
+        }
         NavigationSystem navigation = ai.getNavigation();
         navigation.tick();
 
         if (navigation.getState() == NavigationSystem.State.ARRIVED) {
+            ai.getMemory().clearUnreachable(targetWorld, selected.target());
             succeed();
         } else if (navigation.getState() == NavigationSystem.State.FAILED) {
-            // 끝까지 가지 못했더라도 새로운 곳으로 어느 정도 이동했으면 탐험으로서는 성공이다.
-            if (Positions.distance(ai.getPlayer().getLocation(), startLocation) >= MIN_PROGRESS) succeed();
+            rememberFailedApproach(ai);
+            // Moving a few blocks inside the same familiar area is not successful exploration.
+            if (FrontierChoice.reachedNewFrontier(selected, Positions.of(startLocation), ai.getPosition())) succeed();
             else fail(navigation.getFailReason());
         }
     }
 
     @Override
     protected void onEnd(AIPlayer ai) {
+        if (selected != null && getStatus() == ActionStatus.FAILED && !getFailReason().equals("cancelled")
+                && !getFailReason().equals("world changed") && ai.getWorldId().equals(targetWorld)) rememberFailedApproach(ai);
         ai.getNavigation().stop();
+        terrain = null;
+        candidates.clear();
+        recentPath = List.of();
+        failedApproaches = List.of();
     }
 
-    private @Nullable BlockPoint pickTarget(AIPlayer ai) {
+    private void rememberFailedApproach(AIPlayer ai) {
+        if (failureRemembered) return;
+        ai.getMemory().rememberUnreachable(targetWorld, selected.target(), ai.getTicks());
+        failureRemembered = true;
+    }
+
+    private void sampleTargets(AIPlayer ai) {
         Player player = ai.getPlayer();
         World world = player.getWorld();
-        Location location = player.getLocation();
-        BukkitTerrainView terrain = new BukkitTerrainView(world);
-        ThreadLocalRandom random = ThreadLocalRandom.current();
-        double preferred = preferredDirection(ai, location);
-
-        for (int attempt = 0; attempt < ATTEMPTS; attempt++) {
-            // 처음에는 덜 가 본 쪽을 고르고, 실패할수록 방향을 넓게 흩뜨린다.
-            double spread = Math.toRadians(40.0 + attempt * 40.0);
-            double angle = preferred + (random.nextDouble() * 2.0 - 1.0) * spread;
-            double range = minDistance + random.nextDouble() * (maxDistance - minDistance);
-            int x = (int) Math.floor(location.getX() + Math.cos(angle) * range);
-            int z = (int) Math.floor(location.getZ() + Math.sin(angle) * range);
+        terrain.clearCache();
+        int remaining = SAMPLES_PER_TICK;
+        while (sampleIndex < SECTORS * RINGS && remaining-- > 0 && !ai.getWorkBudget().isExhausted()) {
+            int sector = sampleIndex % SECTORS;
+            int ring = sampleIndex++ / SECTORS;
+            double angle = preferred + sectorOffset + sector * Math.PI * 2.0 / SECTORS;
+            double range = ring == 0 ? maxDistance : minDistance;
+            int x = (int) Math.floor(startLocation.getX() + Math.cos(angle) * range);
+            int z = (int) Math.floor(startLocation.getZ() + Math.sin(angle) * range);
             if (!world.isChunkLoaded(x >> 4, z >> 4)) continue;
 
             int surface = world.getHighestBlockYAt(x, z) + 1;
+            BlockPoint ground;
             if (stayUnderground) {
                 // 동굴을 탐험할 때는 지금 높이 근처에서, 위가 막혀 있는(지상이 아닌) 칸만 고른다.
-                BlockPoint ground = GroundFinder.find(terrain, x, location.getBlockY(), z, 4, 8);
-                if (ground != null && ground.y() < surface - 2) return ground;
-                continue;
+                ground = GroundFinder.find(terrain, x, startLocation.getBlockY(), z, 4, 8);
+                if (ground != null && ground.y() >= surface - 2) ground = null;
+            } else {
+                // No forced chunk loading, ocean endpoint or new movement executor is introduced here.
+                ground = GroundFinder.find(terrain, x, surface, z, 2, 6);
+                if (ground == null) ground = GroundFinder.find(terrain, x, startLocation.getBlockY(), z, 4, 6);
             }
-
-            // 지표면 높이에서 시작해서 설 수 있는 칸을 찾는다. 동굴 안이라면 현재 높이 근처도 살펴본다.
-            BlockPoint ground = GroundFinder.find(terrain, x, surface, z, 2, 6);
-            if (ground == null) ground = GroundFinder.find(terrain, x, location.getBlockY(), z, 4, 6);
-            if (ground != null) return ground;
+            if (ground != null) candidates.add(describe(ai, ground, angle));
         }
-        return null;
+    }
+
+    private FrontierChoice.Candidate describe(AIPlayer ai, BlockPoint ground, double angle) {
+        int chunkX = ground.x() >> 4;
+        int chunkZ = ground.z() >> 4;
+        int unexploredNeighbors = 0;
+        for (int dx = -1; dx <= 1; dx++) for (int dz = -1; dz <= 1; dz++) {
+            if ((dx != 0 || dz != 0) && !ai.getWorldModel().isExplored(targetWorld, chunkX + dx, chunkZ + dz)) unexploredNeighbors++;
+        }
+        int recentVisits = 0;
+        for (MemorySystem.Visit visit : recentPath) if (visit.pos().distanceSq(ground) <= RECENT_PATH_RADIUS_SQ) recentVisits++;
+        boolean failedTarget = false;
+        int nearbyFailures = 0;
+        for (MemoryEntry failure : failedApproaches) {
+            double distance = failure.pos().distanceSq(ground);
+            if (distance <= FAILED_TARGET_RADIUS_SQ) failedTarget = true;
+            if (distance <= NEAR_FAILURE_RADIUS_SQ) nearbyFailures++;
+        }
+        return new FrontierChoice.Candidate(ground, ai.getWorldModel().isExplored(targetWorld, chunkX, chunkZ),
+                unexploredNeighbors, recentVisits, failedTarget, nearbyFailures,
+                ground.distance(Positions.of(startLocation)), Math.cos(angle - preferred));
     }
 
     /**

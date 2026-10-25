@@ -16,6 +16,8 @@ public final class FoodSearch {
 
     // 사냥감이 보이지 않아서 찾아다니는 중일 때 부른다.
     public void onSearching(long now) {
+        // Optional searches during the rest period must not move its deadline forward.
+        if (now < restUntil) return;
         if (startedAt < 0) startedAt = now;
         if (now - startedAt >= SEARCH_LIMIT) {
             restUntil = now + REST;
@@ -24,7 +26,13 @@ public final class FoodSearch {
     }
 
     public void onPreyFound() {
+        onSourceFound();
+    }
+
+    /** An actually observed source is usable immediately, even while optional exploration is resting. */
+    public void onSourceFound() {
         startedAt = -1L;
+        restUntil = 0L;
     }
 
     // 찾기를 그만두고 쉬는 중인지

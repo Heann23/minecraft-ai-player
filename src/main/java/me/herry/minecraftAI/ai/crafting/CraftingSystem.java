@@ -137,6 +137,24 @@ public final class CraftingSystem {
         return new CraftPlan(steps, missing);
     }
 
+    /** A selected recipe runs exactly once, adding its full output even when some output is already owned. */
+    public @Nullable CraftStep singleStep(Material target, String recipeId, Map<Material, Integer> stock) {
+        for (Recipe recipe : recipesFor(target)) {
+            if (!(recipe instanceof Keyed keyed) || !keyed.getKey().toString().equals(recipeId)) continue;
+            Map<Material, Integer> remaining = new HashMap<>(stock);
+            boolean feasible = true;
+            for (Ingredient ingredient : ingredientsOf(recipe)) {
+                if (ingredient.choice() instanceof RecipeChoice.ExactChoice
+                        || takeFromStock(remaining, ingredient.choice(), ingredient.count()) < ingredient.count()) {
+                    feasible = false;
+                    break;
+                }
+            }
+            if (feasible) return new CraftStep(recipe, target, 1, needsTable(recipe));
+        }
+        return null;
+    }
+
     /**
      * 한 단계를 실제로 제작한다. 재료가 모자라면 아무것도 하지 않고 false 를 반환한다.
      */

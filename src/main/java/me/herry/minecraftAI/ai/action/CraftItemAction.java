@@ -25,26 +25,38 @@ public final class CraftItemAction extends AbstractAction implements PrimitiveAc
 
     private final Material target;
     private final int amount;
+    private final @Nullable String recipeId;
     private List<CraftingSystem.CraftStep> steps;
     private int stepIndex;
     private @Nullable BlockPoint table;
 
     public CraftItemAction(Material target, int amount) {
+        this(target, amount, null);
+    }
+
+    public CraftItemAction(Material target, int amount, @Nullable String recipeId) {
         super("CraftItem", TIMEOUT);
         this.target = target;
         this.amount = amount;
+        this.recipeId = recipeId;
     }
 
     @Override
     protected void onStart(AIPlayer ai) {
-        CraftingSystem.CraftPlan plan = ai.getCrafting().plan(target, amount, ai.getInventory().snapshot());
-        if (!plan.isFeasible()) {
-            fail("missing materials for " + target);
-            return;
+        boolean needsTable;
+        if (recipeId != null) {
+            CraftingSystem.CraftStep selected = ai.getCrafting().singleStep(target, recipeId, ai.getInventory().snapshot());
+            if (selected == null) { fail("selected recipe unavailable: " + recipeId); return; }
+            steps = List.of(selected);
+            needsTable = selected.needsTable();
+        } else {
+            CraftingSystem.CraftPlan plan = ai.getCrafting().plan(target, amount, ai.getInventory().snapshot());
+            if (!plan.isFeasible()) { fail("missing materials for " + target); return; }
+            steps = plan.steps();
+            needsTable = plan.needsTable();
         }
-        steps = plan.steps();
 
-        if (plan.needsTable()) {
+        if (needsTable) {
             table = NearbyBlocks.find(ai.getPlayer(), Material.CRAFTING_TABLE, TABLE_RADIUS);
             if (table == null) {
                 fail("no crafting table nearby");

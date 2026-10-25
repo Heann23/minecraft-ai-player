@@ -35,4 +35,24 @@ class FoodSearchTest {
         search.onSearching(later);
         assertFalse(search.isExhausted(later));
     }
+
+    @Test
+    void optionalSearchCallsCannotExtendAnExistingRestDeadline() {
+        search.onSearching(1000L);
+        long restStarted = 1000L + FoodSearch.SEARCH_LIMIT;
+        search.onSearching(restStarted);
+        for (long now = restStarted + 1; now < restStarted + FoodSearch.REST; now += 100) search.onSearching(now);
+        assertFalse(search.isExhausted(restStarted + FoodSearch.REST));
+        search.onSearching(restStarted + FoodSearch.REST);
+        assertFalse(search.isExhausted(restStarted + FoodSearch.REST));
+    }
+
+    @Test
+    void anActuallyFoundFoodSourceCancelsOptionalRest() {
+        search.onSearching(0L);
+        search.onSearching(FoodSearch.SEARCH_LIMIT);
+        assertTrue(search.isExhausted(FoodSearch.SEARCH_LIMIT + 1));
+        search.onSourceFound();
+        assertFalse(search.isExhausted(FoodSearch.SEARCH_LIMIT + 1));
+    }
 }

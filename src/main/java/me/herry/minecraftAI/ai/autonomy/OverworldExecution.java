@@ -7,6 +7,8 @@ import me.herry.minecraftAI.ai.memory.MemoryType;
 import me.herry.minecraftAI.ai.plan.CraftPlans;
 import me.herry.minecraftAI.ai.plan.HomePlans;
 import me.herry.minecraftAI.ai.plan.Planner;
+import me.herry.minecraftAI.ai.plan.ResourceOptions;
+import me.herry.minecraftAI.ai.plan.ForagePlans;
 import org.bukkit.Material;
 import org.bukkit.Tag;
 
@@ -28,7 +30,10 @@ public final class OverworldExecution {
             case LEGACY_ACTION, COLLECT_FURNACE -> planner.plan(operation.label(), ai);
             case PLACE_FURNACE -> List.of(new PlaceBlockAction(Material.FURNACE, MemoryType.FURNACE));
             case FETCH -> HomePlans.fetchItem(ai, operation.target(), operation.amount());
-            case CRAFT -> craft(ai, operation.target(), operation.amount());
+            case CRAFT -> craft(ai, operation.target(), operation.recipe());
+            case MINE_MATERIAL -> ResourceOptions.mineStone(ai, operation.target());
+            case SURVEY_COAL -> ResourceOptions.findCoal(ai);
+            case FORAGE_BLOCK -> ForagePlans.gather(ai);
             case SMELT -> {
                 Material input = operation.target();
                 if (input == null) input = ai.getInventory().mostRawFood();
@@ -48,14 +53,16 @@ public final class OverworldExecution {
         return new Execution(actions, false);
     }
 
-    private static List<Action> craft(AIPlayer ai, Material target, int amount) {
+    private static List<Action> craft(AIPlayer ai, Material target, String recipe) {
         if (Tag.PLANKS.isTagged(target)) {
             for (Material variant : Tag.PLANKS.getValues().stream().sorted(java.util.Comparator.comparing(Material::name)).toList()) {
-                List<Action> available = CraftPlans.craftItem(ai, variant, amount);
-                if (!available.isEmpty()) return available;
+                for (var option : ai.getCrafting().recipeOptions(variant)) {
+                    List<Action> available = CraftPlans.craftRecipe(ai, variant, option.id());
+                    if (!available.isEmpty()) return available;
+                }
             }
             return List.of();
         }
-        return CraftPlans.craftItem(ai, target, amount);
+        return CraftPlans.craftRecipe(ai, target, recipe);
     }
 }

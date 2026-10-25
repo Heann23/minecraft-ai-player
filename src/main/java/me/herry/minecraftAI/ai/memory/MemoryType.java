@@ -15,6 +15,8 @@ public enum MemoryType {
     GRAVEL(false),
     // 양동이로 뜰 수 있는 물 (위가 트인 원천). 강과 바다에 흔해서 저장하지 않는다.
     WATER_SOURCE(false),
+    // A visible, currently harvestable crop/berry/food block. Actual maturity is rechecked before harvesting.
+    FOOD_SOURCE(false),
     // 위가 트인 용암 원천. 물을 부어 흑요석을 만들 수 있는 용암 호수의 표면이다. 피할 곳(DANGER_PLACE)과는 따로 적는다.
     LAVA_LAKE(true),
     // 네더 포탈의 틀을 짓기로 한 자리 (서 있을 기준점). 짓다가 떠났다 와도 같은 자리에서 이어서 짓는다.

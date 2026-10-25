@@ -6,6 +6,7 @@ import java.util.Map;
 /** Independent, renewable outcome conditions. List order is not a progression script. */
 public final class OverworldObjectives {
     private static final List<AutonomyGoal> OBJECTIVES = List.of(
+            new AutonomyGoal("nether-portal", Map.of("world:portal", 1), 120),
             new AutonomyGoal("food-reserve", Map.of("stock:food", 8), 140),
             new AutonomyGoal("ready-food", Map.of("stock:ready-food", 4), 85),
             new AutonomyGoal("safe-home", Map.of("world:shelter", 1), 90),
@@ -21,8 +22,7 @@ public final class OverworldObjectives {
             new AutonomyGoal("lighting", Map.of("item:TORCH", 8), 55),
             new AutonomyGoal("diamond-mining", Map.of("cap:pickaxe:DIAMOND", 1), 50),
             new AutonomyGoal("water", Map.of("item:WATER_BUCKET", 1), 45),
-            new AutonomyGoal("ignition", Map.of("item:FLINT_AND_STEEL", 1), 30),
-            new AutonomyGoal("obsidian", Map.of("item:OBSIDIAN", 10), 25));
+            new AutonomyGoal("ignition", Map.of("item:FLINT_AND_STEEL", 1), 30));
 
     private OverworldObjectives() {}
 
@@ -30,8 +30,8 @@ public final class OverworldObjectives {
         return OBJECTIVES.stream().filter(goal -> !goal.achieved(state)).toList();
     }
 
-    /** Readiness for this profile, not a claim of complete Minecraft capability or permanent self-sufficiency. */
+    /** Equipment and a house are alternative stabilizing outcomes, not mandatory gates to an already usable portal. */
     public static boolean ready(PlanningState state) {
-        return goals(state).isEmpty();
+        return state.count("world:portal") > 0;
     }
 }

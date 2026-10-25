@@ -10,6 +10,9 @@ import me.herry.minecraftAI.ai.inventory.ToolTier;
 import me.herry.minecraftAI.ai.inventory.InventorySystem;
 import me.herry.minecraftAI.ai.plan.BuildPlans;
 import me.herry.minecraftAI.ai.plan.Progression;
+import me.herry.minecraftAI.ai.plan.PortalPlans;
+import me.herry.minecraftAI.ai.plan.ForagePlans;
+import me.herry.minecraftAI.ai.plan.ResourceOptions;
 import org.bukkit.Material;
 import org.bukkit.Tag;
 
@@ -25,16 +28,19 @@ import java.util.UUID;
 
 /** Current facts and conditional action knowledge. Simulated effects are never written to the world model. */
 public final class OverworldDomain {
-    public enum Kind { LEGACY_ACTION, CRAFT, PLACE_FURNACE, SMELT, COLLECT_FURNACE, FETCH }
+    public enum Kind { LEGACY_ACTION, CRAFT, PLACE_FURNACE, SMELT, COLLECT_FURNACE, FETCH, MINE_MATERIAL, SURVEY_COAL, FORAGE_BLOCK }
 
-    public record Operation(Kind kind, GoalType label, Material target, int amount, boolean exploratory, String fuel) {
+    public record Operation(Kind kind, GoalType label, Material target, int amount, boolean exploratory, String fuel, String recipe) {
         public Operation(Kind kind, GoalType label, Material target, int amount, boolean exploratory) {
-            this(kind, label, target, amount, exploratory, "");
+            this(kind, label, target, amount, exploratory, "", "");
+        }
+        public Operation(Kind kind, GoalType label, Material target, int amount, boolean exploratory, String fuel) {
+            this(kind, label, target, amount, exploratory, fuel, "");
         }
     }
     public record Snapshot(UUID world, PlanningState state, List<ActionModel> actions,
-                           Map<String, Operation> operations) {
-        public Snapshot { actions = List.copyOf(actions); operations = Map.copyOf(operations); }
+                           Map<String, Operation> operations, List<String> limits) {
+        public Snapshot { actions = List.copyOf(actions); operations = Map.copyOf(operations); limits = List.copyOf(limits); }
     }
 
     private static final List<Material> ROOT_ITEMS = List.of(Material.OAK_PLANKS, Material.STICK, Material.CRAFTING_TABLE,
@@ -42,7 +48,10 @@ public final class OverworldDomain {
             Material.IRON_SWORD, Material.IRON_HELMET, Material.IRON_CHESTPLATE, Material.IRON_LEGGINGS,
             Material.IRON_BOOTS, Material.SHIELD, Material.DIAMOND_PICKAXE, Material.BUCKET,
             Material.FLINT_AND_STEEL, Material.TORCH,
-            Material.IRON_INGOT, Material.CHARCOAL);
+            Material.IRON_INGOT, Material.CHARCOAL, Material.BREAD, Material.DRIED_KELP,
+            Material.COOKED_COD, Material.COOKED_SALMON, Material.BAKED_POTATO,
+            Material.COOKED_BEEF, Material.COOKED_PORKCHOP, Material.COOKED_CHICKEN,
+            Material.COOKED_MUTTON, Material.COOKED_RABBIT, Material.BEETROOT_SOUP);
     private static final int MAX_RECIPE_MATERIALS = 72;
     private static final int MAX_RECIPE_VARIANTS = 6;
 
@@ -58,6 +67,7 @@ public final class OverworldDomain {
         public Catalog(long revision) { this.revision = revision; }
         public long revision() { return revision; }
         public boolean complete() { return queue.isEmpty() || visited.size() >= MAX_RECIPE_MATERIALS; }
+        public boolean limited() { return !queue.isEmpty() && visited.size() >= MAX_RECIPE_MATERIALS; }
 
         public void advance(AIPlayer ai) {
             int remaining = 2;
@@ -113,6 +123,11 @@ public final class OverworldDomain {
         if (s.knowsIron) values.put("known:iron", 1);
         if (s.knowsDiamond) values.put("known:diamond", 1);
         if (s.knowsCoal) values.put("known:coal", 1);
+        for (Material drop : ResourceOptions.stoneDrops(ai)) values.put("known:stone:" + drop.name(), 1);
+        Material foodSource = ForagePlans.product(ai);
+        if (foodSource != null) values.put("known:food:" + foodSource.name(), 1);
+        values.put("stock:portal-frame", PortalPlans.placedObsidian(ai));
+        if (PortalPlans.observedPortalHere(ai)) values.put("world:portal", 1);
         if (s.knowsWater) values.put("known:water", 1);
         if (s.knowsLava || s.obsidianWork) values.put("known:lava", 1);
         if (s.obsidianWork) values.put("world:obsidian-work", 1);
@@ -123,14 +138,12 @@ public final class OverworldDomain {
         if (ai.getBuildJob() != null) values.put("remaining:shelter", BuildPlans.requirements(ai).structuralBlocks());
         var job = ai.getFurnaceJob();
         if (job != null && job.world().equals(ai.getWorldId()) && !job.result().isEmpty() && s.furnaceBusy) {
-            values.put(pending(job.result(), job.count()), 1);
-            if (job.food()) values.put(pending("ready-food", job.count()), 1);
+            values.put(pending(job.food() ? "ready-food" : job.result(), job.count()), 1);
         }
         return new PlanningState(values);
     }
 
-    public static Snapshot capture(AIPlayer ai, Situation s, Catalog catalog) {
-        PlanningState state = observe(ai, s);
+    public static Snapshot capture(AIPlayer ai, Situation s, Catalog catalog, PlanningState state) {
         Map<String, ActionModel> actions = new LinkedHashMap<>();
         Map<String, Operation> operations = new LinkedHashMap<>();
         var builder = new Builder(state, actions, operations);
@@ -142,7 +155,7 @@ public final class OverworldDomain {
                 if (material == null) return;
                 int amount = Math.min(count, 16);
                 builder.add("fetch:" + material, new Operation(Kind.FETCH, GoalType.FETCH_ITEMS, material, amount, true),
-                        Map.of(token, amount), Map.of(token, amount), Map.of(item(material), amount), 6 + s.homeDistance / 8.0);
+                        Map.of(token, amount), Map.of(token, amount), effects(material, amount), 6 + s.homeDistance / 8.0);
             });
         }
 
@@ -150,17 +163,30 @@ public final class OverworldDomain {
         if (surfaceAllowed) {
             builder.leaf("survey:tree", GoalType.FIND_WOOD, Map.of(), Map.of("known:tree", 1), 35, true);
             builder.leaf("harvest:wood", GoalType.COLLECT_WOOD, Map.of("known:tree", 1), Map.of("stock:logs", 4), 8, false);
-            builder.leaf("forage", GoalType.STOCK_FOOD, Map.of(), Map.of("stock:food", 2), s.preyNearby ? 12 : 45, true);
+            if (!s.foodSearchExhausted || s.preyNearby) {
+                builder.leaf("forage", GoalType.STOCK_FOOD, Map.of(), Map.of("stock:food", 2), s.preyNearby ? 12 : 45, true);
+            }
+            Material product = state.quantities().keySet().stream().filter(token -> token.startsWith("known:food:"))
+                    .map(token -> Material.matchMaterial(token.substring("known:food:".length()))).findFirst().orElse(null);
+            if (product != null) builder.add("forage:block:" + product,
+                    new Operation(Kind.FORAGE_BLOCK, GoalType.STOCK_FOOD, product, 1, false),
+                    Map.of("known:food:" + product.name(), 1), Map.of(), effects(product, 1), 8);
             builder.leaf("gravel", GoalType.GATHER_FLINT, Map.of(), Map.of("item:FLINT", 1), s.knowsGravel ? 18 : 55, true);
             builder.add("fill:water", new Operation(Kind.LEGACY_ACTION, GoalType.FILL_BUCKET, Material.WATER_BUCKET, 1, !s.knowsWater),
                     Map.of("item:BUCKET", 1), Map.of("item:BUCKET", 1), Map.of("item:WATER_BUCKET", 1), s.knowsWater ? 8 : 45);
         }
         builder.leaf("mine:stone", GoalType.MINE_STONE, Map.of("cap:pickaxe:WOOD", 1), Map.of("item:COBBLESTONE", 8), 12, false);
+        for (Material drop : List.of(Material.COBBLESTONE, Material.COBBLED_DEEPSLATE, Material.BLACKSTONE)) {
+            builder.add("mine:stone:" + drop, new Operation(Kind.MINE_MATERIAL, GoalType.MINE_STONE, drop, 1, false),
+                    Map.of("cap:pickaxe:WOOD", 1, "known:stone:" + drop.name(), 1), Map.of(), effects(drop, 1), 3);
+        }
         builder.leaf("survey:iron", GoalType.FIND_IRON, Map.of("cap:pickaxe:STONE", 1), Map.of("known:iron", 1), 65, true);
         builder.leaf("mine:iron", GoalType.MINE_IRON, Map.of("cap:pickaxe:STONE", 1, "known:iron", 1), Map.of("item:RAW_IRON", 8), 18, false);
         builder.leaf("survey:diamond", GoalType.FIND_DIAMOND, Map.of("cap:pickaxe:IRON", 1), Map.of("known:diamond", 1), 110, true);
         builder.leaf("mine:diamond", GoalType.MINE_DIAMOND, Map.of("cap:pickaxe:IRON", 1, "known:diamond", 1), Map.of("item:DIAMOND", 3), 22, false);
-        builder.leaf("mine:coal", GoalType.MINE_COAL, Map.of("cap:pickaxe:WOOD", 1), Map.of("item:COAL", 8), s.knowsCoal ? 14 : 65, !s.knowsCoal);
+        builder.add("survey:coal", new Operation(Kind.SURVEY_COAL, GoalType.MINE_COAL, null, 1, true),
+                Map.of("cap:pickaxe:WOOD", 1), Map.of(), Map.of("known:coal", 1), 35);
+        builder.leaf("mine:coal", GoalType.MINE_COAL, Map.of("cap:pickaxe:WOOD", 1, "known:coal", 1), Map.of("item:COAL", 8), 14, false);
         builder.add("place:table", new Operation(Kind.LEGACY_ACTION, GoalType.CRAFT_WORKBENCH, Material.CRAFTING_TABLE, 1, false),
                 Map.of("item:CRAFTING_TABLE", 1), Map.of("item:CRAFTING_TABLE", 1), Map.of("world:table", 1), 3);
         builder.add("place:furnace", new Operation(Kind.PLACE_FURNACE, GoalType.SMELT_IRON, Material.FURNACE, 1, false),
@@ -193,37 +219,57 @@ public final class OverworldDomain {
         }
         builder.leaf("obsidian:start", GoalType.GATHER_OBSIDIAN, Map.of("cap:pickaxe:DIAMOND", 1, "item:WATER_BUCKET", 1),
                 Map.of("item:OBSIDIAN", 1), s.knowsLava ? 25 : 90, true);
+        if (surfaceAllowed) {
+            int needed = Math.max(0, 10 - state.count("stock:portal-frame"));
+            Map<String, Integer> pre = new HashMap<>();
+            pre.put("item:FLINT_AND_STEEL", 1);
+            if (needed > 0) pre.put("item:OBSIDIAN", needed);
+            builder.add("build:portal", new Operation(Kind.LEGACY_ACTION, GoalType.BUILD_PORTAL, null, 1, true),
+                    pre, needed == 0 ? Map.of() : Map.of("item:OBSIDIAN", needed), Map.of("world:portal", 1), 35);
+        }
 
         for (RecipeOption option : catalog.options) {
             Material target = Material.matchMaterial(option.result());
             if (target == null) continue;
             if (!option.smelting()) {
                 for (Map<String, Integer> ingredients : variants(option, state)) {
-                    Map<String, Integer> requirements = new HashMap<>(ingredients);
+                    Map<String, Integer> consumed = new HashMap<>(ingredients);
+                    ingredients.forEach((token, count) -> {
+                        Material input = token.startsWith("item:") ? Material.matchMaterial(token.substring(5)) : null;
+                        if (input == null || !InventorySystem.isSafeFood(input)) return;
+                        consumed.merge("stock:food", count, Integer::sum);
+                        consumed.merge(InventorySystem.isRawFood(input) ? "stock:raw-food" : "stock:ready-food", count, Integer::sum);
+                    });
+                    Map<String, Integer> requirements = new HashMap<>(consumed);
                     if (option.needsTable()) requirements.put("world:table", 1);
                     Map<String, Integer> effects = effects(target, option.resultAmount());
                     builder.add("recipe:" + option.id() + ":" + new java.util.TreeMap<>(ingredients), new Operation(Kind.CRAFT, GoalType.CRAFT_TOOL,
-                            target, option.resultAmount(), false), requirements, ingredients, effects, 2 + ingredients.values().stream().mapToInt(Integer::intValue).sum() * 0.1);
+                            target, option.resultAmount(), false, "", option.id()), requirements, consumed, effects, 2 + ingredients.values().stream().mapToInt(Integer::intValue).sum() * 0.1);
                 }
             } else {
                 Set<String> inputs = new java.util.HashSet<>();
                 for (var ingredient : option.ingredients().getFirst().alternatives()) {
                     Material input = Material.matchMaterial(ingredient);
                     if (input == null || !inputs.add(item(input))) continue;
-                    int batch = target == Material.IRON_INGOT ? 8 : 4;
+                    for (int batch : List.of(1, target == Material.IRON_INGOT ? 8 : 4)) {
                     for (String fuel : List.of("item:COAL", "item:CHARCOAL", "stock:planks")) {
                         Map<String, Integer> consumed = new HashMap<>();
                         consumed.put(item(input), batch);
+                        if (InventorySystem.isSafeFood(input)) {
+                            consumed.put("stock:food", batch);
+                            consumed.put(InventorySystem.isRawFood(input) ? "stock:raw-food" : "stock:ready-food", batch);
+                        }
                         consumed.merge(fuel, fuel.equals("stock:planks") ? (int) Math.ceil(batch / 1.5) : 1, Integer::sum);
                         consumed.put("world:idle-furnace", 1);
                         Map<String, Integer> pre = new HashMap<>(consumed);
                         pre.put("world:furnace", 1);
                         String pending = pending(target.name(), batch * option.resultAmount());
-                        builder.add("smelt:" + option.id() + ":" + input + ":" + fuel,
+                        builder.add("smelt:" + option.id() + ":" + input + ":" + fuel + ":" + batch,
                                 new Operation(Kind.SMELT, GoalType.SMELT_IRON, input, batch, false, fuel), pre, consumed,
                                 Map.of(pending, 1), 8 + batch);
-                        builder.add("collect:" + target, new Operation(Kind.COLLECT_FURNACE, GoalType.TEND_FURNACE, target, 1, false),
+                        builder.add("collect:" + target + ":" + batch, new Operation(Kind.COLLECT_FURNACE, GoalType.TEND_FURNACE, target, batch, false),
                                 Map.of(pending, 1), Map.of(pending, 1), withIdleFurnace(effects(target, batch * option.resultAmount())), 3);
+                    }
                     }
                 }
             }
@@ -256,7 +302,11 @@ public final class OverworldDomain {
                         Map.of(pending, 1), Map.of(pending, 1), effect, 3);
             }
         }
-        return new Snapshot(ai.getWorldId(), state, List.copyOf(actions.values()), operations);
+        List<String> limits = new ArrayList<>();
+        if (catalog.limited()) limits.add("제작 의존 재료 카탈로그 한도 " + MAX_RECIPE_MATERIALS);
+        if (actions.size() >= 1024) limits.add("행동 후보 한도 1024");
+        limits.add("레시피별 대체 재료 최대3·조합 최대" + MAX_RECIPE_VARIANTS);
+        return new Snapshot(ai.getWorldId(), state, List.copyOf(actions.values()), operations, limits);
     }
 
     private static List<Map<String, Integer>> variants(RecipeOption option, PlanningState state) {
@@ -279,6 +329,10 @@ public final class OverworldDomain {
     private static Map<String, Integer> effects(Material target, int amount) {
         Map<String, Integer> effects = new HashMap<>();
         effects.put(item(target), amount);
+        if (InventorySystem.isSafeFood(target)) {
+            effects.put("stock:food", amount);
+            effects.put(InventorySystem.isRawFood(target) ? "stock:raw-food" : "stock:ready-food", amount);
+        }
         if (Tag.ITEMS_PICKAXES.isTagged(target)) {
             ToolTier tier = ToolTier.of(target);
             for (ToolTier candidate : List.of(ToolTier.WOOD, ToolTier.STONE, ToolTier.IRON, ToolTier.DIAMOND)) {
