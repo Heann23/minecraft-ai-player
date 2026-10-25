@@ -4,6 +4,8 @@ from pathlib import Path
 import tempfile
 import unittest
 import uuid
+import threading
+from unittest import mock
 
 import numpy as np
 
@@ -92,6 +94,44 @@ class ActorTests(unittest.TestCase):
 
 
 class BridgeProtocolTests(unittest.TestCase):
+    def test_optimizer_wait_does_not_block_sampling_or_mutate_the_active_policy(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            trainer = PaperTrainer(Path(temporary) / "run", seed=7, rollout_size=32, maximum=32, max_bytes=16 * 1024 * 1024)
+            entered, release = threading.Event(), threading.Event()
+            original = ActorCritic.fit
+
+            def delayed(model, rows):
+                entered.set()
+                if not release.wait(5):
+                    raise RuntimeError("numerical fixture update not released")
+                return original(model, rows, epochs=1)
+
+            try:
+                with mock.patch.object(ActorCritic, "fit", delayed):
+                    session = str(uuid.uuid4())
+                    before = trainer.model.params["actor_w"].copy()
+                    for sequence in range(32):
+                        transition = row(trainer.model, session=session, sequence=sequence)
+                        transition.pop("nextValue")
+                        trainer.handle({"schema": SCHEMA, "environment": "minecraft-paper", "id": str(uuid.uuid4()),
+                                        "frame": frame(), "transitions": [transition]})
+                    self.assertTrue(entered.wait(2))
+                    self.assertIsNotNone(trainer.training)
+                    # Sampling remains on a frozen parameter snapshot while the optimizer is deliberately blocked.
+                    answer = trainer.handle({"schema": SCHEMA, "environment": "minecraft-paper", "id": str(uuid.uuid4()),
+                                             "frame": frame(), "transitions": []})
+                    self.assertEqual(answer["modelVersion"], 0)
+                    np.testing.assert_array_equal(before, trainer.model.params["actor_w"])
+                    self.assertFalse((trainer.output / "minecraft-rl-actor.json").exists())
+                    release.set()
+                    trainer.poll_training(wait=True)
+                    self.assertEqual(trainer.model.version, 1)
+                    # This artifact is a temporary numerical/protocol fixture, never actual Minecraft learning evidence.
+                    self.assertTrue((trainer.output / "minecraft-rl-actor.json").exists())
+            finally:
+                release.set()
+                trainer.close()
+
     def test_no_artifact_is_created_while_waiting_and_wrong_environment_is_rejected(self):
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary) / "run"

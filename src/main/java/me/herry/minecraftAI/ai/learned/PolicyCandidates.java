@@ -66,7 +66,8 @@ public final class PolicyCandidates {
         body[14] = Math.cos(p.getWorld().getTime() * 2 * Math.PI / 24000); body[15] = p.getWorld().hasStorm() ? 1 : 0;
         for (var effect : SurvivalCapture.effects(p)) body[16 + bucket(effect.key(), 16)] += Math.min(1, (effect.amplifier() + 1) / 8.0);
         if (active != null) {
-            body[40 + bucket(active.id(), 7)] = 1;
+            String activeKind = active.recipe() != null ? "CRAFT_ITEM" : active.consumable() != null ? "USE_ITEM" : active.command().type().name();
+            body[40 + bucket(activeKind, 7)] = 1;
             body[47] = Math.min(1, activeTicks / 200.0);
         }
         body[32 + bucket(p.getInventory().getItemInMainHand().getType().name(), 8)] = 1;
@@ -164,8 +165,11 @@ public final class PolicyCandidates {
         // Fair category interleaving prevents an inventory full of block variants from hiding every recipe.
         List<Candidate> expanded = new ArrayList<>();
         for (Candidate candidate : found.values()) {
-            if (candidate.commitmentTicks() > 0) expanded.add(candidate);
-            else for (int ticks : new int[]{5, 20, 80, 600}) expanded.add(candidate.committed(ticks));
+            if (candidate.commitmentTicks() > 0) {
+                double[] retained = candidate.encoded().features(); retained[55] = 1;
+                expanded.add(new Candidate(candidate.id(), candidate.command(), candidate.recipe(), candidate.consumable(),
+                        new PolicyFrame.Option(candidate.id(), retained), candidate.commitmentTicks(), candidate.inputId()));
+            } else for (int ticks : new int[]{5, 20, 80, 600}) expanded.add(candidate.committed(ticks));
         }
         var candidates = selectFair(expanded, active == null ? "" : active.id());
         Map<String, Integer> stockCounts = new HashMap<>();
@@ -194,7 +198,11 @@ public final class PolicyCandidates {
         PrimitiveType type = recipe != null ? PrimitiveType.CRAFT_ITEM : consumable != null ? PrimitiveType.USE_ITEM : command.type();
         features[type.ordinal()] = 1;
         features[24] = Math.clamp(dx / 16, -1, 1); features[25] = Math.clamp(dy / 16, -1, 1); features[26] = Math.clamp(dz / 16, -1, 1);
-        features[32 + bucket(identity, 16)] = 1; features[48 + bucket(id, 8)] = 1;
+        features[32 + bucket(identity, 16)] = 1;
+        String semantic = recipe != null ? recipe.result() : consumable != null ? consumable.consumption().remainderMaterial()
+                : command instanceof PrimitiveCommand.BreakBlock mine ? mine.tool().material()
+                : command instanceof PrimitiveCommand.Equip equip ? equip.tool().material() : "";
+        if (!semantic.isBlank()) features[48 + bucket(semantic, 7)] = 1;
         if (consumable != null) {
             var use = consumable.consumption();
             features[27] = Math.min(16, consumable.amount() / 64.0); features[28] = use.useTicks() / 200.0;
