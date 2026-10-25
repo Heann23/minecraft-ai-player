@@ -22,6 +22,7 @@ public final class Situation {
     public boolean shouldEat;
     public boolean starving;
     public boolean canRegenerate = true;
+    public boolean recoveryAvailable;
 
     public boolean inLava;
     public boolean standingInDanger;

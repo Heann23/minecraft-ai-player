@@ -71,15 +71,14 @@ public final class SurvivalPlans {
     }
 
     static List<Action> survive(AIPlayer ai) {
-        List<Action> actions = new ArrayList<>();
-        // 숨은 자리 안에서는 달아날 필요가 없다. 그 안에서 먹고 쉰다.
         LivingEntity hostile = RefugePlans.isHidden(ai) ? null : nearestHostile(ai);
         if (hostile != null && Positions.distance(hostile.getLocation(), ai.getPlayer().getLocation()) < ai.getConfig().fleeDistance) {
-            actions.add(new RunAwayAction(hostile, hostile.getLocation(), ai.getConfig().fleeDistance));
+            // Re-observe after retreat instead of carrying a stale item choice through movement.
+            return List.of(new RunAwayAction(hostile, hostile.getLocation(), ai.getConfig().fleeDistance));
         }
-        if (ai.getInventory().hasFood() && ai.getPlayer().getFoodLevel() < 20) actions.add(new EatFoodAction());
-        actions.add(new WaitAction(REST_TICKS));
-        return actions;
+        List<Action> chosen = RecoveryPlans.choose(ai);
+        if (!chosen.isEmpty()) return chosen;
+        return List.of(new WaitAction(REST_TICKS));
     }
 
     static List<Action> fightHostile(AIPlayer ai) {
