@@ -8,6 +8,7 @@ import java.util.Comparator;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * 상황에 맞는 단기 목표를 고른다.
@@ -156,6 +157,19 @@ public final class GoalSystem {
                 bestScore = score;
                 bestGoal = goal;
             }
+        }
+        return new Selection(bestGoal, bestScore);
+    }
+
+    /** Selects only the requested safety/maintenance family; normal progression need not use its scores. */
+    public Selection selectAmong(Situation situation, long now, Set<GoalType> allowed) {
+        GoalType bestGoal = GoalType.IDLE;
+        double bestScore = 0.0;
+        for (GoalType goal : GoalType.values()) {
+            if (!allowed.contains(goal)) continue;
+            double value = score(goal, situation);
+            if (value < CRITICAL_SCORE && isOnCooldown(goal, now)) continue;
+            if (value > bestScore) { bestGoal = goal; bestScore = value; }
         }
         return new Selection(bestGoal, bestScore);
     }

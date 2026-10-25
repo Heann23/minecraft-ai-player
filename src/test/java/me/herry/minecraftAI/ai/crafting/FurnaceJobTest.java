@@ -60,6 +60,15 @@ class FurnaceJobTest {
     }
 
     @Test
+    void preservesTypedOutputAndKeepsOldJobsUnknown() {
+        FurnaceJob charcoal = FurnaceJob.start(WORLD, POS, false, 4, 100L, "CHARCOAL");
+        assertEquals("CHARCOAL", FurnaceJob.importState(charcoal.exportState()).result());
+        Map<String, Object> old = new LinkedHashMap<>(charcoal.exportState());
+        old.remove("result");
+        assertEquals("", FurnaceJob.importState(old).result());
+    }
+
+    @Test
     void ignoresStateItCannotRead() {
         assertNull(FurnaceJob.importState(Map.of()));
         assertNull(FurnaceJob.importState(Map.of("world", "not-a-uuid", "pos", "1,64,-2", "food", true, "count", 8, "readyAt", 2600L)));

@@ -15,7 +15,15 @@ import java.util.UUID;
  * @param count   넣은 개수
  * @param readyAt 다 구워질 것으로 보는 시각 (AI 틱)
  */
-public record FurnaceJob(UUID world, BlockPoint pos, boolean food, int count, long readyAt) {
+public record FurnaceJob(UUID world, BlockPoint pos, boolean food, int count, long readyAt, String result) {
+    public FurnaceJob {
+        result = result == null ? "" : result;
+    }
+
+    /** Older saves/callers do not identify the output; unknown is never treated as iron. */
+    public FurnaceJob(UUID world, BlockPoint pos, boolean food, int count, long readyAt) {
+        this(world, pos, food, count, readyAt, "");
+    }
     // 아이템 하나를 굽는 데 걸리는 시간 (10초)
     public static final int TICKS_PER_ITEM = 200;
     // 다 구워졌어야 할 시각을 이만큼 넘겼는데도 재료가 남아 있으면 화로가 멈춘 것이다 (연료가 떨어졌거나 누가 빼 갔다).
@@ -26,6 +34,10 @@ public record FurnaceJob(UUID world, BlockPoint pos, boolean food, int count, lo
 
     public static FurnaceJob start(UUID world, BlockPoint pos, boolean food, int count, long now) {
         return new FurnaceJob(world, pos, food, count, now + (long) count * TICKS_PER_ITEM);
+    }
+
+    public static FurnaceJob start(UUID world, BlockPoint pos, boolean food, int count, long now, String result) {
+        return new FurnaceJob(world, pos, food, count, now + (long) count * TICKS_PER_ITEM, result);
     }
 
     public boolean isAt(UUID otherWorld, BlockPoint otherPos) {
@@ -53,6 +65,7 @@ public record FurnaceJob(UUID world, BlockPoint pos, boolean food, int count, lo
         state.put("food", food);
         state.put("count", count);
         state.put("readyAt", readyAt);
+        if (!result.isEmpty()) state.put("result", result);
         return state;
     }
 
@@ -64,7 +77,8 @@ public record FurnaceJob(UUID world, BlockPoint pos, boolean food, int count, lo
             boolean food = Boolean.parseBoolean(String.valueOf(state.get("food")));
             int count = (int) Double.parseDouble(String.valueOf(state.get("count")));
             long readyAt = (long) Double.parseDouble(String.valueOf(state.get("readyAt")));
-            return new FurnaceJob(world, pos, food, count, readyAt);
+            String result = state.get("result") instanceof String name ? name : "";
+            return new FurnaceJob(world, pos, food, count, readyAt, result);
         } catch (IllegalArgumentException e) {
             return null;
         }
