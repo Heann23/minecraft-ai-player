@@ -30,11 +30,17 @@ public final class SmeltItemAction extends AbstractAction implements PrimitiveAc
 
     private final Material input;
     private final int count;
+    private final @Nullable Material selectedFuel;
 
     public SmeltItemAction(Material input, int count) {
+        this(input, count, null);
+    }
+
+    public SmeltItemAction(Material input, int count, @Nullable Material fuel) {
         super("SmeltItem", TIMEOUT);
         this.input = input;
         this.count = count;
+        this.selectedFuel = fuel;
     }
 
     @Override
@@ -68,7 +74,7 @@ public final class SmeltItemAction extends AbstractAction implements PrimitiveAc
             fail("nothing to smelt");
             return;
         }
-        ItemStack fuel = takeFuel(inventory, amount);
+        ItemStack fuel = takeFuel(inventory, amount, selectedFuel);
         if (fuel == null) {
             fail("no fuel");
             return;
@@ -83,7 +89,9 @@ public final class SmeltItemAction extends AbstractAction implements PrimitiveAc
         if (left != null && !left.isAt(ai.getWorldId(), furnacePos)) {
             ai.debug("Leaving behind what was put in the furnace at " + left.pos());
         }
-        ai.setFurnaceJob(FurnaceJob.start(ai.getWorldId(), furnacePos, InventorySystem.isRawFood(input), amount, ai.getTicks()));
+        Material result = ai.getCrafting().smeltingResult(input);
+        ai.setFurnaceJob(FurnaceJob.start(ai.getWorldId(), furnacePos, InventorySystem.isRawFood(input), amount,
+                ai.getTicks(), result == null ? "" : result.name()));
         player.swingMainHand();
         ai.getBody().lookAt(furnacePos.x() + 0.5, furnacePos.y() + 0.5, furnacePos.z() + 0.5);
         ai.debug("Smelting " + amount + " " + input + " with " + fuel.getAmount() + " " + fuel.getType());
@@ -105,12 +113,13 @@ public final class SmeltItemAction extends AbstractAction implements PrimitiveAc
      * 필요한 만큼의 연료를 인벤토리에서 꺼낸다. 석탄과 숯을 먼저 쓰고, 없으면 판자를, 판자도 없으면 원목을 쓴다.
      * 원목은 판자로 바꾸면 네 배를 구울 수 있어서, 계획을 세울 때 미리 판자로 만들어 둔다 (FurnacePlans.splitLogsForFuel).
      */
-    private static @Nullable ItemStack takeFuel(PlayerInventory inventory, int items) {
+    private static @Nullable ItemStack takeFuel(PlayerInventory inventory, int items, @Nullable Material selectedFuel) {
         ItemStack best = null;
         int bestSlot = -1;
         for (int slot = 0; slot < STORAGE_SIZE; slot++) {
             ItemStack item = inventory.getItem(slot);
             if (item == null || item.isEmpty() || !InventorySystem.isFuel(item.getType())) continue;
+            if (selectedFuel != null && item.getType() != selectedFuel) continue;
             int rank = fuelRank(item);
             if (best == null || rank > fuelRank(best) || rank == fuelRank(best) && item.getAmount() > best.getAmount()) {
                 best = item;

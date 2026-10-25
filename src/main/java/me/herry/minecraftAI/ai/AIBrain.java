@@ -4,6 +4,12 @@ import me.herry.minecraftAI.ai.action.Action;
 import me.herry.minecraftAI.ai.action.ActionStatus;
 import me.herry.minecraftAI.ai.action.RunAwayAction;
 import me.herry.minecraftAI.ai.action.WaitAction;
+import me.herry.minecraftAI.ai.autonomy.AutonomyFeedback;
+import me.herry.minecraftAI.ai.autonomy.AutonomyGoalSpec;
+import me.herry.minecraftAI.ai.autonomy.OverworldAutonomy;
+import me.herry.minecraftAI.ai.autonomy.OverworldDomain;
+import me.herry.minecraftAI.ai.autonomy.OverworldObjectives;
+import me.herry.minecraftAI.ai.autonomy.OverworldExecution;
 import me.herry.minecraftAI.ai.brain.DecisionLog;
 import me.herry.minecraftAI.ai.brain.DecisionTrace;
 import me.herry.minecraftAI.ai.brain.Directive;
@@ -34,6 +40,9 @@ import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
+import java.util.EnumSet;
+import java.util.Set;
+import org.bukkit.World;
 
 /**
  * AI 의 판단 루프.
@@ -63,14 +72,25 @@ final class AIBrain {
     // 갇힌 곳에서 길을 파서 나오는 계획은 어느 스킬의 것도 아니라서 이 이름으로 적는다.
     private static final String DIG_WAY_OUT = "DigWayOut";
 
-    private record Choice(GoalType goal, double score, DecisionTrace.Origin origin) {
+    private record Choice(GoalType goal, double score, DecisionTrace.Origin origin,
+                          @Nullable OverworldAutonomy.Decision autonomy) {
+        Choice(GoalType goal, double score, DecisionTrace.Origin origin) { this(goal, score, origin, null); }
     }
+
+    // These preserve immediate safety and ongoing world obligations, not the old progression order.
+    private static final Set<GoalType> MAINTENANCE = EnumSet.of(GoalType.ESCAPE_DANGER, GoalType.SURVIVE,
+            GoalType.FIGHT_HOSTILE, GoalType.ASSIST_ALLY, GoalType.FIND_FOOD, GoalType.RETURN_HOME,
+            GoalType.SLEEP, GoalType.SHARE_FOOD, GoalType.CLEAN_INVENTORY, GoalType.STORE_ITEMS,
+            GoalType.PICKUP_ITEMS, GoalType.TEND_FURNACE);
 
     private final AIPlayer ai;
     private final Planner planner;
     private final GoalSystem goals = new GoalSystem();
     private final RecoveryTracker recovery = new RecoveryTracker();
     private final DecisionLog log = new DecisionLog();
+    private final OverworldAutonomy autonomy = new OverworldAutonomy();
+    private @Nullable OverworldAutonomy.Decision activeAutonomy;
+    private boolean autonomyPreparation;
     // 목표 명세, 스킬, 관측, 학습용 기록. 판단에는 쓰지 않는다.
     private final DecisionJournal journal;
     // 쉬게 한 목표와, 쉬게 할 때 서 있던 자리
@@ -143,6 +163,8 @@ final class AIBrain {
         goals.clearCooldowns();
         recovery.reset();
         restedAt.clear();
+        autonomy.reset();
+        activeAutonomy = null;
         ai.getNavigation().stop();
         ai.getBody().clearInputs();
     }
@@ -193,6 +215,8 @@ final class AIBrain {
         ai.getNavigation().stop();
         ai.getBody().clearInputs();
         activeTrace = null;
+        activeAutonomy = null;
+        autonomy.invalidate();
         currentGoal = GoalType.IDLE;
         plan = null;
     }
@@ -219,6 +243,11 @@ final class AIBrain {
         return currentGoal;
     }
 
+    boolean usesOverworldAutonomy() {
+        return forcedGoal == null && directive == null && controlledProgram == null && !primitiveLease
+                && ai.getPlayer().getWorld().getEnvironment() == World.Environment.NORMAL;
+    }
+
     boolean isEscaping() {
         return escaping;
     }
@@ -234,6 +263,8 @@ final class AIBrain {
     void setForcedGoal(@Nullable GoalType goal) {
         cancelPrimitiveProgram("forced goal changed", true);
         forcedGoal = goal;
+        activeAutonomy = null;
+        autonomy.invalidate();
         goals.clearCooldowns();
         recovery.reset();
         ai.debug(goal == null ? "Forced goal cleared" : "Forced goal: " + goal);
@@ -250,10 +281,12 @@ final class AIBrain {
     void setDirective(@Nullable Directive directive) {
         cancelPrimitiveProgram("directive changed", true);
         this.directive = directive;
+        autonomy.invalidate();
         ai.debug(directive == null ? "Directive cleared" : "Directive: " + directive.kind() + " " + directive.subject() + " from " + directive.requestedBy());
         if (directive != null && plan != null && !isCombatGoal(currentGoal)) {
             plan.cancel(ai);
             plan = null;
+            activeAutonomy = null;
             journal.planEnded(ai.getTicks(), Experience.Outcome.INTERRUPTED, "asked to do something else");
         }
     }
@@ -307,6 +340,14 @@ final class AIBrain {
         releaseRestedGoals(position);
         Situation situation = SituationBuilder.build(ai, currentGoal);
         lastSituation = situation;
+        if (activeAutonomy != null && plan != null && !plan.isFinished()
+                && !autonomy.valid(activeAutonomy, ai, situation)) {
+            plan.cancel(ai);
+            plan = null;
+            activeAutonomy = null;
+            autonomy.invalidate();
+            journal.planEnded(now, Experience.Outcome.INTERRUPTED, "autonomous objective or prerequisites changed");
+        }
         Choice choice = choose(situation, now);
         profiler.end(TickProfiler.Section.DECISION, started);
 
@@ -329,6 +370,7 @@ final class AIBrain {
             planDone = true;
         }
         if (planDone) {
+            activeAutonomy = choice.autonomy();
             // 목표는 그대로인데 새 계획을 세우는 경우, 이유를 지금 상황으로 다시 적는다.
             if (choice.goal() == currentGoal) activeTrace = trace(choice, situation, now, previousGoal);
             started = profiler.begin();
@@ -344,7 +386,8 @@ final class AIBrain {
     private Choice choose(Situation situation, long now) {
         if (forcedGoal != null) return new Choice(forcedGoal, Double.MAX_VALUE, DecisionTrace.Origin.FORCED);
 
-        GoalSystem.Selection selection = goals.select(situation, now);
+        boolean overworld = ai.getPlayer().getWorld().getEnvironment() == World.Environment.NORMAL;
+        GoalSystem.Selection selection = overworld ? goals.selectAmong(situation, now, MAINTENANCE) : goals.select(situation, now);
         if (directive != null) {
             if (directive.isDone(situation) || directive.isExpired(now)) {
                 ai.debug("Directive finished: " + directive.kind());
@@ -354,6 +397,22 @@ final class AIBrain {
                 // 부탁받은 일이 계속 실패해서 쉬는 중이면 그동안은 스스로 고른 일을 한다.
                 if (!goals.isOnCooldown(requested, now)) return new Choice(requested, DIRECTIVE_SCORE, DecisionTrace.Origin.REQUESTED);
             }
+        }
+        if (overworld && selection.score() < GoalSystem.EMERGENCY_SCORE) {
+            // Maintenance is conditional work (food, sleep, inventory, an existing furnace job), not equipment order.
+            if (selection.score() > 0) return new Choice(selection.goal(), selection.score(), DecisionTrace.Origin.AUTONOMOUS);
+            if (activeAutonomy != null && plan != null && !plan.isFinished()) {
+                return new Choice(currentGoal, 1.0, DecisionTrace.Origin.AUTONOMOUS, activeAutonomy);
+            }
+            if (OverworldObjectives.ready(OverworldDomain.observe(ai, situation))) {
+                GoalSystem.Selection portal = goals.selectAmong(situation, now, java.util.Set.of(GoalType.BUILD_PORTAL, GoalType.ENTER_NETHER));
+                if (portal.score() > 0) return new Choice(portal.goal(), portal.score(), DecisionTrace.Origin.AUTONOMOUS);
+            }
+            OverworldAutonomy.Decision selected = autonomy.choose(ai, situation);
+            if (selected != null) return new Choice(selected.operation().label(), selected.objective().value(),
+                    DecisionTrace.Origin.AUTONOMOUS, selected);
+            // Waiting for bounded computation is not a planning failure, and does not activate legacy progression.
+            return new Choice(autonomy.searching() ? GoalType.IDLE : GoalType.EXPLORE, 0.0, DecisionTrace.Origin.AUTONOMOUS);
         }
         return new Choice(selection.goal(), selection.score(), DecisionTrace.Origin.AUTONOMOUS);
     }
@@ -381,6 +440,7 @@ final class AIBrain {
         ai.debug("Goal changed: " + currentGoal + " -> " + choice.goal());
         if (plan != null) plan.cancel(ai);
         plan = null;
+        activeAutonomy = null;
         journal.planEnded(now, Experience.Outcome.INTERRUPTED, "switched to " + choice.goal());
         recovery.onGoalSwitched(currentGoal);
         ai.getMemory().setLastGoal(currentGoal.name());
@@ -396,13 +456,14 @@ final class AIBrain {
 
     private DecisionTrace trace(Choice choice, Situation situation, long now, @Nullable GoalType previous) {
         List<DecisionTrace.Candidate> candidates = new ArrayList<>();
-        for (GoalSystem.Ranked ranked : goals.rank(situation, now, TRACE_CANDIDATES)) {
+        for (GoalSystem.Ranked ranked : choice.autonomy() == null ? goals.rank(situation, now, TRACE_CANDIDATES) : List.<GoalSystem.Ranked>of()) {
             candidates.add(new DecisionTrace.Candidate(ranked.goal(), ranked.score(), ranked.resting()));
         }
         String reason = switch (choice.origin()) {
             case FORCED -> "관리자가 이 목표로 고정해 두었어요";
             case REQUESTED -> directive != null ? directive.describe() : GoalReasons.explain(choice.goal(), situation);
-            case AUTONOMOUS -> GoalReasons.explain(choice.goal(), situation);
+            case AUTONOMOUS -> choice.autonomy() != null ? choice.autonomy().reason()
+                    : choice.goal() == GoalType.IDLE && autonomy.searching() ? autonomy.status() : GoalReasons.explain(choice.goal(), situation);
         };
         return new DecisionTrace(now, choice.goal(), choice.score(), choice.origin(), situation.stage, situation.nextMilestone,
                 candidates, reason, previous);
@@ -422,6 +483,28 @@ final class AIBrain {
                 ai.debug("Trapped, digging a way out: " + plan.describe());
                 return;
             }
+        }
+
+        if (activeAutonomy != null) {
+            OverworldExecution.Execution execution = OverworldExecution.create(activeAutonomy, ai, planner);
+            List<Action> actions = execution.actions();
+            Goal spec = new AutonomyGoalSpec(activeAutonomy.objective());
+            if (actions.isEmpty()) {
+                autonomy.failed(activeAutonomy, ai);
+                journal.decided(now, activeTrace, spec, "Conditional/" + activeAutonomy.action().id(), false, List.of());
+                journal.planEnded(now, Experience.Outcome.NO_PLAN, "chosen operator could not be instantiated");
+                activeAutonomy = null;
+                plan = new Plan(currentGoal, List.of(new WaitAction(NO_PLAN_WAIT_TICKS)));
+                waitingForPlan = true;
+                return;
+            }
+            autonomyPreparation = execution.preparation();
+            plan = new Plan(currentGoal, actions);
+            waitingForPlan = false;
+            journal.decided(now, activeTrace, spec, "Conditional/" + activeAutonomy.action().id(), false, actions);
+            log.notePlan(activeAutonomy.objective().id() + " via " + activeAutonomy.action().id() + ": " + plan.describe());
+            ai.debug("Conditional plan: " + activeAutonomy.forecast());
+            return;
         }
 
         // 고른 목표를 "무엇을 얼마나"로 옮겨 적고, 그것을 맡는 스킬에게 계획을 세우게 한다.
@@ -481,8 +564,20 @@ final class AIBrain {
             journal.actionFinished(plan.position(), action, now);
             plan.advance();
             // 계획이 없어서 기다린 것은 성공으로 세지 않는다. 그래야 계획을 못 세우는 목표가 결국 쉬게 된다.
-            if (plan.isFinished() && !waitingForPlan) onPlanSucceeded();
-            if (plan.isFinished()) journal.planEnded(now, Experience.Outcome.SUCCEEDED, "");
+            if (plan.isFinished() && activeAutonomy != null && !escaping) {
+                BuildPlans.checkCompletion(ai);
+                Situation actual = SituationBuilder.build(ai, currentGoal);
+                AutonomyFeedback.Outcome result = autonomy.finished(activeAutonomy, ai, actual, autonomyPreparation);
+                if (result == AutonomyFeedback.Outcome.ACHIEVED) onPlanSucceeded();
+                journal.planEnded(now, result == AutonomyFeedback.Outcome.ACHIEVED ? Experience.Outcome.SUCCEEDED : Experience.Outcome.INTERRUPTED,
+                        "autonomous step " + result + "; observe and replan");
+                ai.debug("Autonomous objective result: " + result);
+                activeAutonomy = null;
+                autonomyPreparation = false;
+            } else {
+                if (plan.isFinished() && !waitingForPlan) onPlanSucceeded();
+                if (plan.isFinished()) journal.planEnded(now, Experience.Outcome.SUCCEEDED, "");
+            }
         } else if (action.getStatus() == ActionStatus.FAILED) {
             journal.actionFinished(plan.position(), action, now);
             journal.planEnded(now, Experience.Outcome.FAILED, action.getName() + ": " + action.getFailReason());
@@ -492,7 +587,10 @@ final class AIBrain {
             boolean trapped = NavigationSystem.FAIL_TRAPPED.equals(action.getFailReason());
             if (trapped) trappedStreak++;
             // 길을 한 단 파고 가 보니 아직 갇혀 있는 것은 목표의 실패로 세지 않는다. 바로 다음 단을 판다.
-            if (recovery.countsAsFailure(trapped)) onPlanFailed(now, action.getName() + ": " + action.getFailReason());
+            if (activeAutonomy != null) {
+                autonomy.failed(activeAutonomy, ai);
+                activeAutonomy = null;
+            } else if (recovery.countsAsFailure(trapped)) onPlanFailed(now, action.getName() + ": " + action.getFailReason());
             else trappedStreak = TRAPPED_THRESHOLD;
             // 계획의 나머지는 버리고, 다음 판단 때 현재 상황에 맞춰 다시 세운다.
             plan = null;

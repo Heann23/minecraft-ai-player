@@ -480,6 +480,8 @@ public final class AIPlayer {
         return brain.getCurrentGoal();
     }
 
+    public boolean usesOverworldAutonomy() { return brain.usesOverworldAutonomy(); }
+
     public @Nullable GoalType getForcedGoal() {
         return brain.getForcedGoal();
     }

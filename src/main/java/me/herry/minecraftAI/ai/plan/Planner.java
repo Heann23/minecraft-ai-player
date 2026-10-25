@@ -130,6 +130,14 @@ public final class Planner {
         return plan(LegacyGoalAdapter.toGoal(goal), ai, null).actions();
     }
 
+    /** Shared physical preparation for both legacy plans and condition/effect execution leaves. */
+    public List<Action> prepareFooting(GoalType goal, AIPlayer ai) {
+        if (goal != null && NEEDS_FOOTING.contains(goal) && ai.getPlayer().isInWater() && !ai.getBody().isGrounded()) {
+            return TerrainPlans.leaveWater(ai);
+        }
+        return List.of();
+    }
+
     /**
      * 목표를 이루는 계획과, 그 계획을 세운 스킬.
      *
@@ -139,10 +147,8 @@ public final class Planner {
     public SkillPlan plan(Goal goal, AIPlayer ai, @Nullable Situation situation) {
         GoalType legacy = LegacyGoalAdapter.toLegacy(goal);
         // 물에 떠 있는 채로는 캐는 속도가 훨씬 느리고, 블록을 놓거나 굴을 팔 수도 없다. 가까이에 마른 땅이 있으면 먼저 나온다.
-        if (legacy != null && NEEDS_FOOTING.contains(legacy) && ai.getPlayer().isInWater() && !ai.getBody().isGrounded()) {
-            List<Action> leave = TerrainPlans.leaveWater(ai);
-            if (!leave.isEmpty()) return new SkillPlan(LEAVE_WATER, leave);
-        }
+        List<Action> leave = prepareFooting(legacy, ai);
+        if (!leave.isEmpty()) return new SkillPlan(LEAVE_WATER, leave);
         return skillPlanner.plan(goal, ai, situation);
     }
 }

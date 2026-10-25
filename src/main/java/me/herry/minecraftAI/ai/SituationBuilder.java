@@ -77,6 +77,7 @@ final class SituationBuilder {
         InventorySystem inventory = ai.getInventory();
         SurvivalSystem survival = ai.getSurvival();
         Situation situation = new Situation();
+        situation.autonomousOverworld = ai.usesOverworldAutonomy();
         situation.currentGoal = currentGoal;
 
         situation.health = perception.getHealth();

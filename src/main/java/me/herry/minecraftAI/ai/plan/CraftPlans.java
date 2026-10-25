@@ -105,6 +105,22 @@ public final class CraftPlans {
         return actions;
     }
 
+    /** Parameterized smelting leaf; insertion remains distinct from collecting the actual output. */
+    public static List<Action> smeltItem(AIPlayer ai, Material input, int amount) {
+        return smeltItem(ai, input, amount, null);
+    }
+
+    public static List<Action> smeltItem(AIPlayer ai, Material input, int amount, @Nullable Material fuel) {
+        if (FurnacePlans.activeJob(ai) != null) return FurnacePlans.tendFurnace(ai);
+        int batch = Math.min(amount, ai.getInventory().count(input));
+        if (batch <= 0 || !ai.getInventory().hasFuel()) return List.of();
+        List<Action> actions = new ArrayList<>();
+        if (!prepareFurnace(ai, actions)) return List.of();
+        if (fuel == null) FurnacePlans.splitLogsForFuel(ai, actions, batch);
+        actions.add(new SmeltItemAction(input, batch, fuel));
+        return actions;
+    }
+
     /**
      * 캐 놓은 철 원석을 화로에서 제련한다. 가까운 화로, 가진 화로, 그 자리에서 만든 화로 순으로 쓰고,
      * 셋 다 안 되면(조약돌이나 작업대가 없을 때) 집에 있는 화로까지 돌아간다.

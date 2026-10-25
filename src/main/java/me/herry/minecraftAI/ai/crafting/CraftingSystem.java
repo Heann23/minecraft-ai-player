@@ -2,10 +2,12 @@ package me.herry.minecraftAI.ai.crafting;
 
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
+import org.bukkit.Keyed;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.PlayerInventory;
 import org.bukkit.inventory.Recipe;
+import org.bukkit.inventory.FurnaceRecipe;
 import org.bukkit.inventory.RecipeChoice;
 import org.bukkit.inventory.ShapedRecipe;
 import org.bukkit.inventory.ShapelessRecipe;
@@ -59,10 +61,69 @@ public final class CraftingSystem {
 
     // 결과물별 제작 레시피. 처음 쓸 때 만든다.
     private @Nullable Map<Material, List<Recipe>> recipeIndex;
+    private @Nullable Map<Material, List<RecipeOption>> cookingIndex;
+    private final Map<Material, List<RecipeOption>> optionIndex = new EnumMap<>(Material.class);
+    private long revision;
+
+    public long revision() { return revision; }
 
     // 데이터팩을 다시 불러와서 레시피가 바뀌었을 때 호출한다.
     public void clearCache() {
+        revision++;
         recipeIndex = null;
+        cookingIndex = null;
+        optionIndex.clear();
+    }
+
+    /** Cached, immutable recipe knowledge; reading it never performs a craft or changes inventory. */
+    public List<RecipeOption> recipeOptions(Material target) {
+        return optionIndex.computeIfAbsent(target, material -> {
+            List<RecipeOption> result = new ArrayList<>();
+            for (Recipe recipe : recipesFor(material)) {
+                if (!(recipe instanceof Keyed keyed)) continue;
+                List<RecipeOption.Ingredient> groups = new ArrayList<>();
+                for (Ingredient ingredient : ingredientsOf(recipe)) {
+                    List<String> alternatives = materialsOf(ingredient.choice()).stream().map(Material::name).distinct().sorted().toList();
+                    if (alternatives.isEmpty()) { groups.clear(); break; }
+                    groups.add(new RecipeOption.Ingredient(ingredient.count(), alternatives,
+                            ingredient.choice() instanceof RecipeChoice.ExactChoice));
+                }
+                if (!groups.isEmpty()) result.add(new RecipeOption(keyed.getKey().toString(), material.name(),
+                        recipe.getResult().getAmount(), needsTable(recipe), false, groups));
+            }
+            result.sort(java.util.Comparator.comparing(RecipeOption::id));
+            return List.copyOf(result);
+        });
+    }
+
+    public List<RecipeOption> smeltingOptions(Material target) {
+        if (cookingIndex == null) {
+            Map<Material, List<RecipeOption>> index = new EnumMap<>(Material.class);
+            Iterator<Recipe> recipes = Bukkit.recipeIterator();
+            while (recipes.hasNext()) {
+                Recipe candidate = recipes.next();
+                if (!(candidate instanceof FurnaceRecipe recipe)) continue;
+                List<String> alternatives = materialsOf(recipe.getInputChoice()).stream().map(Material::name).distinct().sorted().toList();
+                if (alternatives.isEmpty()) continue;
+                var option = new RecipeOption(recipe.getKey().toString(), recipe.getResult().getType().name(),
+                        recipe.getResult().getAmount(), false, true, List.of(new RecipeOption.Ingredient(1, alternatives,
+                        recipe.getInputChoice() instanceof RecipeChoice.ExactChoice)));
+                index.computeIfAbsent(recipe.getResult().getType(), ignored -> new ArrayList<>()).add(option);
+            }
+            index.replaceAll((material, options) -> List.copyOf(options));
+            cookingIndex = index;
+        }
+        return cookingIndex.getOrDefault(target, List.of());
+    }
+
+    /** Registered, count-plannable furnace result; no guessed output for exact/unsupported choices. */
+    public @Nullable Material smeltingResult(Material input) {
+        smeltingOptions(Material.AIR);
+        for (var entry : cookingIndex.entrySet()) {
+            if (entry.getValue().stream().anyMatch(option -> option.countPlannable()
+                    && option.ingredients().getFirst().alternatives().contains(input.name()))) return entry.getKey();
+        }
+        return null;
     }
 
     /**

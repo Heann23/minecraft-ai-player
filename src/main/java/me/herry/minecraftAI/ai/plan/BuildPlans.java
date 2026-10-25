@@ -56,6 +56,23 @@ public final class BuildPlans {
     private BuildPlans() {
     }
 
+    public record Requirements(int planks, int structuralBlocks) {}
+
+    /** Quantities from the actual blueprint/current job, without choosing which resource to acquire first. */
+    public static Requirements requirements(AIPlayer ai) {
+        BuildJob job = ai.getBuildJob();
+        World world = ai.getPlayer().getWorld();
+        PlayerInventory inventory = ai.getPlayer().getInventory();
+        if (job != null && job.world().equals(world.getUID())) {
+            if (!isLoaded(world, job)) return new Requirements(0, 0);
+            Predicate<Blueprint.Part> done = doneCheck(world, job);
+            return new Requirements(planksNeeded(inventory, job.pending(done)), job.pendingStructural(done));
+        }
+        Blueprint blueprint = Blueprints.shelter();
+        return new Requirements(planksNeeded(inventory, blueprint.parts()),
+                blueprint.count(BlockRole.WALL) + blueprint.count(BlockRole.ROOF) + FLOOR_MARGIN);
+    }
+
     /**
      * 짓던 집이 다 지어졌으면 완성으로 처리한다. 진행 단계를 판정하기 전에 불러야,
      * 완성된 바로 그 판단에서 다음 단계(철 장비)로 넘어간다.

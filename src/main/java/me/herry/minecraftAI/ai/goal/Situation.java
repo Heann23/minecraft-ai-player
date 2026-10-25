@@ -12,6 +12,8 @@ public final class Situation {
     public enum Need { NONE, WOOD, STONE, IRON, DIAMOND, FLINT, OTHER }
 
     public GoalType currentGoal = GoalType.IDLE;
+    // Normal overworld production is selected by conditional planning, not nextMilestone's ordinal.
+    public boolean autonomousOverworld;
 
     public double health = 20.0;
     public double maxHealth = 20.0;

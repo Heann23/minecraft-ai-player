@@ -79,6 +79,8 @@ public final class HomePlans {
 
     // 지금 만들려는 것에 필요한 재료는 상자에 넣지 않는다.
     public static StoragePolicy.Context contextOf(Situation situation) {
+        // Independent objectives may need these resources in another order than legacy Milestone.
+        if (situation.autonomousOverworld) return new StoragePolicy.Context(true, true, true, true);
         Milestone next = situation.nextMilestone;
         return new StoragePolicy.Context(
                 situation.need == Situation.Need.WOOD,
@@ -157,6 +159,17 @@ public final class HomePlans {
         if (!climb.isEmpty()) return climb;
         ai.debug("Fetching needed items from the chest at " + place.pos());
         return List.of(approach(ai, home, place.pos()), new WithdrawItemsAction(place.pos(), wanted.filter(), wanted.amount()));
+    }
+
+    /** The planner supplies the actual material/count, not the legacy next milestone. */
+    public static List<Action> fetchItem(AIPlayer ai, Material material, int amount) {
+        Base home = ai.getWorldModel().homeIn(ai.getWorldId());
+        if (home == null || amount <= 0) return List.of();
+        WorldModel.Place place = chestHolding(ai.getWorldModel(), type -> type == material);
+        if (place == null || !place.world().equals(ai.getWorldId())) return List.of();
+        List<Action> climb = climbFirst(ai);
+        if (!climb.isEmpty()) return climb;
+        return List.of(approach(ai, home, place.pos()), new WithdrawItemsAction(place.pos(), type -> type == material, amount));
     }
 
     static List<Action> sleep(AIPlayer ai) {
