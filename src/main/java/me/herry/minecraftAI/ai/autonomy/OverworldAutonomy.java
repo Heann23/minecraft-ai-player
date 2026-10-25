@@ -2,6 +2,10 @@ package me.herry.minecraftAI.ai.autonomy;
 
 import me.herry.minecraftAI.ai.AIPlayer;
 import me.herry.minecraftAI.ai.goal.Situation;
+import me.herry.minecraftAI.ai.plan.FarmingPlans;
+import me.herry.minecraftAI.ai.farming.CropRules;
+import me.herry.minecraftAI.ai.util.Positions;
+import org.bukkit.Material;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
@@ -33,6 +37,7 @@ public final class OverworldAutonomy {
     private int cursor;
     private long capturedAt;
     private String status = "관측 대기";
+    private boolean farmSurveyPending;
 
     public @Nullable Decision choose(AIPlayer ai, Situation situation) {
         if (ai.getWorkBudget().isExhausted()) { status = "계획 예산 대기"; return null; }
@@ -46,6 +51,7 @@ public final class OverworldAutonomy {
             if (!catalog.complete()) return null;
         }
         PlanningState actual = OverworldDomain.observe(ai, situation);
+        farmSurveyPending = FarmingPlans.searching(ai);
         boolean retryDue = failures.values().stream().anyMatch(f -> f.until() > capturedAt && f.until() <= ai.getTicks());
         if (snapshot == null || !snapshot.world().equals(ai.getWorldId()) || !actual.equals(snapshot.state())
                 || retryDue || ai.getTicks() - capturedAt >= 1200) {
@@ -111,7 +117,7 @@ public final class OverworldAutonomy {
     }
 
     public boolean searching() { return catalog == null || !catalog.complete()
-            || searches.stream().anyMatch(Search::pending); }
+            || searches.stream().anyMatch(Search::pending) || farmSurveyPending; }
     public String status() { return status; }
 
     public boolean valid(Decision decision, AIPlayer ai, Situation situation) {
@@ -127,7 +133,20 @@ public final class OverworldAutonomy {
 
     public AutonomyFeedback.Outcome finished(Decision decision, AIPlayer ai, Situation situation, boolean preparation) {
         PlanningState actual = OverworldDomain.observe(ai, situation);
-        var result = AutonomyFeedback.assess(decision.objective(), decision.action(), decision.before(), actual);
+        // The completed action's exact cell is inexpensive to recheck even if the broad survey yielded its budget.
+        if (decision.operation().kind() == OverworldDomain.Kind.PLANT_CROP) {
+            var soil = decision.operation().position();
+            var world = ai.getPlayer().getWorld();
+            if (decision.world().equals(world.getUID()) && soil != null && Positions.isLoaded(world, soil.offset(0, 1, 0))
+                    && soil.distance(ai.getPosition()) <= 5.0 && Positions.block(world, soil).getType() == Material.FARMLAND
+                    && Positions.block(world, soil.offset(0, 1, 0)).getType() == CropRules.crop(decision.operation().target())) {
+                Map<String, Integer> proven = new HashMap<>(actual.quantities());
+                proven.put(FarmPlanning.planted(decision.operation().target(), soil), 1);
+                actual = new PlanningState(proven);
+            }
+        }
+        var result = AutonomyFeedback.assess(decision.objective(), decision.action(), decision.before(), actual,
+                decision.operation().exploratory());
         if (result == AutonomyFeedback.Outcome.NO_PROGRESS && !preparation) failed(decision, ai);
         else { failures.remove(failureKey(ai, decision.action().id())); invalidate(); }
         return result;
@@ -148,5 +167,5 @@ public final class OverworldAutonomy {
     }
 
     public void invalidate() { snapshot = null; searches.clear(); cursor = 0; }
-    public void reset() { invalidate(); catalog = null; failures.clear(); status = "새 관측 대기"; }
+    public void reset() { invalidate(); catalog = null; farmSurveyPending = false; failures.clear(); status = "새 관측 대기"; }
 }

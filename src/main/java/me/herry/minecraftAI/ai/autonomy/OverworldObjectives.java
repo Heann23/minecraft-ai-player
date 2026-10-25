@@ -2,6 +2,7 @@ package me.herry.minecraftAI.ai.autonomy;
 
 import java.util.List;
 import java.util.Map;
+import java.util.ArrayList;
 
 /** Independent, renewable outcome conditions. List order is not a progression script. */
 public final class OverworldObjectives {
@@ -9,6 +10,7 @@ public final class OverworldObjectives {
             new AutonomyGoal("nether-portal", Map.of("world:portal", 1), 120),
             new AutonomyGoal("food-reserve", Map.of("stock:food", 8), 140),
             new AutonomyGoal("ready-food", Map.of("stock:ready-food", 4), 85),
+            new AutonomyGoal("renewable-food", Map.of("world:crop-planted", 4), 70),
             new AutonomyGoal("safe-home", Map.of("world:shelter", 1), 90),
             new AutonomyGoal("stone-mining", Map.of("cap:pickaxe:STONE", 1), 100),
             new AutonomyGoal("work-pickaxe", Map.of("item:STONE_PICKAXE", 1), 45),
@@ -27,7 +29,14 @@ public final class OverworldObjectives {
     private OverworldObjectives() {}
 
     public static List<AutonomyGoal> goals(PlanningState state) {
-        return OBJECTIVES.stream().filter(goal -> !goal.achieved(state)).toList();
+        List<AutonomyGoal> result = new ArrayList<>(OBJECTIVES.stream().filter(goal -> !goal.achieved(state)).toList());
+        state.quantities().keySet().stream().filter(token -> token.startsWith("known:farm-due:"))
+                .sorted().limit(16).forEach(token -> {
+                    String position = token.substring("known:farm-due:".length());
+                    result.add(new AutonomyGoal("inspect-farm:" + position,
+                            Map.of("known:farm-checked:" + position, 1), state.count("stock:food") < 8 ? 38 : 8));
+                });
+        return List.copyOf(result);
     }
 
     /** Equipment and a house are alternative stabilizing outcomes, not mandatory gates to an already usable portal. */

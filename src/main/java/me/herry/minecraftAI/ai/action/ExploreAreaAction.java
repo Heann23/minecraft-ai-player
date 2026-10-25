@@ -11,6 +11,7 @@ import me.herry.minecraftAI.ai.navigation.NavigationSystem;
 import me.herry.minecraftAI.ai.navigation.PathGoal;
 import me.herry.minecraftAI.ai.util.BlockPoint;
 import me.herry.minecraftAI.ai.util.Positions;
+import me.herry.minecraftAI.ai.primitive.PrimitiveTarget;
 import org.bukkit.Location;
 import org.bukkit.World;
 import org.bukkit.entity.Player;
@@ -24,7 +25,8 @@ import java.util.concurrent.ThreadLocalRandom;
  * 아직 가 보지 않은 방향으로 얼마간 걸어가서 새로운 지역을 살핀다.
  */
 public final class ExploreAreaAction extends AbstractAction {
-    private static final int TIMEOUT = 500;
+    private static final int TIMEOUT = 2200;
+    private static final int LAND_TIMEOUT = 500;
     private static final int SECTORS = 12;
     private static final int RINGS = 2;
     private static final int SAMPLES_PER_TICK = 3;
@@ -48,6 +50,9 @@ public final class ExploreAreaAction extends AbstractAction {
     private List<MemoryEntry> failedApproaches = List.of();
     private final List<FrontierChoice.Candidate> candidates = new ArrayList<>();
     private FrontierChoice.Candidate selected;
+    private SurfaceTravelAction.CandidateSearch waterSearch;
+    private PrimitiveTarget.Point waterTarget;
+    private SurfaceTravelAction surfaceTravel;
 
     public ExploreAreaAction(double minDistance, double maxDistance) {
         this(minDistance, maxDistance, false);
@@ -78,6 +83,7 @@ public final class ExploreAreaAction extends AbstractAction {
         sectorOffset = ThreadLocalRandom.current().nextDouble(-Math.PI / SECTORS, Math.PI / SECTORS);
         recentPath = ai.getMemory().getRecentPath().stream().filter(visit -> visit.world().equals(targetWorld)).toList();
         failedApproaches = ai.getMemory().all(MemoryType.UNREACHABLE, targetWorld, ai.getTicks());
+        if (!stayUnderground) waterSearch = new SurfaceTravelAction.CandidateSearch(ai, true);
     }
 
     @Override
@@ -88,17 +94,42 @@ public final class ExploreAreaAction extends AbstractAction {
         }
         if (selected == null) {
             sampleTargets(ai);
-            if (sampleIndex < SECTORS * RINGS) return;
+            if (waterSearch != null && waterSearch.searching()) waterSearch.advance(ai, 2);
+            if (sampleIndex < SECTORS * RINGS || waterSearch != null && waterSearch.searching()) return;
+            if (waterSearch != null && waterSearch.target() != null) {
+                waterTarget = waterSearch.target();
+                BlockPoint point = new BlockPoint((int) Math.floor(waterTarget.x()), (int) Math.floor(waterTarget.y()),
+                        (int) Math.floor(waterTarget.z()));
+                double angle = Math.atan2(point.z() - startLocation.getZ(), point.x() - startLocation.getX());
+                candidates.add(describe(ai, point, angle));
+            }
             selected = FrontierChoice.select(candidates).orElse(null);
             if (selected == null) {
                 fail("no safe loaded frontier endpoint in sampled area");
                 return;
             }
             ai.debug("Exploring toward " + selected.target() + " (visited chunk=" + selected.exploredChunk() + ")");
-            ai.getNavigation().navigateTo(PathGoal.arrive(selected.target(), 3.0));
+            if (waterTarget != null && selected.target().x() == (int) Math.floor(waterTarget.x())
+                    && selected.target().y() == (int) Math.floor(waterTarget.y())
+                    && selected.target().z() == (int) Math.floor(waterTarget.z())) {
+                surfaceTravel = new SurfaceTravelAction(targetWorld, waterTarget, 1800);
+            } else ai.getNavigation().navigateTo(PathGoal.arrive(selected.target(), 3.0));
             terrain = null;
+            waterSearch = null;
             candidates.clear();
         }
+        if (surfaceTravel != null) {
+            surfaceTravel.update(ai);
+            if (surfaceTravel.getStatus() == ActionStatus.SUCCESS) {
+                ai.getMemory().clearUnreachable(targetWorld, selected.target());
+                succeed();
+            } else if (surfaceTravel.getStatus() == ActionStatus.FAILED) {
+                rememberFailedApproach(ai);
+                fail(surfaceTravel.getFailReason());
+            }
+            return;
+        }
+        if (getElapsed() > LAND_TIMEOUT) { fail("land exploration timed out"); return; }
         NavigationSystem navigation = ai.getNavigation();
         navigation.tick();
 
@@ -118,6 +149,10 @@ public final class ExploreAreaAction extends AbstractAction {
         if (selected != null && getStatus() == ActionStatus.FAILED && !getFailReason().equals("cancelled")
                 && !getFailReason().equals("world changed") && ai.getWorldId().equals(targetWorld)) rememberFailedApproach(ai);
         ai.getNavigation().stop();
+        if (surfaceTravel != null && surfaceTravel.getStatus() == ActionStatus.RUNNING) surfaceTravel.cancel(ai);
+        surfaceTravel = null;
+        waterSearch = null;
+        waterTarget = null;
         terrain = null;
         candidates.clear();
         recentPath = List.of();
@@ -151,7 +186,7 @@ public final class ExploreAreaAction extends AbstractAction {
                 ground = GroundFinder.find(terrain, x, startLocation.getBlockY(), z, 4, 8);
                 if (ground != null && ground.y() >= surface - 2) ground = null;
             } else {
-                // No forced chunk loading, ocean endpoint or new movement executor is introduced here.
+                // Land endpoints are evaluated here; observed water routes use the same action lane separately.
                 ground = GroundFinder.find(terrain, x, surface, z, 2, 6);
                 if (ground == null) ground = GroundFinder.find(terrain, x, startLocation.getBlockY(), z, 4, 6);
             }

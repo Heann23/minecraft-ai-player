@@ -74,7 +74,7 @@ public final class SmeltItemAction extends AbstractAction implements PrimitiveAc
             fail("nothing to smelt");
             return;
         }
-        ItemStack fuel = takeFuel(inventory, amount, selectedFuel);
+        ItemStack fuel = takeFuel(inventory, amount, selectedFuel, input);
         if (fuel == null) {
             fail("no fuel");
             return;
@@ -82,8 +82,14 @@ public final class SmeltItemAction extends AbstractAction implements PrimitiveAc
         // 연료가 모자라면 그 연료로 끝까지 구울 수 있는 만큼만 넣는다. 다 넣으면 구워지지 않은 재료가 화로에 남는다.
         amount = Math.min(amount, FuelMath.itemsFor(fuel.getAmount(), itemsPerFuel(fuel)));
 
-        inventory.removeItem(new ItemStack(input, amount));
-        furnace.setSmelting(new ItemStack(input, amount));
+        ItemStack inserted = takeInput(inventory, input, amount);
+        if (inserted == null) {
+            for (ItemStack leftover : inventory.addItem(fuel).values()) player.getWorld().dropItemNaturally(player.getLocation(), leftover);
+            fail("input changed before insertion");
+            return;
+        }
+        amount = inserted.getAmount();
+        furnace.setSmelting(inserted);
         furnace.setFuel(fuel);
         FurnaceJob left = ai.getFurnaceJob();
         if (left != null && !left.isAt(ai.getWorldId(), furnacePos)) {
@@ -113,13 +119,19 @@ public final class SmeltItemAction extends AbstractAction implements PrimitiveAc
      * 필요한 만큼의 연료를 인벤토리에서 꺼낸다. 석탄과 숯을 먼저 쓰고, 없으면 판자를, 판자도 없으면 원목을 쓴다.
      * 원목은 판자로 바꾸면 네 배를 구울 수 있어서, 계획을 세울 때 미리 판자로 만들어 둔다 (FurnacePlans.splitLogsForFuel).
      */
-    private static @Nullable ItemStack takeFuel(PlayerInventory inventory, int items, @Nullable Material selectedFuel) {
+    private static @Nullable ItemStack takeFuel(PlayerInventory inventory, int items, @Nullable Material selectedFuel, Material input) {
+        int inputAvailable = 0;
+        for (int slot = 0; slot < STORAGE_SIZE; slot++) {
+            ItemStack item = inventory.getItem(slot);
+            if (item != null && item.getType() == input) inputAvailable += item.getAmount();
+        }
         ItemStack best = null;
         int bestSlot = -1;
         for (int slot = 0; slot < STORAGE_SIZE; slot++) {
             ItemStack item = inventory.getItem(slot);
             if (item == null || item.isEmpty() || !InventorySystem.isFuel(item.getType())) continue;
             if (selectedFuel != null && item.getType() != selectedFuel) continue;
+            if (item.getType() == input && inputAvailable <= 1) continue;
             int rank = fuelRank(item);
             if (best == null || rank > fuelRank(best) || rank == fuelRank(best) && item.getAmount() > best.getAmount()) {
                 best = item;
@@ -129,10 +141,41 @@ public final class SmeltItemAction extends AbstractAction implements PrimitiveAc
         if (best == null) return null;
 
         int amount = Math.min(FuelMath.fuelFor(items, itemsPerFuel(best)), best.getAmount());
-        ItemStack fuel = new ItemStack(best.getType(), amount);
+        if (best.getType() == input) amount = Math.min(amount, inputAvailable - 1);
+        ItemStack fuel = best.clone();
+        fuel.setAmount(amount);
         if (amount >= best.getAmount()) inventory.setItem(bestSlot, null);
         else best.setAmount(best.getAmount() - amount);
         return fuel;
+    }
+
+    /** One furnace slot cannot merge different components; take real, similar stacks and preserve their data. */
+    private static @Nullable ItemStack takeInput(PlayerInventory inventory, Material input, int requested) {
+        ItemStack prototype = null;
+        int largest = 0;
+        for (int slot = 0; slot < STORAGE_SIZE; slot++) {
+            ItemStack candidate = inventory.getItem(slot);
+            if (candidate == null || candidate.isEmpty() || candidate.getType() != input) continue;
+            int available = 0;
+            for (int other = 0; other < STORAGE_SIZE; other++) {
+                ItemStack stack = inventory.getItem(other);
+                if (stack != null && candidate.isSimilar(stack)) available += stack.getAmount();
+            }
+            if (available > largest) { largest = available; prototype = candidate.clone(); }
+        }
+        if (prototype == null || requested <= 0) return null;
+        int amount = Math.min(requested, Math.min(largest, prototype.getMaxStackSize()));
+        int remaining = amount;
+        for (int slot = 0; slot < STORAGE_SIZE && remaining > 0; slot++) {
+            ItemStack stack = inventory.getItem(slot);
+            if (stack == null || !prototype.isSimilar(stack)) continue;
+            int used = Math.min(remaining, stack.getAmount());
+            if (used == stack.getAmount()) inventory.setItem(slot, null);
+            else stack.setAmount(stack.getAmount() - used);
+            remaining -= used;
+        }
+        prototype.setAmount(amount);
+        return prototype;
     }
 
     private static int fuelRank(ItemStack item) {
