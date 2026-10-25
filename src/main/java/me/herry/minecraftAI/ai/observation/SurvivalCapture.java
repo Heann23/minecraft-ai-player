@@ -29,11 +29,8 @@ public final class SurvivalCapture {
     public static SurvivalObservation capture(AIPlayer ai) {
         requireMainThread();
         Player player = ai.getPlayer();
-        var maximum = player.getAttribute(Attribute.MAX_HEALTH);
-        Body body = new Body(player.getHealth(), maximum == null ? player.getHealth() : maximum.getValue(),
-                player.getAbsorptionAmount(), player.getFoodLevel(), player.getSaturation(), player.getExhaustion(),
-                player.getRemainingAir(), player.getMaximumAir());
-        List<Effect> active = player.getActivePotionEffects().stream().map(effect -> effect(effect, 1)).toList();
+        Body body = body(player);
+        List<Effect> active = effects(player);
         List<Item> storage = new ArrayList<>();
         for (int slot = 0; slot < 36 && !ai.getWorkBudget().isExhausted(); slot++)
             storage.add(item(player, slot, player.getInventory().getItem(slot)));
@@ -55,6 +52,26 @@ public final class SurvivalCapture {
                 using ? Math.max(0, player.getActiveItemRemainingTime()) : 0);
         return new SurvivalObservation(SCHEMA_VERSION, ai.getTicks(), Integer.toUnsignedLong(Bukkit.getCurrentTick()),
                 player.getWorld().getUID().toString(), body, active, storage, equipment, use, storage.size() == 36);
+    }
+
+    /** Bounded per-action reads avoid copying every inventory stack on every use tick. */
+    public static Item item(AIPlayer ai, int slot) {
+        requireMainThread();
+        if (slot < 0 || slot >= 36) throw new IllegalArgumentException("storage slot required");
+        return item(ai.getPlayer(), slot, ai.getPlayer().getInventory().getItem(slot));
+    }
+
+    public static Body body(Player player) {
+        requireMainThread();
+        var maximum = player.getAttribute(Attribute.MAX_HEALTH);
+        return new Body(player.getHealth(), maximum == null ? player.getHealth() : maximum.getValue(),
+                player.getAbsorptionAmount(), player.getFoodLevel(), player.getSaturation(), player.getExhaustion(),
+                player.getRemainingAir(), player.getMaximumAir());
+    }
+
+    public static List<Effect> effects(Player player) {
+        requireMainThread();
+        return player.getActivePotionEffects().stream().map(effect -> effect(effect, 1)).toList();
     }
 
     /** Includes names, durability and all components; quantity is a separate choice/precondition. */

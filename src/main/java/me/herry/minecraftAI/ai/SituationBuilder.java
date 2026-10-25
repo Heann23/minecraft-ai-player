@@ -110,6 +110,9 @@ final class SituationBuilder {
         situation.underground = TerrainPlans.needsToClimb(ai);
         fillCombat(ai, perception, situation, weaponPower * readiness * (1 + allies), weaponPower);
 
+        if (situation.health < situation.maxHealth * GoalSystem.REFUGE_LEAVE_HEALTH)
+            situation.recoveryAvailable = me.herry.minecraftAI.ai.plan.RecoveryPlans.available(ai);
+
         situation.night = perception.isNight();
         situation.nightPolicy = survival.nightPolicy(weaponPower);
 

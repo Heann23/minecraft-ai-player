@@ -238,12 +238,12 @@ public final class GoalSystem {
         boolean canEat = situation.hasFood && situation.food < 20;
         // 숨은 자리에서는 체력이 넉넉히 돌아올 때까지 나가지 않는다. 회복할 방법이 없으면 기다려도 소용없으니 나간다.
         if (situation.sealedIn && situation.health < situation.maxHealth * REFUGE_LEAVE_HEALTH) {
-            return canEat || situation.canRegenerate ? 850.0 : 0.0;
+            return canEat || situation.canRegenerate || situation.recoveryAvailable ? 850.0 : 0.0;
         }
         if (situation.healthState == SurvivalSystem.HealthState.OK) return 0.0;
         if (situation.combat == CombatSystem.Decision.FIGHT) return 0.0;
         boolean canRest = situation.canRegenerate && !situation.hostileNearby;
-        return canEat || canRest ? 850.0 : 0.0;
+        return canEat || canRest || situation.recoveryAvailable ? 850.0 : 0.0;
     }
 
     // 동료가 도움을 청하면 하던 일을 멈추고 도우러 간다. 자기 몸이 성하지 않으면 나서지 않는다.
