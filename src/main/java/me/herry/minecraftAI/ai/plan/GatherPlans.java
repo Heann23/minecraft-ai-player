@@ -36,11 +36,11 @@ public final class GatherPlans {
     // 목표를 고를 때(SituationBuilder)도 같은 범위로 아이템을 찾는다.
     public static final double LOOSE_DROP_RADIUS = 8.0;
     // 이 거리 안에 드러난 돌이 있으면 걸어가서 캐고, 없으면 그 자리에서 파 내려간다.
-    private static final double STONE_WALK_RANGE = 24.0;
+    static final double STONE_WALK_RANGE = 24.0;
     private static final long STONE_RETRY_WINDOW = 200L;
     public static final double ORE_WALK_RANGE = 32.0;
     // 걸어갈 길은 없지만 이 거리 안에 있는 광석은 굴을 파거나 다리를 놓아서 다가간다.
-    private static final double DIG_TOWARD_RANGE = 20.0;
+    static final double DIG_TOWARD_RANGE = 20.0;
     // 이 거리 안에 보이는 광석은 광맥이 이어지는 것으로 보고 다 캔다.
     private static final double VEIN_RANGE = 6.0;
     // 철이 가장 많이 나오는 높이 부근. 이 높이까지 계단으로 내려간 뒤 수평으로 굴을 판다.
@@ -239,6 +239,11 @@ public final class GatherPlans {
         return mineOre(ai, MemoryType.COAL_ORE);
     }
 
+    /** Information gathering only; this route does not promise coal in the inventory. */
+    public static List<Action> findCoal(AIPlayer ai) {
+        return explore(ai);
+    }
+
     // 캐러 갈 광석을 알고 있는지. 걸어갈 수 있는 것이 없어도 굴을 파거나 다리를 놓아 닿을 만큼 가까운 것이 있으면 안다고 본다.
     public static boolean knowsOre(AIPlayer ai, MemoryType type) {
         return ResourceLocator.locate(ai, type, ORE_WALK_RANGE) != null
@@ -348,6 +353,16 @@ public final class GatherPlans {
         // 물가처럼 팔 수 없는 자리라면 조금 먼 돌이라도 찾아가 본다.
         stone = ResourceLocator.locate(ai, MemoryType.STONE);
         return stone == null ? List.of() : mineBlock(ai, stone);
+    }
+
+    /** Collects the requested stone ingredient from a matching observed source, without substituting another drop. */
+    public static List<Action> mineStone(AIPlayer ai, Material drop) {
+        if (!ResourceOptions.isStoneIngredient(drop)) return List.of();
+        java.util.function.Predicate<Block> matches = block -> ResourceOptions.expectedStoneDrop(ai, block) == drop;
+        BlockPoint target = ResourceLocator.locate(ai, MemoryType.STONE, STONE_WALK_RANGE, matches);
+        if (target != null) return mineBlock(ai, target);
+        BlockPoint blocked = ResourceLocator.locateBlocked(ai, MemoryType.STONE, DIG_TOWARD_RANGE, matches);
+        return blocked == null ? List.of() : approachBlocked(ai, blocked);
     }
 
     // 다가가서, 캐고, 떨어진 아이템을 줍는다.

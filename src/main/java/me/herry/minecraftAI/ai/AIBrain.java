@@ -7,8 +7,6 @@ import me.herry.minecraftAI.ai.action.WaitAction;
 import me.herry.minecraftAI.ai.autonomy.AutonomyFeedback;
 import me.herry.minecraftAI.ai.autonomy.AutonomyGoalSpec;
 import me.herry.minecraftAI.ai.autonomy.OverworldAutonomy;
-import me.herry.minecraftAI.ai.autonomy.OverworldDomain;
-import me.herry.minecraftAI.ai.autonomy.OverworldObjectives;
 import me.herry.minecraftAI.ai.autonomy.OverworldExecution;
 import me.herry.minecraftAI.ai.brain.DecisionLog;
 import me.herry.minecraftAI.ai.brain.DecisionTrace;
@@ -404,10 +402,10 @@ final class AIBrain {
             if (activeAutonomy != null && plan != null && !plan.isFinished()) {
                 return new Choice(currentGoal, 1.0, DecisionTrace.Origin.AUTONOMOUS, activeAutonomy);
             }
-            if (OverworldObjectives.ready(OverworldDomain.observe(ai, situation))) {
-                GoalSystem.Selection portal = goals.selectAmong(situation, now, java.util.Set.of(GoalType.BUILD_PORTAL, GoalType.ENTER_NETHER));
-                if (portal.score() > 0) return new Choice(portal.goal(), portal.score(), DecisionTrace.Origin.AUTONOMOUS);
-            }
+            if (situation.knowsPortal && !goals.isOnCooldown(GoalType.ENTER_NETHER, now))
+                return new Choice(GoalType.ENTER_NETHER, 30.0, DecisionTrace.Origin.AUTONOMOUS);
+            if (situation.knowsLootChest && !situation.inventoryFull && !goals.isOnCooldown(GoalType.LOOT_CHEST, now))
+                return new Choice(GoalType.LOOT_CHEST, 25.0, DecisionTrace.Origin.AUTONOMOUS);
             OverworldAutonomy.Decision selected = autonomy.choose(ai, situation);
             if (selected != null) return new Choice(selected.operation().label(), selected.objective().value(),
                     DecisionTrace.Origin.AUTONOMOUS, selected);
@@ -463,7 +461,9 @@ final class AIBrain {
             case FORCED -> "관리자가 이 목표로 고정해 두었어요";
             case REQUESTED -> directive != null ? directive.describe() : GoalReasons.explain(choice.goal(), situation);
             case AUTONOMOUS -> choice.autonomy() != null ? choice.autonomy().reason()
-                    : choice.goal() == GoalType.IDLE && autonomy.searching() ? autonomy.status() : GoalReasons.explain(choice.goal(), situation);
+                    : (choice.goal() == GoalType.IDLE || choice.goal() == GoalType.EXPLORE)
+                    && ai.getPlayer().getWorld().getEnvironment() == World.Environment.NORMAL
+                    ? autonomy.status() : GoalReasons.explain(choice.goal(), situation);
         };
         return new DecisionTrace(now, choice.goal(), choice.score(), choice.origin(), situation.stage, situation.nextMilestone,
                 candidates, reason, previous);

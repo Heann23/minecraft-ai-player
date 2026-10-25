@@ -24,4 +24,9 @@ class OverworldObjectivesTest {
         assertTrue(OverworldObjectives.goals(lost).stream().anyMatch(g -> g.id().equals("food-reserve")));
         assertTrue(OverworldObjectives.goals(lost).stream().anyMatch(g -> g.id().equals("safe-home")));
     }
+
+    @Test void usablePortalDoesNotRequireEveryOptionalEquipmentAndHouseGoal() {
+        assertTrue(OverworldObjectives.ready(new PlanningState(Map.of("world:portal", 1))));
+        assertFalse(OverworldObjectives.ready(new PlanningState(Map.of("item:OBSIDIAN", 10))));
+    }
 }

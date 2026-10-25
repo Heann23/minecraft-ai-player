@@ -11,6 +11,7 @@ import me.herry.minecraftAI.ai.util.Positions;
 import me.herry.minecraftAI.ai.world.Base;
 import org.bukkit.Material;
 import org.bukkit.World;
+import org.bukkit.block.Block;
 import org.bukkit.block.BlockFace;
 import org.jetbrains.annotations.Nullable;
 
@@ -37,15 +38,26 @@ public final class ResourceLocator {
 
     // maxDistance 보다 멀리 있는 블록은 후보에서 뺀다.
     public static @Nullable BlockPoint locate(AIPlayer ai, MemoryType type, double maxDistance) {
-        return locate(ai, type, maxDistance, false);
+        return locate(ai, type, maxDistance, block -> true);
+    }
+
+    /** Additional resource condition, evaluated only for loaded, valid and safe remembered candidates. */
+    public static @Nullable BlockPoint locate(AIPlayer ai, MemoryType type, double maxDistance, Predicate<Block> accepts) {
+        return locate(ai, type, maxDistance, false, accepts);
     }
 
     // 걸어갈 길이 없다고 기억해 둔 블록 중에서 고른다. 굴을 파서 다가갈 대상을 찾을 때 쓴다.
     public static @Nullable BlockPoint locateBlocked(AIPlayer ai, MemoryType type, double maxDistance) {
-        return locate(ai, type, maxDistance, true);
+        return locateBlocked(ai, type, maxDistance, block -> true);
     }
 
-    private static @Nullable BlockPoint locate(AIPlayer ai, MemoryType type, double maxDistance, boolean blockedOnly) {
+    public static @Nullable BlockPoint locateBlocked(AIPlayer ai, MemoryType type, double maxDistance, Predicate<Block> accepts) {
+        return locate(ai, type, maxDistance, true, accepts);
+    }
+
+    private static @Nullable BlockPoint locate(AIPlayer ai, MemoryType type, double maxDistance, boolean blockedOnly,
+                                               Predicate<Block> accepts) {
+        java.util.Objects.requireNonNull(accepts, "accepts");
         MemorySystem memory = ai.getMemory();
         World world = ai.getPlayer().getWorld();
         UUID worldId = world.getUID();
@@ -84,6 +96,7 @@ public final class ResourceLocator {
             // 물에 닿아 있는 돌이나 광석은 고르지 않는다. 캐려면 물속에 서야 해서 캐는 속도가 5배 느려지고,
             // 캐고 나면 물이 굴로 흘러들어 떠 있는 채로 아무것도 못 하게 된다. 다이아몬드도 마찬가지다.
             if (floods(type) && touchesWater(world, pos)) continue;
+            if (!accepts.test(Positions.block(world, pos))) continue;
             bestScore = score;
             best = pos;
         }

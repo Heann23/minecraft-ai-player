@@ -105,6 +105,16 @@ public final class CraftPlans {
         return actions;
     }
 
+    /** No recursive material acquisition or implicit alternative recipe inside this selected operation. */
+    public static List<Action> craftRecipe(AIPlayer ai, Material item, String recipeId) {
+        var selected = ai.getCrafting().singleStep(item, recipeId, ai.getInventory().snapshot());
+        if (selected == null) return List.of();
+        List<Action> actions = new ArrayList<>();
+        if (selected.needsTable() && !ensureTable(ai, actions)) return List.of();
+        actions.add(new CraftItemAction(item, selected.recipe().getResult().getAmount(), recipeId));
+        return actions;
+    }
+
     /** Parameterized smelting leaf; insertion remains distinct from collecting the actual output. */
     public static List<Action> smeltItem(AIPlayer ai, Material input, int amount) {
         return smeltItem(ai, input, amount, null);

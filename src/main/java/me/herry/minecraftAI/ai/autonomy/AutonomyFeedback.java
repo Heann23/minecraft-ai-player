@@ -16,6 +16,8 @@ public final class AutonomyFeedback {
                 && after.count(token) > before.count(token))) return Outcome.PROGRESSED;
         if (before.count("remaining:shelter") > after.count("remaining:shelter")
                 && before.count("remaining:shelter") > 0) return Outcome.PROGRESSED;
+        if (action.effects().containsKey("world:portal")
+                && after.count("stock:portal-frame") > before.count("stock:portal-frame")) return Outcome.PROGRESSED;
         return Outcome.NO_PROGRESS;
     }
 }

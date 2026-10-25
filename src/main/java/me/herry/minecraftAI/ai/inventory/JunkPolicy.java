@@ -54,6 +54,7 @@ public final class JunkPolicy {
         Map<Tag<Material>, Integer> bestLevel = bestToolLevels(inventory);
         Map<Tag<Material>, Integer> keptTools = new java.util.HashMap<>();
         Map<Pool, Integer> kept = new EnumMap<>(Pool.class);
+        Map<Material, Integer> forageKept = new EnumMap<>(Material.class);
         List<Integer> junk = new ArrayList<>();
         int workPickaxeLevel = bestWorkPickaxeLevel(inventory);
         boolean keptWorkPickaxe = false;
@@ -85,6 +86,13 @@ public final class JunkPolicy {
                 continue;
             }
 
+            int reserve = ForageReserve.minimum(type);
+            if (reserve > 0) {
+                int count = forageKept.getOrDefault(type, 0);
+                if (count >= reserve) junk.add(slot);
+                else forageKept.put(type, count + item.getAmount());
+                continue;
+            }
             Pool pool = poolOf(type);
             if (pool == null) {
                 if (!isAlwaysKept(type)) junk.add(slot);

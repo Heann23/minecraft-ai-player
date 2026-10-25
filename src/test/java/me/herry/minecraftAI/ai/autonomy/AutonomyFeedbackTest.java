@@ -44,4 +44,11 @@ class AutonomyFeedbackTest {
         assertEquals(AutonomyFeedback.Outcome.PROGRESSED, AutonomyFeedback.assess(goal, action,
                 new PlanningState(Map.of("remaining:shelter", 3)), new PlanningState(Map.of())));
     }
+
+    @Test void placedPortalFrameIsProgressWhileActivationRemainsUnfinished() {
+        var goal = new AutonomyGoal("portal", Map.of("world:portal", 1), 10);
+        var action = new ActionModel("build", Map.of(), Map.of(), Map.of("world:portal", 1), 1);
+        assertEquals(AutonomyFeedback.Outcome.PROGRESSED, AutonomyFeedback.assess(goal, action,
+                new PlanningState(Map.of("stock:portal-frame", 2)), new PlanningState(Map.of("stock:portal-frame", 7))));
+    }
 }

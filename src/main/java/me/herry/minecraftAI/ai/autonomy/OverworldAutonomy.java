@@ -20,7 +20,10 @@ public final class OverworldAutonomy {
         public String key() { return world + ":" + objective.id() + ":" + action.id(); }
     }
     private record Failure(int count, long until) {}
-    private record Search(AutonomyGoal goal, ForwardSearch search) {}
+    private record Search(AutonomyGoal goal, ForwardSearch search, SupportSearch support) {
+        boolean pending() { return search.status() == ForwardSearch.Status.SEARCHING
+                || search.status() != ForwardSearch.Status.SOLVED && support.status() == SupportSearch.Status.SEARCHING; }
+    }
     private static final int EXPANSIONS_PER_SEARCH = 16;
     private static final int MAX_FAILURES = 128;
     private final Map<String, Failure> failures = new LinkedHashMap<>();
@@ -46,7 +49,7 @@ public final class OverworldAutonomy {
         boolean retryDue = failures.values().stream().anyMatch(f -> f.until() > capturedAt && f.until() <= ai.getTicks());
         if (snapshot == null || !snapshot.world().equals(ai.getWorldId()) || !actual.equals(snapshot.state())
                 || retryDue || ai.getTicks() - capturedAt >= 1200) {
-            snapshot = OverworldDomain.capture(ai, situation, catalog);
+            snapshot = OverworldDomain.capture(ai, situation, catalog, actual);
             capturedAt = ai.getTicks();
             searches.clear();
             cursor = 0;
@@ -54,7 +57,8 @@ public final class OverworldAutonomy {
             List<ActionModel> available = snapshot.actions().stream()
                     .filter(a -> { Failure f = failures.get(failureKey(ai, a.id())); return f == null || f.until() <= ai.getTicks(); }).toList();
             for (AutonomyGoal goal : OverworldObjectives.goals(snapshot.state())) {
-                searches.add(new Search(goal, new ForwardSearch(snapshot.state(), available, goal)));
+                searches.add(new Search(goal, new ForwardSearch(snapshot.state(), available, goal),
+                        new SupportSearch(snapshot.state(), available, goal)));
             }
         }
         Decision best = null;
@@ -65,27 +69,49 @@ public final class OverworldAutonomy {
             if (candidate.search().status() == ForwardSearch.Status.SEARCHING) {
                 candidate.search().advance(EXPANSIONS_PER_SEARCH, ai.getWorkBudget()::isExhausted);
             }
-            if (candidate.search().status() != ForwardSearch.Status.SOLVED || candidate.search().plan().isEmpty()) continue;
-            ActionModel first = candidate.search().plan().getFirst();
+            ActionModel first;
+            double cost;
+            List<String> forecast;
+            boolean partial;
+            if (candidate.search().status() == ForwardSearch.Status.SOLVED && !candidate.search().plan().isEmpty()) {
+                first = candidate.search().plan().getFirst();
+                cost = candidate.search().cost();
+                forecast = candidate.search().plan().stream().map(ActionModel::id).toList();
+                partial = false;
+            } else if (candidate.search().status() != ForwardSearch.Status.SEARCHING) {
+                candidate.support().advance(EXPANSIONS_PER_SEARCH, ai.getWorkBudget()::isExhausted);
+                if (candidate.support().status() != SupportSearch.Status.READY || candidate.support().choices().isEmpty()) continue;
+                var support = candidate.support().choices().getFirst();
+                first = support.action();
+                cost = support.cost();
+                forecast = support.dependencyPath();
+                partial = true;
+            } else continue;
             // Recheck against actual facts: a forecast is not permission to execute a missing prerequisite.
             if (!actual.satisfies(first.preconditions())) continue;
-            double value = candidate.goal().value() / (1.0 + candidate.search().cost());
+            double value = candidate.goal().value() / (1.0 + cost);
             if (value > bestValue) {
                 bestValue = value;
                 String reason = candidate.goal().id() + " 조건을 위해 " + first.id()
-                        + "을 선택했어요. 관측된 선행 조건과 예상 비용 " + String.format(java.util.Locale.ROOT, "%.1f", candidate.search().cost())
+                        + "을 선택했어요. " + (partial ? "전체 경로를 확정하지 못해 필요한 선행 조건부터 진행해요. " : "")
+                        + "관측된 조건과 예상 비용 " + String.format(java.util.Locale.ROOT, "%.1f", cost)
                         + "을 비교했고, 실행 후 실제 결과를 다시 확인해요";
                 best = new Decision(snapshot.world(), candidate.goal(), first, snapshot.operations().get(first.id()),
-                        actual, reason, candidate.search().plan().stream().map(ActionModel::id).toList());
+                        actual, reason, forecast);
             }
         }
-        status = best != null ? "실행 후보 준비" : searches.stream().anyMatch(s -> s.search().status() == ForwardSearch.Status.SEARCHING)
-                ? "조건·효과 계획 탐색 중" : "확인된 수단 부족: 탐색 필요";
+        status = best != null ? "실행 후보 준비" : searches.stream().anyMatch(Search::pending)
+                ? "조건·효과와 필요한 선행 작업 계산 중"
+                : searches.stream().anyMatch(s -> s.search().status() == ForwardSearch.Status.LIMIT_REACHED
+                        || s.support().status() == SupportSearch.Status.LIMIT_REACHED)
+                ? "계산 한도: 월드 불가능 판정 아님"
+                : "현재 관측·지원 행동에서 경로 미확인: 자원 발견/접근 필요";
+        if (best == null && snapshot != null && !snapshot.limits().isEmpty()) status += " (후보 범위 제한 있음)";
         return best;
     }
 
     public boolean searching() { return catalog == null || !catalog.complete()
-            || searches.stream().anyMatch(s -> s.search().status() == ForwardSearch.Status.SEARCHING); }
+            || searches.stream().anyMatch(Search::pending); }
     public String status() { return status; }
 
     public boolean valid(Decision decision, AIPlayer ai, Situation situation) {
@@ -94,6 +120,8 @@ public final class OverworldAutonomy {
         if (decision.objective().achieved(actual)) return false;
         Map<String, Integer> persistent = new HashMap<>(decision.action().preconditions());
         decision.action().consumed().keySet().forEach(persistent::remove);
+        // Discovery facts may be omitted when perception yields to the tick budget. The action rechecks its target.
+        persistent.keySet().removeIf(token -> token.startsWith("known:"));
         return actual.satisfies(persistent);
     }
 

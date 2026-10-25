@@ -5,6 +5,7 @@ import me.herry.minecraftAI.ai.memory.MemoryType;
 import me.herry.minecraftAI.ai.navigation.BlockClass;
 import me.herry.minecraftAI.ai.navigation.BukkitTerrainView;
 import me.herry.minecraftAI.ai.perf.WorkBudget;
+import me.herry.minecraftAI.ai.survival.FoodSources;
 import me.herry.minecraftAI.ai.util.BlockPoint;
 import me.herry.minecraftAI.ai.util.Positions;
 import me.herry.minecraftAI.config.AIConfig;
@@ -142,6 +143,7 @@ public final class BlockScanner {
         if (count >= MAX_PER_TYPE) return;
         // 상자는 전리품이 아직 들어 있는 것(구조물의 상자)만 기억한다. 누군가 놓은 일반 상자는 건드리지 않는다.
         if (type == MemoryType.LOOT_CHEST && !isUnopenedLootChest(world.getBlockAt(x, y, z))) return;
+        if (type == MemoryType.FOOD_SOURCE && !FoodSources.isReady(world.getBlockAt(x, y, z))) return;
         // 돌과 광물은 겉으로 드러난 것만 기억한다. 땅속에 묻힌 블록은 걸어서 닿을 수 없다.
         if (needsExposure(type) && !isExposed(x, y, z)) return;
         // 물은 양동이로 뜰 수 있는 것만 기억한다: 흐르지 않는 원천이고 위가 트여 있어야 한다.
@@ -204,7 +206,7 @@ public final class BlockScanner {
     }
 
     private static boolean isResource(MemoryType type) {
-        return type == MemoryType.TREE || needsExposure(type);
+        return type == MemoryType.TREE || type == MemoryType.FOOD_SOURCE || needsExposure(type);
     }
 
     // 이 블록이 기억할 만한 블록이면 그 종류를, 아니면 null 을 돌려준다.
@@ -217,6 +219,7 @@ public final class BlockScanner {
     }
 
     private static MemoryType classifyInterest(Material material) {
+        if (FoodSources.product(material) != null) return MemoryType.FOOD_SOURCE;
         if (Tag.LOGS.isTagged(material)) return MemoryType.TREE;
         if (Tag.COAL_ORES.isTagged(material)) return MemoryType.COAL_ORE;
         if (Tag.IRON_ORES.isTagged(material)) return MemoryType.IRON_ORE;

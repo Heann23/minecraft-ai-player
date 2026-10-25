@@ -16,6 +16,7 @@ import org.bukkit.attribute.AttributeInstance;
 import org.bukkit.entity.AbstractSkeleton;
 import org.bukkit.entity.Animals;
 import org.bukkit.entity.Creeper;
+import org.bukkit.entity.Cod;
 import org.bukkit.entity.Enderman;
 import org.bukkit.entity.Enemy;
 import org.bukkit.entity.Entity;
@@ -26,6 +27,7 @@ import org.bukkit.entity.PigZombie;
 import org.bukkit.entity.Piglin;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.Spider;
+import org.bukkit.entity.Salmon;
 import org.bukkit.entity.Zombie;
 import org.bukkit.util.Vector;
 
@@ -159,7 +161,7 @@ public final class PerceptionSystem {
                 perception.players.add(other);
             } else if (entity instanceof LivingEntity living) {
                 if (isHostile(living, player)) perception.hostiles.add(living);
-                else if (living instanceof Animals) perception.animals.add(living);
+                else if (living instanceof Animals || living instanceof Cod || living instanceof Salmon) perception.animals.add(living);
             }
         }
 

@@ -22,6 +22,7 @@ public record AutonomyGoalSpec(AutonomyGoal objective) implements Goal {
         values.put("stock:food", observation.inventory().food());
         values.put("stock:ready-food", observation.inventory().food() - observation.inventory().rawFood());
         if (observation.memory().homeSheltered()) values.put("world:shelter", 1);
+        if (observation.progress().netherPortalBuilt()) values.put("world:portal", 1);
         for (String name : observation.inventory().itemCounts().keySet()) {
             if (observation.inventory().itemCounts().get(name) <= 0) continue;
             ToolTier tier = ToolTier.ofName(name);

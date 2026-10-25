@@ -152,6 +152,17 @@ public final class PortalPlans {
                 || ai.getWorldModel().nearestPortal(WorldModel.PortalKind.NETHER, world.getUID(), ai.getPosition()) != null;
     }
 
+    /** Only loaded, actually present portal blocks prove this outcome; a remembered distant location is not proof. */
+    public static boolean observedPortalHere(AIPlayer ai) {
+        World world = ai.getPlayer().getWorld();
+        if (isPortal(world, ai.getPosition())) return true;
+        for (WorldModel.Portal portal : ai.getWorldModel().getPortals()) {
+            if (portal.kind() == WorldModel.PortalKind.NETHER && portal.world().equals(world.getUID())
+                    && Positions.isLoaded(world, portal.pos()) && isPortal(world, portal.pos())) return true;
+        }
+        return false;
+    }
+
     /**
      * 가장 가까운 포탈로 가서 들어간다. 오버월드에서는 네더로, 네더에서는 오버월드로 넘어간다.
      */

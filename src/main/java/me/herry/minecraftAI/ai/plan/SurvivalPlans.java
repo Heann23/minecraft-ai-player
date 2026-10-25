@@ -23,11 +23,13 @@ import me.herry.minecraftAI.ai.perception.Perception;
 import me.herry.minecraftAI.ai.perception.PerceptionSystem;
 import me.herry.minecraftAI.ai.util.Positions;
 import org.bukkit.entity.Chicken;
+import org.bukkit.entity.Cod;
 import org.bukkit.entity.Cow;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Pig;
 import org.bukkit.entity.Rabbit;
 import org.bukkit.entity.Sheep;
+import org.bukkit.entity.Salmon;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
@@ -119,24 +121,46 @@ public final class SurvivalPlans {
         return requester == null ? List.of() : List.of(new GiveFoodAction(requester));
     }
 
-    // 먹을 것을 넉넉히 모아 둔다. 사냥감이 보이면 잡고, 없으면 찾아다닌다.
+    // 보이는 성숙 식량 자원과 사냥감을 비교하고, 아무것도 발견하지 못했을 때만 탐색 휴식을 적용한다.
     static List<Action> stockFood(AIPlayer ai) {
-        // 찾아다닌 시간을 센다. 한참 찾아도 없으면 당분간 찾지 않고 하던 일을 한다 (동물이 없는 지역일 수 있다).
-        if (nearestPrey(ai) != null) {
-            ai.getFoodSearch().onPreyFound();
-        } else {
-            ai.getFoodSearch().onSearching(ai.getTicks());
-            if (ai.getFoodSearch().isExhausted(ai.getTicks())) {
-                ai.debug("No animals found after a long search, going on without more food");
-                return List.of();
-            }
+        LivingEntity prey = nearestPrey(ai);
+        BlockPoint source = ForagePlans.locate(ai);
+        if (prey != null || source != null) {
+            ai.getFoodSearch().onSourceFound();
+            return acquireFood(ai, prey, source);
+        }
+        ai.getFoodSearch().onSearching(ai.getTicks());
+        if (ai.getFoodSearch().isExhausted(ai.getTicks())) {
+            ai.debug("No food sources found after a long search; optional food exploration is resting");
+            return List.of();
         }
         return hunt(ai);
     }
 
     static List<Action> findFood(AIPlayer ai) {
         if (ai.getInventory().hasFood() && ai.getPlayer().getFoodLevel() < 20) return List.of(new EatFoodAction());
+        LivingEntity prey = nearestPrey(ai);
+        BlockPoint source = ForagePlans.locate(ai);
+        if (prey != null || source != null) {
+            ai.getFoodSearch().onSourceFound();
+            return acquireFood(ai, prey, source);
+        }
+        // Immediate hunger is a survival request; optional stockpiling rest must not prohibit finding food.
         return hunt(ai);
+    }
+
+    private static List<Action> acquireFood(AIPlayer ai, @Nullable LivingEntity prey, @Nullable BlockPoint source) {
+        double preyCost = prey == null ? Double.POSITIVE_INFINITY
+                : Positions.distance(prey.getLocation(), ai.getPlayer().getLocation()) + 4.0;
+        double sourceCost = source == null ? Double.POSITIVE_INFINITY : source.distance(ai.getPosition());
+        if (source != null) {
+            var product = me.herry.minecraftAI.ai.survival.FoodSources.product(
+                    Positions.block(ai.getPlayer().getWorld(), source).getType());
+            if (product != null && !product.isEdible()) sourceCost += 8.0;
+        }
+        if (source != null && sourceCost <= preyCost) return ForagePlans.gather(ai, source);
+        return prey == null ? List.of() : List.of(new AttackEntityAction(prey, HandPolicy.Purpose.HUNT),
+                new PickupItemAction(DROP_RADIUS, false));
     }
 
     /**
@@ -171,7 +195,12 @@ public final class SurvivalPlans {
 
     public static @Nullable LivingEntity nearestPrey(AIPlayer ai) {
         for (LivingEntity animal : ai.getPerception().getAnimals()) {
-            if (isUsable(ai, animal) && isPrey(animal) && PerceptionSystem.canSee(ai.getPlayer(), animal)) return animal;
+            if (!isUsable(ai, animal) || !isPrey(animal) || !PerceptionSystem.canSee(ai.getPlayer(), animal)) continue;
+            // Fish can be gathered near the surface without treating an unseen/deep-water pursuit as a safe hunt.
+            if ((animal instanceof Cod || animal instanceof Salmon)
+                    && (animal.getLocation().getY() < ai.getPlayer().getLocation().getY() - 2.0
+                    || ai.getPlayer().getRemainingAir() < ai.getPlayer().getMaximumAir() / 2)) continue;
+            return animal;
         }
         return null;
     }
@@ -183,6 +212,6 @@ public final class SurvivalPlans {
 
     private static boolean isPrey(LivingEntity entity) {
         return entity instanceof Cow || entity instanceof Pig || entity instanceof Sheep
-                || entity instanceof Chicken || entity instanceof Rabbit;
+                || entity instanceof Chicken || entity instanceof Rabbit || entity instanceof Cod || entity instanceof Salmon;
     }
 }
