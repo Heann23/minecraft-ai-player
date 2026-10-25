@@ -27,6 +27,10 @@
 !/training/test_export_goal_onnx.py
 !/training/requirements-onnx.txt
 !/training/README.md
+!/training/rl_actor.py
+!/training/train_paper_ppo.py
+!/training/test_rl_actor.py
+!/training/requirements-rl.txt
 
 # AI 개발 지침은 하위 폴더에서도 GitHub에 올리지 않는다.
 AGENTS.md

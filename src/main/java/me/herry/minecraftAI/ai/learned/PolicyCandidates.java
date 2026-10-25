@@ -29,8 +29,8 @@ public final class PolicyCandidates {
             return PrimitiveAdapter.create(ai, command);
         }
     }
-    public record Capture(PolicyFrame frame, List<Candidate> candidates) {
-        public Capture { candidates = List.copyOf(candidates); }
+    public record Capture(PolicyFrame frame, List<Candidate> candidates, SurvivalObservation.Body body, Map<String, Integer> stock) {
+        public Capture { candidates = List.copyOf(candidates); stock = Map.copyOf(stock); }
     }
     private final List<RecipeOption> recipes = new ArrayList<>();
     private final Set<String> recipeIds = new HashSet<>();
@@ -138,9 +138,11 @@ public final class PolicyCandidates {
         }
         // Fair category interleaving prevents an inventory full of block variants from hiding every recipe.
         var candidates = selectFair(List.copyOf(found.values()), active == null ? "" : active.id());
+        Map<String, Integer> stockCounts = new HashMap<>();
+        for (var item : state.inventory()) if (item.amount() > 0) stockCounts.merge(item.material(), item.amount(), Integer::sum);
         return new Capture(new PolicyFrame(ai.getWorldId(), Integer.toUnsignedLong(Bukkit.getCurrentTick()), body,
                 candidates.stream().map(Candidate::encoded).toList(), inspected.complete() && !ai.getWorkBudget().isExhausted()
-                && recipeCursor >= Material.values().length && found.size() <= PolicyFrame.MAX_OPTIONS), candidates);
+                && recipeCursor >= Material.values().length && found.size() <= PolicyFrame.MAX_OPTIONS), candidates, survival, stockCounts);
     }
 
     private void advanceRecipes(AIPlayer ai) {

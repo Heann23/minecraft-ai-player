@@ -52,3 +52,26 @@ python export_goal_onnx.py <candidate-folder> --features <frozen-feature-folder>
 모델·원본 후보·feature/Goal·분할·도구 해시, 런타임 버전·OS·CPU provider·입출력·지원 ID·오차와 단일 입력 지연을 `model-manifest.json`에 남긴다. 산출물은 `goal-candidate.onnx`와 계약/manifest다. 수치 동등성은 후보 품질 개선이나 Java/Paper 호환성을 증명하지 않는다. 이 단계도 `deployable: false`, `executionAuthority: none`이며 JAR에 모델을 넣거나 자동 승격하지 않는다. Java 추론·Shadow·fallback·지원 환경 검증은 후속이다.
 
 API 근거: [ONNX 공식 Python 문서](https://onnx.ai/onnx/intro/python.html), [ONNX Runtime 공식 Python API](https://onnxruntime.ai/docs/api/python/api_summary.html).
+
+
+## 실제 Paper 경험으로 학습하는 RL 정책 — 전환 중
+
+2026-10-26 사용자 지시로 새 경로는 Teacher Goal 모방이 아니라 실제 행동/인자의 선택을 학습하는 PPO입니다.
+위 Goal BC/ONNX 도구와 후보는 과거 개발 경로이며, 새 actor의 학습 자료나 배포 Brain으로 자동 재사용하지 않습니다.
+
+`rl_actor.py`는 관측64+파라미터 후보64의 공유 actor와 별도 value 네트워크를 학습합니다. 동일 행동 정책 버전의
+실제 전이만 PPO 갱신에 사용하고, 경과한 실제 서버 틱의 할인·에피소드/순서 누락·여러 AI의 GAE를 구분합니다.
+Goal 정답이나 Teacher 점수는 필요하지 않습니다. 초기 무작위 가중치는 학습 모델로 내보낼 수 없습니다.
+
+`PpoBridge`/`train_paper_ppo.py`는 전용 로컬 개발 폴더에서 값 JSON을 교환하는 전송/훈련 프로토콜입니다.
+메인 스레드는 월드 관측/입력 실행을 담당하고, 파일 I/O는 별도 쓰레드에서 수행하도록 준비했습니다.
+트레이너는 실제 실행을 확인한 전이를 받아야 갱신하며, 서버/월드를 시작하거나 가상 게임 경험을 만들지 않습니다.
+모델 초기화와 numerical fixture 테스트는 Minecraft에서 학습했다는 근거가 아닙니다.
+
+필요한 개발 의존성은 `requirements-rl.txt`의 NumPy입니다. 출력은 새 비공개 폴더로 한정하고 학습 결정 수/원본 기록 용량을
+명시적으로 제한합니다. 아직 Brain의 실제 전이/보상/종료와 이 브리지의 연결·격리 훈련 환경·reset·미사용 월드 평가가
+미완료이므로 현재 명령을 실행해 기다리게 하는 것만으로 실제 RL 훈련이 되는 것은 아닙니다.
+
+호환 출력을 만들 때는 `minecraft-rl-actor/v1`에 실제 환경 스텝·run ID·원본 전이 해시를 기록합니다.
+학습 후에도 생존/진행 성능과 모든 월드 자율은 별도 실제 평가가 필요하며, `evaluationComplete`와
+`allWorldAutonomyProven`을 근거 없이 true로 바꾸지 않습니다. 사용자 서버는 최종 학습 모델의 추론만 수행하는 제품 목표를 유지합니다.

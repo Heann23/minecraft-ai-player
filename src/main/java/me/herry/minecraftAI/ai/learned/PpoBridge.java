@@ -1,0 +1,81 @@
+package me.herry.minecraftAI.ai.learned;
+
+import com.google.gson.Gson;
+
+import java.io.IOException;
+import java.nio.file.*;
+import java.util.UUID;
+import java.util.concurrent.*;
+
+/** Local development-only file transport. World access never leaves the server thread. No network or LLM commands. */
+public final class PpoBridge implements AutoCloseable {
+    public static final String SCHEMA = "minecraft-paper-ppo/v1";
+    public record Transition(String session, long sequence, PolicyFrame frame, int index,
+                             double logProbability, double value, long modelVersion, double reward,
+                             int elapsedTicks, boolean terminated, boolean truncated) {
+        public Transition {
+            UUID.fromString(session);
+            if (sequence < 0 || index < 0 || index >= frame.options().size() || modelVersion < 0
+                    || elapsedTicks < 1 || elapsedTicks > 2400 || !Double.isFinite(logProbability) || logProbability > 0
+                    || !Double.isFinite(value) || !Double.isFinite(reward) || Math.abs(reward) > 100)
+                throw new IllegalArgumentException("invalid actual PPO transition");
+        }
+    }
+    public record Query(String schema, String environment, String id, PolicyFrame frame, Transition previous) {}
+    public record Response(String schema, String id, int index, String candidate, double logProbability,
+                           double value, long modelVersion, long environmentSteps) {}
+    private final Path directory;
+    private final ExecutorService io = new ThreadPoolExecutor(2, 2, 0, TimeUnit.MILLISECONDS,
+            new ArrayBlockingQueue<>(32), r -> {
+                Thread thread = new Thread(r, "minecraft-ai-ppo-io"); thread.setDaemon(true); return thread;
+            }, new ThreadPoolExecutor.AbortPolicy());
+    private final Gson gson = new Gson();
+
+    public PpoBridge(Path directory) throws IOException {
+        this.directory = directory.toAbsolutePath().normalize();
+        Files.createDirectories(this.directory);
+    }
+
+    public CompletableFuture<Response> request(PolicyFrame frame, Transition previous) {
+        String id = UUID.randomUUID().toString();
+        String payload = gson.toJson(new Query(SCHEMA, "minecraft-paper", id, frame, previous));
+        return CompletableFuture.supplyAsync(() -> exchange(id, payload, frame), io);
+    }
+
+    private Response exchange(String id, String payload, PolicyFrame frame) {
+        Path temporary = directory.resolve(id + ".request.tmp");
+        Path request = directory.resolve(id + ".request.json");
+        Path response = directory.resolve(id + ".response.json");
+        try {
+            Files.writeString(temporary, payload, StandardOpenOption.CREATE_NEW);
+            Files.move(temporary, request, StandardCopyOption.ATOMIC_MOVE);
+            long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(1500);
+            while (System.nanoTime() < deadline && !Thread.currentThread().isInterrupted()) {
+                if (Files.isRegularFile(response)) {
+                    if (Files.size(response) > 16384) throw new IOException("oversized PPO response");
+                    Response result = gson.fromJson(Files.readString(response), Response.class);
+                    if (result == null || !SCHEMA.equals(result.schema()) || !id.equals(result.id())
+                            || result.index() < 0 || result.index() >= frame.options().size()
+                            || !frame.options().get(result.index()).id().equals(result.candidate())
+                            || !Double.isFinite(result.logProbability()) || result.logProbability() > 0
+                            || !Double.isFinite(result.value()) || result.modelVersion() < 0 || result.environmentSteps() < 0)
+                        throw new IOException("invalid/stale PPO response");
+                    return result;
+                }
+                Thread.sleep(10);
+            }
+            throw new IOException("PPO trainer unavailable/timeout");
+        } catch (IOException | InterruptedException | RuntimeException failure) {
+            if (failure instanceof InterruptedException) Thread.currentThread().interrupt();
+            throw new CompletionException(failure);
+        } finally {
+            for (Path path : new Path[]{temporary, request, response}) try { Files.deleteIfExists(path); } catch (IOException ignored) {}
+        }
+    }
+
+    @Override public void close() {
+        io.shutdown();
+        try { if (!io.awaitTermination(2, TimeUnit.SECONDS)) io.shutdownNow(); }
+        catch (InterruptedException interrupted) { io.shutdownNow(); Thread.currentThread().interrupt(); }
+    }
+}
