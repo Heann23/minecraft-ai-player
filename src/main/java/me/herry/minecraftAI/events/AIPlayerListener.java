@@ -3,6 +3,7 @@ package me.herry.minecraftAI.events;
 import me.herry.minecraftAI.ai.AIController;
 import me.herry.minecraftAI.ai.AIDebugger;
 import me.herry.minecraftAI.ai.AIPlayer;
+import me.herry.minecraftAI.ai.observation.RiskCapture;
 import me.herry.minecraftAI.commands.AICommand;
 import me.herry.minecraftAI.view.InventoryViews;
 import org.bukkit.entity.Entity;
@@ -16,6 +17,7 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
+import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
 import io.papermc.paper.event.player.AsyncChatEvent;
 import io.papermc.paper.event.server.ServerResourcesReloadedEvent;
@@ -40,12 +42,16 @@ public class AIPlayerListener implements Listener {
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
-    public void onDamage(EntityDamageByEntityEvent event) {
+    public void onDamage(EntityDamageEvent event) {
         AIPlayer ai = controller.getByEntity(event.getEntity());
         if (ai == null) return;
 
+        RiskCapture.record(ai, event);
+        // Environmental damage is observed too, but keeps its own meaning instead of becoming an attack.
+        if (!(event instanceof EntityDamageByEntityEvent attack)) return;
+
         // 화살에 맞았으면 화살이 아니라 쏜 쪽을 공격자로 기억한다.
-        Entity attacker = event.getDamager();
+        Entity attacker = attack.getDamager();
         if (attacker instanceof Projectile projectile && projectile.getShooter() instanceof Entity shooter) attacker = shooter;
         // 무엇에게 얼마나 맞았는지 남겨 둔다. 전투 판단이 맞았는지 나중에 로그로 따져 볼 수 있다.
         ai.debug("Hit by " + attacker.getType() + " for " + String.format("%.1f", event.getFinalDamage()));
