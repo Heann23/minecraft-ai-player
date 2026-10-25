@@ -165,6 +165,7 @@ final class AIBrain {
         restedAt.clear();
         autonomy.reset();
         FarmingPlans.invalidate(ai);
+        me.herry.minecraftAI.ai.plan.IrrigationPlans.invalidate(ai);
         activeAutonomy = null;
         ai.getNavigation().stop();
         ai.getBody().clearInputs();

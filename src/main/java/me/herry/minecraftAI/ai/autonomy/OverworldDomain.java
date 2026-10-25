@@ -14,6 +14,7 @@ import me.herry.minecraftAI.ai.plan.PortalPlans;
 import me.herry.minecraftAI.ai.plan.ForagePlans;
 import me.herry.minecraftAI.ai.plan.ResourceOptions;
 import me.herry.minecraftAI.ai.plan.FarmingPlans;
+import me.herry.minecraftAI.ai.plan.IrrigationPlans;
 import me.herry.minecraftAI.ai.plan.SeedGatheringPlans;
 import me.herry.minecraftAI.ai.memory.MemoryType;
 import me.herry.minecraftAI.ai.util.BlockPoint;
@@ -38,7 +39,7 @@ import java.util.UUID;
 /** Current facts and conditional action knowledge. Simulated effects are never written to the world model. */
 public final class OverworldDomain {
     public enum Kind { LEGACY_ACTION, CRAFT, PLACE_FURNACE, SMELT, COLLECT_FURNACE, FETCH, MINE_MATERIAL, SURVEY_COAL, FORAGE_BLOCK,
-        PLANT_CROP, INSPECT_CROP, GATHER_SEEDS }
+        PLANT_CROP, INSPECT_CROP, GATHER_SEEDS, IRRIGATE }
 
     public record Operation(Kind kind, GoalType label, Material target, int amount, boolean exploratory, String fuel, String recipe,
                             BlockPoint position) {
@@ -164,6 +165,18 @@ public final class OverworldDomain {
             farmFacts.put(FarmPlanning.planted(propagation, crop.soil()), 1);
         }
         values.putAll(farmFacts);
+        var irrigation = IrrigationPlans.observe(ai);
+        for (var site : irrigation.sites()) {
+            if (!ai.getWorkBudget().isExhausted() && IrrigationPlans.validate(ai, site.cell(), false).isEmpty())
+                values.put(IrrigationPlanning.site(site.cell()), 1);
+        }
+        if (!irrigation.complete()) values.put("knowledge:irrigation-incomplete", 1);
+        if (irrigation.encounteredUnknown()) values.put("knowledge:irrigation-unknown", 1);
+        for (var source : ai.getMemory().all(MemoryType.WATER_SOURCE, ai.getWorldId(), ai.getTicks()).stream().limit(32).toList()) {
+            if (ai.getWorkBudget().isExhausted()) break;
+            if (source.pos().distance(ai.getPosition()) <= 5 && IrrigationPlans.observedSource(ai, source.pos()))
+                values.put(IrrigationPlanning.water(source.pos()), 1);
+        }
         for (BlockPoint seedSource : SeedGatheringPlans.candidates(ai)) values.put("known:seeds:" + seedSource.encode(), 1);
         for (var plot : ai.getMemory().all(MemoryType.FARM_PLOT, ai.getWorldId(), ai.getTicks())) {
             values.put("known:farm:" + plot.pos().encode(), 1);
@@ -196,6 +209,13 @@ public final class OverworldDomain {
         var builder = new Builder(state, actions, operations);
         boolean surfaceAllowed = !s.underground || !s.surfaceTooLate;
         if (surfaceAllowed) {
+            for (var site : IrrigationPlans.observe(ai).sites()) {
+                if (state.count(IrrigationPlanning.site(site.cell())) == 0) continue;
+                ActionModel install = IrrigationPlanning.install(site);
+                builder.add(install.id(), new Operation(Kind.IRRIGATE, GoalType.STOCK_FOOD, Material.WATER_BUCKET,
+                        1, false, "", "", site.cell()), install.preconditions(), install.consumed(), install.effects(),
+                        install.cost() + site.cell().distance(ai.getPosition()) / 4.0);
+            }
             var farming = FarmingPlans.observe(ai);
             for (var site : farming.plantable().stream().limit(64).toList()) {
                 ActionModel plant = FarmPlanning.planting(site, FarmPlanning.requiredSeedCount(farming, site.seed()));
@@ -375,6 +395,8 @@ public final class OverworldDomain {
         List<String> limits = new ArrayList<>();
         if (catalog.limited()) limits.add("제작 의존 재료 카탈로그 한도 " + MAX_RECIPE_MATERIALS);
         if (state.count("knowledge:farm-incomplete") > 0) limits.add("지역 농지 관측 진행 중 또는 범위 제한");
+        if (state.count("knowledge:irrigation-incomplete") > 0) limits.add("지역 관개 후보 관측 진행 중 또는 범위 제한");
+        if (state.count("knowledge:irrigation-unknown") > 0) limits.add("관개 주변 미관측 영역 있음");
         if (actions.size() >= 1024) limits.add("행동 후보 한도 1024");
         limits.add("레시피별 대체 재료 최대3·조합 최대" + MAX_RECIPE_VARIANTS);
         return new Snapshot(ai.getWorldId(), state, List.copyOf(actions.values()), operations, limits);

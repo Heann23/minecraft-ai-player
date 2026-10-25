@@ -10,6 +10,7 @@ import me.herry.minecraftAI.ai.plan.Planner;
 import me.herry.minecraftAI.ai.plan.ResourceOptions;
 import me.herry.minecraftAI.ai.plan.ForagePlans;
 import me.herry.minecraftAI.ai.plan.FarmingPlans;
+import me.herry.minecraftAI.ai.plan.IrrigationPlans;
 import me.herry.minecraftAI.ai.plan.SeedGatheringPlans;
 import org.bukkit.Material;
 import org.bukkit.Tag;
@@ -36,6 +37,7 @@ public final class OverworldExecution {
             case MINE_MATERIAL -> ResourceOptions.mineStone(ai, operation.target());
             case SURVEY_COAL -> ResourceOptions.findCoal(ai);
             case FORAGE_BLOCK -> ForagePlans.gather(ai, operation.position(), operation.target());
+            case IRRIGATE -> IrrigationPlans.plan(ai, operation.position());
             case PLANT_CROP -> FarmingPlans.plantAt(ai, operation.position(), operation.target());
             case INSPECT_CROP -> FarmingPlans.revisit(ai, operation.position());
             case GATHER_SEEDS -> SeedGatheringPlans.gather(ai, operation.position());

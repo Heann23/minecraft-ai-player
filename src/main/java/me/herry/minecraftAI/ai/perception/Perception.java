@@ -6,15 +6,31 @@ import org.bukkit.entity.Item;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
+import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
+import java.util.UUID;
 
 /**
  * 한 시점에 AI 가 인식한 주변 상황. PerceptionSystem 이 채우고 나머지 시스템은 읽기만 한다.
  * 엔티티 목록은 가까운 순서로 정렬되어 있다. 엔티티는 다음 판단 때까지 사라질 수 있으므로 쓰기 전에 isValid() 를 확인해야 한다.
  */
 public final class Perception {
+    /** The actual completed scan cube and clock, not the time at which a later caller reads the cache. */
+    public record EntityScanStamp(UUID worldId, long serverTick, double range, boolean complete,
+                                  double x, double y, double z) {
+        public EntityScanStamp {
+            Objects.requireNonNull(worldId, "worldId");
+            if (serverTick < 0 || serverTick > 0xffff_ffffL || !Double.isFinite(range) || range < 0
+                    || !Double.isFinite(x) || !Double.isFinite(y) || !Double.isFinite(z)) {
+                throw new IllegalArgumentException("invalid entity scan stamp");
+            }
+        }
+    }
+
+    @Nullable EntityScanStamp entityScanStamp;
     Location location;
     World world;
     long time;
@@ -43,6 +59,10 @@ public final class Perception {
     final List<Item> drops = new ArrayList<>();
     final List<Threat> threats = new ArrayList<>();
     int nearbyBlockCount;
+
+    public @Nullable EntityScanStamp getEntityScanStamp() {
+        return entityScanStamp;
+    }
 
     public Location getLocation() {
         return location;

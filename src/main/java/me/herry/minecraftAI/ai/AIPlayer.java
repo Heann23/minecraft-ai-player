@@ -181,6 +181,12 @@ public final class AIPlayer {
         return RiskCapture.capture(this, damageHistory);
     }
 
+    /** Body, exact item components and effect timing; independent of the existing v1 learning schemas. */
+    public me.herry.minecraftAI.ai.observation.SurvivalObservation survivalObservation() {
+        requireMainThread();
+        return me.herry.minecraftAI.ai.observation.SurvivalCapture.capture(this);
+    }
+
     /** Observes an accepted damage event without changing goal choice, combat memory or execution authority. */
     public void observeDamage(RiskObservation.Damage damage) {
         requireMainThread();
