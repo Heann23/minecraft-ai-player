@@ -10,6 +10,20 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class MemorySystemTest {
+    @Test
+    void plantedSoilSurvivesRestartWhileRecentInspectionAndWildSeedSourcesExpire() {
+        UUID world = UUID.fromString("00000000-0000-0000-0000-000000000005");
+        BlockPoint soil = new BlockPoint(4, 63, 4);
+        MemorySystem original = new MemorySystem();
+        original.rememberPermanent(MemoryType.FARM_PLOT, world, soil, 10);
+        original.remember(MemoryType.FARM_CHECKED, world, soil, 10, 1000);
+        original.remember(MemoryType.SEED_SOURCE, world, soil.offset(1, 1, 0), 10, 6000);
+        MemorySystem restored = new MemorySystem();
+        restored.importState(original.exportState(20));
+        assertTrue(restored.contains(MemoryType.FARM_PLOT, world, soil, 20));
+        assertFalse(restored.contains(MemoryType.FARM_CHECKED, world, soil, 20));
+        assertEquals(0, restored.count(MemoryType.SEED_SOURCE, world, 20));
+    }
     private static final UUID OVERWORLD = UUID.randomUUID();
     private static final UUID NETHER = UUID.randomUUID();
     private static final BlockPoint ORIGIN = new BlockPoint(0, 64, 0);

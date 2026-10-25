@@ -6,6 +6,7 @@ import me.herry.minecraftAI.ai.navigation.BlockClass;
 import me.herry.minecraftAI.ai.navigation.BukkitTerrainView;
 import me.herry.minecraftAI.ai.perf.WorkBudget;
 import me.herry.minecraftAI.ai.survival.FoodSources;
+import me.herry.minecraftAI.ai.survival.SeedSources;
 import me.herry.minecraftAI.ai.util.BlockPoint;
 import me.herry.minecraftAI.ai.util.Positions;
 import me.herry.minecraftAI.config.AIConfig;
@@ -206,7 +207,7 @@ public final class BlockScanner {
     }
 
     private static boolean isResource(MemoryType type) {
-        return type == MemoryType.TREE || type == MemoryType.FOOD_SOURCE || needsExposure(type);
+        return type == MemoryType.TREE || type == MemoryType.FOOD_SOURCE || type == MemoryType.SEED_SOURCE || needsExposure(type);
     }
 
     // 이 블록이 기억할 만한 블록이면 그 종류를, 아니면 null 을 돌려준다.
@@ -219,6 +220,7 @@ public final class BlockScanner {
     }
 
     private static MemoryType classifyInterest(Material material) {
+        if (SeedSources.isSource(material)) return MemoryType.SEED_SOURCE;
         if (FoodSources.product(material) != null) return MemoryType.FOOD_SOURCE;
         if (Tag.LOGS.isTagged(material)) return MemoryType.TREE;
         if (Tag.COAL_ORES.isTagged(material)) return MemoryType.COAL_ORE;

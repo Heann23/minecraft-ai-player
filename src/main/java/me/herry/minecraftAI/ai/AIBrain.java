@@ -7,6 +7,8 @@ import me.herry.minecraftAI.ai.action.WaitAction;
 import me.herry.minecraftAI.ai.autonomy.AutonomyFeedback;
 import me.herry.minecraftAI.ai.autonomy.AutonomyGoalSpec;
 import me.herry.minecraftAI.ai.autonomy.OverworldAutonomy;
+import me.herry.minecraftAI.ai.plan.FarmingPlans;
+import me.herry.minecraftAI.ai.plan.FoodPreparation;
 import me.herry.minecraftAI.ai.autonomy.OverworldExecution;
 import me.herry.minecraftAI.ai.brain.DecisionLog;
 import me.herry.minecraftAI.ai.brain.DecisionTrace;
@@ -162,6 +164,7 @@ final class AIBrain {
         recovery.reset();
         restedAt.clear();
         autonomy.reset();
+        FarmingPlans.invalidate(ai);
         activeAutonomy = null;
         ai.getNavigation().stop();
         ai.getBody().clearInputs();
@@ -337,6 +340,7 @@ final class AIBrain {
         started = profiler.begin();
         releaseRestedGoals(position);
         Situation situation = SituationBuilder.build(ai, currentGoal);
+        FoodPreparation.advance(ai);
         lastSituation = situation;
         if (activeAutonomy != null && plan != null && !plan.isFinished()
                 && !autonomy.valid(activeAutonomy, ai, situation)) {

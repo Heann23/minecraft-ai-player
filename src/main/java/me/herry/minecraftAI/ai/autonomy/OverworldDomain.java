@@ -13,6 +13,15 @@ import me.herry.minecraftAI.ai.plan.Progression;
 import me.herry.minecraftAI.ai.plan.PortalPlans;
 import me.herry.minecraftAI.ai.plan.ForagePlans;
 import me.herry.minecraftAI.ai.plan.ResourceOptions;
+import me.herry.minecraftAI.ai.plan.FarmingPlans;
+import me.herry.minecraftAI.ai.plan.SeedGatheringPlans;
+import me.herry.minecraftAI.ai.memory.MemoryType;
+import me.herry.minecraftAI.ai.util.BlockPoint;
+import me.herry.minecraftAI.ai.util.Positions;
+import me.herry.minecraftAI.ai.survival.FoodSources;
+import me.herry.minecraftAI.ai.farming.CropRules;
+import me.herry.minecraftAI.ai.perception.PerceptionSystem;
+import me.herry.minecraftAI.ai.perception.Visibility;
 import org.bukkit.Material;
 import org.bukkit.Tag;
 
@@ -28,14 +37,19 @@ import java.util.UUID;
 
 /** Current facts and conditional action knowledge. Simulated effects are never written to the world model. */
 public final class OverworldDomain {
-    public enum Kind { LEGACY_ACTION, CRAFT, PLACE_FURNACE, SMELT, COLLECT_FURNACE, FETCH, MINE_MATERIAL, SURVEY_COAL, FORAGE_BLOCK }
+    public enum Kind { LEGACY_ACTION, CRAFT, PLACE_FURNACE, SMELT, COLLECT_FURNACE, FETCH, MINE_MATERIAL, SURVEY_COAL, FORAGE_BLOCK,
+        PLANT_CROP, INSPECT_CROP, GATHER_SEEDS }
 
-    public record Operation(Kind kind, GoalType label, Material target, int amount, boolean exploratory, String fuel, String recipe) {
+    public record Operation(Kind kind, GoalType label, Material target, int amount, boolean exploratory, String fuel, String recipe,
+                            BlockPoint position) {
         public Operation(Kind kind, GoalType label, Material target, int amount, boolean exploratory) {
-            this(kind, label, target, amount, exploratory, "", "");
+            this(kind, label, target, amount, exploratory, "", "", null);
         }
         public Operation(Kind kind, GoalType label, Material target, int amount, boolean exploratory, String fuel) {
-            this(kind, label, target, amount, exploratory, fuel, "");
+            this(kind, label, target, amount, exploratory, fuel, "", null);
+        }
+        public Operation(Kind kind, GoalType label, Material target, int amount, boolean exploratory, String fuel, String recipe) {
+            this(kind, label, target, amount, exploratory, fuel, recipe, null);
         }
     }
     public record Snapshot(UUID world, PlanningState state, List<ActionModel> actions,
@@ -51,7 +65,7 @@ public final class OverworldDomain {
             Material.IRON_INGOT, Material.CHARCOAL, Material.BREAD, Material.DRIED_KELP,
             Material.COOKED_COD, Material.COOKED_SALMON, Material.BAKED_POTATO,
             Material.COOKED_BEEF, Material.COOKED_PORKCHOP, Material.COOKED_CHICKEN,
-            Material.COOKED_MUTTON, Material.COOKED_RABBIT, Material.BEETROOT_SOUP);
+            Material.COOKED_MUTTON, Material.COOKED_RABBIT, Material.BEETROOT_SOUP, Material.WOODEN_HOE);
     private static final int MAX_RECIPE_MATERIALS = 72;
     private static final int MAX_RECIPE_VARIANTS = 6;
 
@@ -105,6 +119,7 @@ public final class OverworldDomain {
             if (pick.isAtLeast(tier)) values.put("cap:pickaxe:" + tier.name(), 1);
         }
         if (ai.getInventory().bestTier(Tag.ITEMS_SWORDS).isAtLeast(ToolTier.IRON)) values.put("cap:sword:IRON", 1);
+        if (ai.getInventory().count(Tag.ITEMS_HOES) > 0) values.put("cap:hoe", 1);
         for (ArmorSlot slot : ArmorSlot.values()) {
             if (ai.getInventory().bestArmorTier(slot).isAtLeast(ArmorTier.IRON)) values.put("cap:armor:IRON:" + slot.name(), 1);
         }
@@ -124,8 +139,40 @@ public final class OverworldDomain {
         if (s.knowsDiamond) values.put("known:diamond", 1);
         if (s.knowsCoal) values.put("known:coal", 1);
         for (Material drop : ResourceOptions.stoneDrops(ai)) values.put("known:stone:" + drop.name(), 1);
-        Material foodSource = ForagePlans.product(ai);
-        if (foodSource != null) values.put("known:food:" + foodSource.name(), 1);
+        BlockPoint foodPosition = ForagePlans.locate(ai);
+        Material foodSource = foodPosition == null ? null : FoodSources.product(Positions.block(ai.getPlayer().getWorld(), foodPosition).getType());
+        if (foodSource != null) {
+            values.put("known:food:" + foodSource.name(), 1);
+            values.put("known:food-position:" + foodSource.name() + ":" + foodPosition.encode(), 1);
+        }
+        var farms = FarmingPlans.observe(ai);
+        Map<String, Integer> farmFacts = new HashMap<>(FarmPlanning.observed(farms));
+        // Site knowledge may be cached; living production capacity requires a current visible crop.
+        farmFacts.keySet().removeIf(token -> token.equals("world:crop-planted") || token.startsWith("planted:"));
+        var world = ai.getPlayer().getWorld();
+        var eye = ai.getPlayer().getEyeLocation();
+        var opacity = PerceptionSystem.opacityOf(world);
+        for (var crop : farms.crops()) {
+            if (ai.getWorkBudget().isExhausted()) break;
+            BlockPoint plant = crop.soil().offset(0, 1, 0);
+            if (!Positions.isLoaded(world, plant) || Positions.block(world, crop.soil()).getType() != Material.FARMLAND
+                    || !Visibility.canSeeBlock(opacity, eye.getX(), eye.getY(), eye.getZ(),
+                    plant.x(), plant.y(), plant.z())) continue;
+            Material propagation = CropRules.seed(Positions.block(world, plant).getType());
+            if (propagation == null) continue;
+            farmFacts.merge("world:crop-planted", 1, Integer::sum);
+            farmFacts.put(FarmPlanning.planted(propagation, crop.soil()), 1);
+        }
+        values.putAll(farmFacts);
+        for (BlockPoint seedSource : SeedGatheringPlans.candidates(ai)) values.put("known:seeds:" + seedSource.encode(), 1);
+        for (var plot : ai.getMemory().all(MemoryType.FARM_PLOT, ai.getWorldId(), ai.getTicks())) {
+            values.put("known:farm:" + plot.pos().encode(), 1);
+            if (ai.getMemory().contains(MemoryType.FARM_CHECKED, ai.getWorldId(), plot.pos(), ai.getTicks()))
+                values.put(FarmPlanning.checked(plot.pos()), 1);
+            else if (!ai.getMemory().contains(MemoryType.UNREACHABLE, ai.getWorldId(), plot.pos(), ai.getTicks()))
+                values.put(FarmPlanning.due(plot.pos()), 1);
+        }
+        values.put("world:explored", ai.getWorldModel().exploredCount(ai.getWorldId()));
         values.put("stock:portal-frame", PortalPlans.placedObsidian(ai));
         if (PortalPlans.observedPortalHere(ai)) values.put("world:portal", 1);
         if (s.knowsWater) values.put("known:water", 1);
@@ -149,6 +196,24 @@ public final class OverworldDomain {
         var builder = new Builder(state, actions, operations);
         boolean surfaceAllowed = !s.underground || !s.surfaceTooLate;
         if (surfaceAllowed) {
+            var farming = FarmingPlans.observe(ai);
+            for (var site : farming.plantable().stream().limit(64).toList()) {
+                ActionModel plant = FarmPlanning.planting(site, FarmPlanning.requiredSeedCount(farming, site.seed()));
+                builder.add(plant.id(), new Operation(Kind.PLANT_CROP, GoalType.STOCK_FOOD, site.seed(), 1, false, "", "", site.soil()),
+                        plant.preconditions(), plant.consumed(), plant.effects(), plant.cost());
+            }
+            for (var plot : ai.getMemory().all(MemoryType.FARM_PLOT, ai.getWorldId(), ai.getTicks()).stream().limit(16).toList()) {
+                if (state.count(FarmPlanning.due(plot.pos())) == 0) continue;
+                builder.add("inspect:farm:" + plot.pos().encode(), new Operation(Kind.INSPECT_CROP, GoalType.STOCK_FOOD, null, 1, true, "", "", plot.pos()),
+                        Map.of(FarmPlanning.due(plot.pos()), 1), Map.of(FarmPlanning.due(plot.pos()), 1),
+                        Map.of(FarmPlanning.checked(plot.pos()), 1), 5 + plot.pos().distance(ai.getPosition()) / 4.0);
+            }
+            for (var token : state.quantities().keySet()) {
+                if (!token.startsWith("known:seeds:")) continue;
+                BlockPoint source = BlockPoint.parse(token.substring("known:seeds:".length()));
+                builder.add("gather:seeds:" + source.encode(), new Operation(Kind.GATHER_SEEDS, GoalType.STOCK_FOOD, Material.WHEAT_SEEDS,
+                        1, true, "", "", source), Map.of(token, 1), Map.of(token, 1), Map.of("item:WHEAT_SEEDS", 1), 8);
+            }
             state.quantities().forEach((token, count) -> {
                 if (!token.startsWith("remembered:item:") || count <= 0) return;
                 Material material = Material.matchMaterial(token.substring("remembered:item:".length()));
@@ -166,11 +231,16 @@ public final class OverworldDomain {
             if (!s.foodSearchExhausted || s.preyNearby) {
                 builder.leaf("forage", GoalType.STOCK_FOOD, Map.of(), Map.of("stock:food", 2), s.preyNearby ? 12 : 45, true);
             }
-            Material product = state.quantities().keySet().stream().filter(token -> token.startsWith("known:food:"))
-                    .map(token -> Material.matchMaterial(token.substring("known:food:".length()))).findFirst().orElse(null);
-            if (product != null) builder.add("forage:block:" + product,
-                    new Operation(Kind.FORAGE_BLOCK, GoalType.STOCK_FOOD, product, 1, false),
-                    Map.of("known:food:" + product.name(), 1), Map.of(), effects(product, 1), 8);
+            for (var token : state.quantities().keySet()) {
+                if (!token.startsWith("known:food-position:")) continue;
+                String value = token.substring("known:food-position:".length());
+                int split = value.indexOf(':');
+                Material product = Material.matchMaterial(value.substring(0, split));
+                BlockPoint source = BlockPoint.parse(value.substring(split + 1));
+                if (product != null) builder.add("forage:block:" + product + ":" + source.encode(),
+                        new Operation(Kind.FORAGE_BLOCK, GoalType.STOCK_FOOD, product, 1, false, "", "", source),
+                        Map.of(token, 1), Map.of(token, 1), effects(product, 1), 8);
+            }
             builder.leaf("gravel", GoalType.GATHER_FLINT, Map.of(), Map.of("item:FLINT", 1), s.knowsGravel ? 18 : 55, true);
             builder.add("fill:water", new Operation(Kind.LEGACY_ACTION, GoalType.FILL_BUCKET, Material.WATER_BUCKET, 1, !s.knowsWater),
                     Map.of("item:BUCKET", 1), Map.of("item:BUCKET", 1), Map.of("item:WATER_BUCKET", 1), s.knowsWater ? 8 : 45);
@@ -304,6 +374,7 @@ public final class OverworldDomain {
         }
         List<String> limits = new ArrayList<>();
         if (catalog.limited()) limits.add("제작 의존 재료 카탈로그 한도 " + MAX_RECIPE_MATERIALS);
+        if (state.count("knowledge:farm-incomplete") > 0) limits.add("지역 농지 관측 진행 중 또는 범위 제한");
         if (actions.size() >= 1024) limits.add("행동 후보 한도 1024");
         limits.add("레시피별 대체 재료 최대3·조합 최대" + MAX_RECIPE_VARIANTS);
         return new Snapshot(ai.getWorldId(), state, List.copyOf(actions.values()), operations, limits);
@@ -340,6 +411,7 @@ public final class OverworldDomain {
             }
         }
         if (Tag.ITEMS_SWORDS.isTagged(target) && ToolTier.of(target).isAtLeast(ToolTier.IRON)) effects.put("cap:sword:IRON", 1);
+        if (Tag.ITEMS_HOES.isTagged(target)) effects.put("cap:hoe", 1);
         String name = target.name();
         if (name.startsWith("IRON_") || name.startsWith("DIAMOND_") || name.startsWith("NETHERITE_")) {
             if (name.endsWith("_HELMET")) effects.put("cap:armor:IRON:HEAD", 1);

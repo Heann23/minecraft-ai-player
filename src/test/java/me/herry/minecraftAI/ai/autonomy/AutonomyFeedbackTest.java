@@ -5,6 +5,16 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.*;
 
 class AutonomyFeedbackTest {
+    @Test void aNewObservedRegionIsInformationProgressWithoutGrantingTheMissingResource() {
+        var goal = new AutonomyGoal("wood", Map.of("stock:logs", 4), 10);
+        var survey = new ActionModel("survey", Map.of(), Map.of(), Map.of("known:tree", 1), 1);
+        var before = new PlanningState(Map.of("world:explored", 1));
+        var after = new PlanningState(Map.of("world:explored", 2));
+        assertEquals(AutonomyFeedback.Outcome.PROGRESSED, AutonomyFeedback.assess(goal, survey, before, after, true));
+        assertEquals(AutonomyFeedback.Outcome.NO_PROGRESS, AutonomyFeedback.assess(goal, survey, before, after, false));
+        assertFalse(goal.achieved(after));
+        assertEquals(AutonomyFeedback.Outcome.NO_PROGRESS, AutonomyFeedback.assess(goal, survey, before, before, true));
+    }
     @Test void finishingMiningWithoutActuallyCollectingDoesNotReachAnAcquisitionObjective() {
         var goal = new AutonomyGoal("iron", Map.of("item:RAW_IRON", 1), 10);
         var action = new ActionModel("mine", Map.of(), Map.of(), Map.of("item:RAW_IRON", 1), 1);

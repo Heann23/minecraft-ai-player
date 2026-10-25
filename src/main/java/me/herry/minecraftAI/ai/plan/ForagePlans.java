@@ -63,6 +63,12 @@ public final class ForagePlans {
         return source == null ? List.of() : gather(ai, source);
     }
 
+    public static List<Action> gather(AIPlayer ai, BlockPoint source, Material expectedProduct) {
+        if (!Positions.isLoaded(ai.getPlayer().getWorld(), source)
+                || FoodSources.product(Positions.block(ai.getPlayer().getWorld(), source).getType()) != expectedProduct) return List.of();
+        return gather(ai, source);
+    }
+
     static List<Action> gather(AIPlayer ai, BlockPoint source) {
         if (!Positions.isLoaded(ai.getPlayer().getWorld(), source)
                 || !FoodSources.isReady(Positions.block(ai.getPlayer().getWorld(), source))) return List.of();

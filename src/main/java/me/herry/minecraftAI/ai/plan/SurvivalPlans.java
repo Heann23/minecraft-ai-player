@@ -139,6 +139,8 @@ public final class SurvivalPlans {
 
     static List<Action> findFood(AIPlayer ai) {
         if (ai.getInventory().hasFood() && ai.getPlayer().getFoodLevel() < 20) return List.of(new EatFoodAction());
+        List<Action> preparation = FoodPreparation.prepare(ai);
+        if (!preparation.isEmpty()) return preparation;
         LivingEntity prey = nearestPrey(ai);
         BlockPoint source = ForagePlans.locate(ai);
         if (prey != null || source != null) {

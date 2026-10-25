@@ -7,6 +7,11 @@ public final class AutonomyFeedback {
     private AutonomyFeedback() {}
 
     public static Outcome assess(AutonomyGoal objective, ActionModel action, PlanningState before, PlanningState after) {
+        return assess(objective, action, before, after, false);
+    }
+
+    public static Outcome assess(AutonomyGoal objective, ActionModel action, PlanningState before, PlanningState after,
+                                 boolean informationAction) {
         if (objective.achieved(after)) return Outcome.ACHIEVED;
         for (String token : action.effects().keySet()) {
             if (after.count(token) > before.count(token)) return Outcome.PROGRESSED;
@@ -18,6 +23,7 @@ public final class AutonomyFeedback {
                 && before.count("remaining:shelter") > 0) return Outcome.PROGRESSED;
         if (action.effects().containsKey("world:portal")
                 && after.count("stock:portal-frame") > before.count("stock:portal-frame")) return Outcome.PROGRESSED;
+        if (informationAction && after.count("world:explored") > before.count("world:explored")) return Outcome.PROGRESSED;
         return Outcome.NO_PROGRESS;
     }
 }
