@@ -24,6 +24,9 @@ import me.herry.minecraftAI.ai.primitive.runtime.PrimitiveContext;
 import me.herry.minecraftAI.ai.inventory.InventorySystem;
 import me.herry.minecraftAI.ai.memory.MemorySystem;
 import me.herry.minecraftAI.ai.navigation.NavigationSystem;
+import me.herry.minecraftAI.ai.observation.DamageHistory;
+import me.herry.minecraftAI.ai.observation.RiskCapture;
+import me.herry.minecraftAI.ai.observation.RiskObservation;
 
 import me.herry.minecraftAI.ai.perception.Perception;
 import me.herry.minecraftAI.ai.perception.PerceptionSystem;
@@ -67,6 +70,7 @@ public final class AIPlayer {
     private final MemorySystem memory = new MemorySystem();
     private final WorldModel worldModel = new WorldModel();
     private final CombatMemory combatMemory = new CombatMemory();
+    private final DamageHistory damageHistory = new DamageHistory();
     private final GoalLabel label = new GoalLabel();
     private final LightingSystem lighting = new LightingSystem();
     private final TickProfiler profiler = new TickProfiler();
@@ -171,6 +175,18 @@ public final class AIPlayer {
         return PrimitiveAdapter.capture(this);
     }
 
+    /** Independent value-only risk observation; existing Primitive/Experience schemas remain unchanged. */
+    public RiskObservation riskObservation() {
+        requireMainThread();
+        return RiskCapture.capture(this, damageHistory);
+    }
+
+    /** Observes an accepted damage event without changing goal choice, combat memory or execution authority. */
+    public void observeDamage(RiskObservation.Damage damage) {
+        requireMainThread();
+        damageHistory.record(damage);
+    }
+
     public PrimitiveContext primitiveContext() {
         requireMainThread();
         return PrimitiveAdapter.context(this);
@@ -242,6 +258,7 @@ public final class AIPlayer {
 
     public void onRespawn() {
         if (state != AIState.DEAD) return;
+        damageHistory.reset();
         perception.reset();
         combatMemory.reset();
         state = resumeAfterRespawn ? AIState.RUNNING : AIState.STOPPED;
@@ -286,6 +303,7 @@ public final class AIPlayer {
 
     // 월드가 바뀌면 진행 중이던 경로와 계획의 좌표가 의미를 잃는다.
     public void onWorldChanged() {
+        damageHistory.reset();
         if (state == AIState.RUNNING) brain.reset();
         // 차원을 넘으라고 시킨 일은 넘어온 것으로 끝났다. 그대로 두면 넘어온 자리에서 같은 목표를 계속 붙들고 있는다.
         GoalType forced = brain.getForcedGoal();
