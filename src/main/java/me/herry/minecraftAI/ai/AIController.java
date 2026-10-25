@@ -99,9 +99,21 @@ public final class AIController {
                 new CombatSystem(config.engageRange, config.criticalHealth),
                 new SurvivalSystem(config.lowHealth, config.criticalHealth, config.eatBelow),
                 new Planner(), team, budget, experience == null ? ExperienceSink.NONE : experience,
-                plugin.getPluginMeta().getVersion(), plugin.getLogger()::warning);
+                plugin.getPluginMeta().getVersion(), plugin.getLogger()::warning, loadLearnedPolicy());
         this.skins = new SkinFetcher(plugin.getLogger());
         crafting.warmUp();
+    }
+
+    private me.herry.minecraftAI.ai.learned.PolicyWeights loadLearnedPolicy() {
+        if (!config.learnedControl) return null;
+        try {
+            var model = me.herry.minecraftAI.ai.learned.PolicyWeights.load(plugin.getDataFolder().toPath().resolve(config.learnedModelFile));
+            plugin.getLogger().info("Learned policy: " + model.sha256() + ", Paper environment steps=" + model.environmentSteps());
+            return model;
+        } catch (java.io.IOException | RuntimeException failure) {
+            plugin.getLogger().warning("Learned policy unavailable; autonomous execution will stay idle. No Teacher fallback. " + failure.getMessage());
+            return null;
+        }
     }
 
     // 이 이름으로 AI 를 만들 수 있는지 확인한다. 만들 수 있으면 OK.

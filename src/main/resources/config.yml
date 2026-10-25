@@ -76,3 +76,10 @@ learning:
 
 debug:
   enabled: false
+
+# Learned autonomous execution. A compatible, genuinely trained Paper RL artifact is required.
+# Missing/incompatible models keep autonomous actions idle; Teacher is never substituted automatically.
+# teacher is an explicit legacy/debug mode, not a learned policy.
+policy:
+  mode: learned
+  model: models/minecraft-rl-actor.json

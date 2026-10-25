@@ -52,6 +52,8 @@ public final class AIConfig {
     public final String shadowPolicy;
 
     public final boolean debugEnabled;
+    public final boolean learnedControl;
+    public final String learnedModelFile;
 
     /**
      * @param warn 관계가 맞지 않는 값을 고쳤을 때 그 내용을 받는다 (보통 플러그인 로거의 warning)
@@ -102,6 +104,16 @@ public final class AIConfig {
                 GoalPolicies.NAMES, GoalPolicies.NONE, warn);
 
         debugEnabled = config.getBoolean("debug.enabled", false);
+        String policyMode = config.getString("policy.mode", "learned");
+        if (!java.util.Set.of("learned", "teacher").contains(policyMode)) {
+            warn.accept("Unknown policy.mode; learned mode remains stopped until a compatible trained model is available");
+            policyMode = "learned";
+        }
+        learnedControl = policyMode.equals("learned");
+        String modelFile = config.getString("policy.model", "models/minecraft-rl-actor.json");
+        java.nio.file.Path modelPath = java.nio.file.Path.of(modelFile).normalize();
+        if (modelPath.isAbsolute() || modelPath.startsWith("..")) throw new IllegalArgumentException("policy.model must stay inside the plugin data directory");
+        learnedModelFile = modelPath.toString();
     }
 
     private static int clamp(int value, int min, int max) {

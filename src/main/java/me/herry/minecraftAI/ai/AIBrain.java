@@ -89,6 +89,12 @@ final class AIBrain {
     private final RecoveryTracker recovery = new RecoveryTracker();
     private final DecisionLog log = new DecisionLog();
     private final OverworldAutonomy autonomy = new OverworldAutonomy();
+    private final me.herry.minecraftAI.ai.learned.PolicyCandidates learnedCandidates = new me.herry.minecraftAI.ai.learned.PolicyCandidates();
+    private final me.herry.minecraftAI.ai.learned.PolicyWeights learnedPolicy;
+    private me.herry.minecraftAI.ai.learned.PolicyCandidates.Candidate activeLearned;
+    private java.util.UUID learnedWorld;
+    private long learnedStartedAt;
+    private boolean learnedLane;
     private @Nullable OverworldAutonomy.Decision activeAutonomy;
     private boolean autonomyPreparation;
     // 목표 명세, 스킬, 관측, 학습용 기록. 판단에는 쓰지 않는다.
@@ -117,6 +123,7 @@ final class AIBrain {
     AIBrain(AIPlayer ai, AIServices services) {
         this.ai = ai;
         this.planner = services.planner();
+        this.learnedPolicy = services.learnedPolicy();
         this.journal = DecisionJournal.create(ai, services);
     }
 
@@ -139,6 +146,16 @@ final class AIBrain {
             ai.debug("Block scan finished: " + ai.getPerception().getNearbyBlockCount() + " blocks of interest");
             // 새로 훑어본 결과를 근처의 동료와 나눈다 (동료가 있을 때만).
             ai.getTeam().shareDiscoveries(ai);
+        }
+        if (ai.getConfig().learnedControl && controlledProgram == null && !primitiveLease && forcedGoal == null && directive == null) {
+            tickLearned(now);
+            profiler.end(TickProfiler.Section.TOTAL, tickStarted);
+            profiler.endTick();
+            return;
+        }
+        if (learnedLane) {
+            if (plan != null) plan.cancel(ai);
+            plan = null; activeLearned = null; learnedLane = false;
         }
         if (now % ai.getConfig().updateInterval == 0) {
             if (controlledProgram == null && !primitiveLease) think(now);
@@ -167,6 +184,7 @@ final class AIBrain {
         FarmingPlans.invalidate(ai);
         me.herry.minecraftAI.ai.plan.IrrigationPlans.invalidate(ai);
         activeAutonomy = null;
+        activeLearned = null; learnedWorld = null; learnedLane = false;
         ai.getNavigation().stop();
         ai.getBody().clearInputs();
     }
@@ -379,6 +397,50 @@ final class AIBrain {
             started = profiler.begin();
             makePlan(now);
             profiler.end(TickProfiler.Section.PLANNING, started);
+        }
+    }
+
+    /** Learned mode owns the same Plan/input lane; GoalSystem, heuristic utilities and Teacher are not consulted. */
+    private void tickLearned(long now) {
+        if (!learnedLane || !ai.getWorldId().equals(learnedWorld)) {
+            if (plan != null) plan.cancel(ai);
+            plan = null; activeLearned = null; activeAutonomy = null; activeTrace = null;
+            currentGoal = GoalType.IDLE;
+            journal.endEpisode(Experience.EndReason.STOPPED);
+            learnedLane = true; learnedWorld = ai.getWorldId();
+        }
+        if (learnedPolicy == null) { ai.getNavigation().stop(); ai.getBody().clearInputs(); return; }
+        if (now % ai.getConfig().updateInterval == 0) {
+            ai.getPerceptionSystem().update();
+            ai.getMemory().recordVisit(ai.getWorldId(), ai.getPosition());
+            ai.getWorldModel().markExplored(ai.getWorldId(), ai.getPosition().x() >> 4, ai.getPosition().z() >> 4);
+            if (!ai.getWorkBudget().isExhausted()) {
+                try {
+                    var captured = learnedCandidates.capture(ai, activeLearned, (int) Math.min(2400, now - learnedStartedAt));
+                    var predicted = learnedPolicy.predict(captured.frame());
+                    var selected = captured.candidates().get(predicted.index());
+                    if (activeLearned == null || !selected.id().equals(activeLearned.id()) || plan == null || plan.isFinished()) {
+                        if (plan != null) plan.cancel(ai);
+                        plan = null; activeLearned = null;
+                        var action = selected.create(ai);
+                        plan = new Plan(GoalType.IDLE, List.of(action));
+                        activeLearned = selected; learnedStartedAt = now;
+                        ai.debug("Model " + predicted.modelSha256() + " selected " + predicted.candidate());
+                    }
+                } catch (RuntimeException failure) {
+                    if (plan != null) plan.cancel(ai);
+                    plan = null; activeLearned = null;
+                    ai.getBody().clearInputs();
+                    ai.debug("Learned execution unavailable: " + failure.getClass().getSimpleName());
+                }
+            }
+        }
+        Action action = plan == null ? null : plan.current();
+        if (action == null) return;
+        action.update(ai);
+        if (action.getStatus() == ActionStatus.SUCCESS || action.getStatus() == ActionStatus.FAILED) {
+            ai.debug("Model action ended: " + action.getName() + " " + action.getStatus() + " " + action.getFailReason());
+            plan = null; activeLearned = null;
         }
     }
 
