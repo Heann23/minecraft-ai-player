@@ -105,7 +105,10 @@ def resume_checkpoint(path: Path, *, upgrade_context=False):
         model = ActorCritic.from_optimizer_state(checkpoint["optimizer"])
     if model.version != report.get("modelVersion") or model.updates != report.get("gradientUpdates"):
         raise ValueError("optimizer/report version mismatch")
+    origin = checkpoint.get("brainId") or (checkpoint.get("parents") or [{"trainingRun": checkpoint["run"]}])[0]["trainingRun"]
+    uuid.UUID(origin)
     return model, {"checkpointSha256": checkpoint_hash, "trainingRun": checkpoint["run"], "contextUpgrade": upgrade_context,
+                   "brainId": origin,
                    "environmentSteps": checkpoint["environmentSteps"], "lineage": checkpoint.get("parents", [])}
 
 
@@ -120,6 +123,10 @@ class PaperTrainer:
         output.mkdir(parents=True, exist_ok=False)  # A new run never overwrites another model or provenance.
         self.output = output
         self.run = str(uuid.uuid4())
+        self.brain_id = self.run if parent is None else parent["brainId"]
+        self.training_start_state = "fresh" if parent is None else "resume"
+        self.saved_model_version = -1
+        self.saved_checkpoint_sha = None
         self.model, self.parent = model, parent
         self.parent_steps = 0 if parent is None else parent["environmentSteps"]
         self.parents = [] if parent is None else [*parent["lineage"], {key: parent[key] for key in ("checkpointSha256", "trainingRun", "environmentSteps", "contextUpgrade")}]
@@ -140,6 +147,7 @@ class PaperTrainer:
         self.episodes = {}
         self.completed_episodes = self.death_episodes = self.episode_bytes = 0
         write_atomic(output / "run.json", {"schema": SCHEMA, "contract": CONTRACT, "algorithm": "ppo",
+                     "brainId": self.brain_id, "trainingStartState": self.training_start_state,
                      "environment": "minecraft-paper", "run": self.run, "seed": seed,
                      "maxTransitions": maximum, "rolloutSize": rollout_size, "teacherLabels": False,
                      "initialWeights": "random" if parent is None else "verified-ppo-checkpoint", "parents": self.parents,
@@ -193,7 +201,11 @@ class PaperTrainer:
                 else:
                     self.preserve_discard(previous, "transition-budget-complete")
         result = self.model.sample(frame)
-        return {"schema": SCHEMA, "id": packet["id"], **result, "environmentSteps": self.steps}
+        return {"schema": SCHEMA, "id": packet["id"], **result, "environmentSteps": self.parent_steps + self.steps,
+                "metadata": {"brainId": self.brain_id, "trainingStartState": self.training_start_state,
+                             "gradientUpdates": self.model.updates, "learningEnabled": True,
+                             "saveState": "updating" if self.training is not None else "saved" if self.saved_model_version == self.model.version else "not-saved",
+                             "checkpointSha256": self.saved_checkpoint_sha}}
 
     def preserve_discard(self, transition, reason):
         encoded = (json.dumps({"reason": reason, "activePolicyVersion": self.model.version, "transition": transition},
@@ -253,10 +265,13 @@ class PaperTrainer:
         total_steps = self.parent_steps + metadata["steps"]
         artifact = self.model.artifact(environment_steps=total_steps, training_run=self.run, rollout_sha256=metadata["sha256"])
         artifact["parents"] = self.parents
+        artifact.update({"brainId": self.brain_id, "trainingStartState": self.training_start_state,
+                         "modelVersion": self.model.version, "gradientUpdates": self.model.updates})
         checkpoint = {"schema": "minecraft-paper-checkpoint/v1", "environment": "minecraft-paper",
                      "run": self.run, "environmentSteps": total_steps, "rolloutSha256": metadata["sha256"],
-                     "parents": self.parents, "optimizer": self.model.optimizer_state()}
+                     "parents": self.parents, "optimizer": self.model.optimizer_state(), "brainId": self.brain_id}
         report = {"run": self.run, "environment": "minecraft-paper",
+                     "brainId": self.brain_id, "trainingStartState": self.training_start_state,
                      "environmentSteps": total_steps, "runEnvironmentSteps": metadata["steps"], "parents": self.parents,
                      "actualServerTicks": metadata["ticks"], "gradientUpdates": self.model.updates,
                      "modelVersion": self.model.version, "rolloutSha256": metadata["sha256"], "rolloutBytesUsed": metadata["bytes"],
@@ -269,6 +284,8 @@ class PaperTrainer:
                      "allWorldAutonomyProven": False, "trainingMetrics": stats}
         self.raw.flush(); os.fsync(self.raw.fileno())
         checkpoint_store.publish(self.output, artifact, checkpoint, report)
+        self.saved_model_version = self.model.version
+        self.saved_checkpoint_sha = hashlib.sha256(checkpoint_store.encoded(checkpoint)).hexdigest()
 
     def close(self):
         # An incomplete on-policy buffer is preserved as raw evidence, never relabeled as a trained update.

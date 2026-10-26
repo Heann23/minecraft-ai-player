@@ -533,6 +533,8 @@ public final class AIPlayer {
 
     public boolean acceptsLegacyGoals() { return !services.config().learnedControl; }
 
+    public java.util.List<String> policyDetails() { return brain.policyDetails(); }
+
     public String policyStatus() {
         if (!services.config().learnedControl) return "기존 규칙 정책 (명시적 teacher 모드)";
         if (services.config().trainingControl) return services.trainingBridge() == null ? "학습 연결 준비 안 됨" : "강화학습 연결 모드 (학습 완료와 구분)";

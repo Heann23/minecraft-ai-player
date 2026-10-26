@@ -14,7 +14,15 @@ public final class PolicyWeights {
     public static final String SCHEMA = "minecraft-rl-actor/v1";
     public record Artifact(String schema, String contract, String algorithm, String environment,
                            long environmentSteps, String trainingRun, String rolloutSha256,
-                           double[][] hiddenWeights, double[] hiddenBias, double[] outputWeights, double outputBias) {}
+                           double[][] hiddenWeights, double[] hiddenBias, double[] outputWeights, double outputBias,
+                           String brainId, String trainingStartState, Long modelVersion, Long gradientUpdates) {
+        public Artifact(String schema, String contract, String algorithm, String environment,
+                        long environmentSteps, String trainingRun, String rolloutSha256,
+                        double[][] hiddenWeights, double[] hiddenBias, double[] outputWeights, double outputBias) {
+            this(schema, contract, algorithm, environment, environmentSteps, trainingRun, rolloutSha256,
+                    hiddenWeights, hiddenBias, outputWeights, outputBias, null, null, null, null);
+        }
+    }
     public record Prediction(int index, String candidate, double logProbability, String modelSha256) {}
     private final Artifact artifact;
     private final String sha256;
@@ -36,6 +44,11 @@ public final class PolicyWeights {
             for (double weight : artifact.hiddenWeights()[row]) finite(weight);
         }
         finite(artifact.outputBias());
+        if (artifact.brainId() != null) java.util.UUID.fromString(artifact.brainId());
+        if (artifact.trainingStartState() != null && !java.util.Set.of("fresh", "pretrained", "resume").contains(artifact.trainingStartState()))
+            throw new IllegalArgumentException("invalid training start state");
+        if (artifact.modelVersion() != null && artifact.modelVersion() < 0 || artifact.gradientUpdates() != null && artifact.gradientUpdates() <= 0)
+            throw new IllegalArgumentException("invalid policy counters");
         this.artifact = artifact; this.sha256 = sha256;
     }
 
@@ -95,6 +108,16 @@ public final class PolicyWeights {
     public String sha256() { return sha256; }
     public long environmentSteps() { return artifact.environmentSteps(); }
     public String trainingRun() { return artifact.trainingRun(); }
+    public java.util.List<String> details() {
+        return java.util.List.of("두뇌 ID: " + (artifact.brainId() == null ? "이전 모델에 미기록" : artifact.brainId()),
+                "실행 상태: 고정 가중치 추론 / 학습 비활성",
+                "정책 버전: " + (artifact.modelVersion() == null ? "미기록" : artifact.modelVersion()),
+                "누적 전이: " + artifact.environmentSteps(),
+                "가중치 갱신: " + (artifact.gradientUpdates() == null ? "미기록" : artifact.gradientUpdates()),
+                "모델 해시: " + sha256, "학습 run: " + artifact.trainingRun(),
+                "학습 당시 시작 상태: " + (artifact.trainingStartState() == null ? "미기록" : artifact.trainingStartState()),
+                "게임 성능: 별도 실제 평가 필요");
+    }
 
     private static void finite(double value) {
         if (!Double.isFinite(value) || Math.abs(value) > 1e6) throw new IllegalArgumentException("invalid actor parameter");

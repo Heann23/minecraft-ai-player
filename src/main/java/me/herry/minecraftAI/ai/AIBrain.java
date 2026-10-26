@@ -491,6 +491,12 @@ final class AIBrain {
         if (learnedLane && trainingControl != null) trainingControl.objective(actualReward);
     }
 
+    List<String> policyDetails() {
+        if (trainingControl != null) return trainingControl.details();
+        if (learnedPolicy != null) return learnedPolicy.details();
+        return List.of(ai.getConfig().learnedControl ? "호환 모델 없음 — 실행 중지" : "Teacher 진단 모드 — 학습 모델 아님");
+    }
+
     private Choice choose(Situation situation, long now) {
         if (forcedGoal != null) return new Choice(forcedGoal, Double.MAX_VALUE, DecisionTrace.Origin.FORCED);
 

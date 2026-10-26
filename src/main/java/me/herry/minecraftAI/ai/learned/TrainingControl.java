@@ -22,6 +22,8 @@ public final class TrainingControl {
     private CompletableFuture<PpoBridge.Response> pending;
     private double objectiveReward;
     private long warnAfter;
+    private PpoBridge.Response latestResponse;
+    private long latestReceivedTick;
 
     public TrainingControl(PpoBridge bridge, Consumer<String> warn) { this.bridge = bridge; this.warn = warn; }
 
@@ -30,6 +32,7 @@ public final class TrainingControl {
         if (pending != null && pending.isDone()) {
             try {
                 var response = pending.join();
+                latestResponse = response; latestReceivedTick = now;
                 // Acknowledgement is independent of whether this delayed decision can still be executed.
                 outbox.removeAll(sent);
                 if (ai.getWorldId().equals(requested.frame().world()) && now >= requested.frame().serverTick()
@@ -59,6 +62,19 @@ public final class TrainingControl {
 
     public void applied(Decision decision) {
         episode.begin(decision.requested(), decision.response(), decision.appliedState(), decision.appliedTick());
+    }
+
+    public List<String> details() {
+        if (latestResponse == null) return List.of("두뇌 상태: 아직 학습 프로세스의 상태 응답을 받지 못함");
+        var metadata = latestResponse.metadata();
+        if (metadata == null) return List.of("두뇌 상태: 이전 프로토콜 응답 — 상세 정보 미기록");
+        return List.of("두뇌 ID: " + metadata.brainId(), "학습 당시 시작 상태: " + metadata.trainingStartState(),
+                "학습 활성화: " + metadata.learningEnabled(), "최근 수신 정책 버전: " + latestResponse.modelVersion(),
+                "누적 수집 전이: " + latestResponse.environmentSteps(), "가중치 갱신: " + metadata.gradientUpdates(),
+                "정책 저장 상태: " + metadata.saveState(),
+                "체크포인트 해시: " + (metadata.checkpointSha256() == null ? "아직 없음" : metadata.checkpointSha256()),
+                "상태 수신 후 경과 틱: " + Math.max(0, Integer.toUnsignedLong(Bukkit.getCurrentTick()) - latestReceivedTick),
+                "게임 성능: 학습 횟수와 별개로 실제 평가 필요");
     }
 
     public void objective(double actualReward) {

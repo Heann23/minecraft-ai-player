@@ -52,6 +52,13 @@ class PolicyWeightsTest {
         assertThrows(java.io.IOException.class, () -> PolicyWeights.load(malformed));
     }
 
+    @Test void missingLegacyCountersAreReportedAsUnknownRatherThanInventedTrainingProgress() throws Exception {
+        var policy = PolicyWeights.load(fixture(1, "minecraft-paper", 1));
+        assertTrue(policy.details().contains("정책 버전: 미기록"));
+        assertTrue(policy.details().contains("가중치 갱신: 미기록"));
+        assertTrue(policy.details().contains("누적 전이: 1"));
+    }
+
     @Test void categoricalExecutionUsesTheLearnedProbabilitiesAndReportsTheChosenLogProbability() throws Exception {
         var policy = PolicyWeights.load(fixture(1, "minecraft-paper", 2));
         var observed = frame();

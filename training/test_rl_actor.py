@@ -286,6 +286,13 @@ class BridgeProtocolTests(unittest.TestCase):
             try:
                 self.assertEqual(continued.model.version, 1)
                 self.assertEqual(continued.parent_steps, 32)
+                self.assertEqual(continued.brain_id, trainer.brain_id)
+                status = continued.handle({"schema": SCHEMA, "environment": "minecraft-paper", "id": str(uuid.uuid4()),
+                                           "frame": frame(), "transitions": []})
+                self.assertEqual(status["metadata"]["brainId"], trainer.brain_id)
+                self.assertEqual(status["metadata"]["trainingStartState"], "resume")
+                self.assertEqual(status["environmentSteps"], 32)
+                self.assertEqual(status["metadata"]["gradientUpdates"], trainer.model.updates)
                 self.assertEqual(continued.steps, 0)
                 self.assertEqual(continued.rows, [])
                 self.assertFalse((continued.output / "minecraft-rl-actor.json").exists())

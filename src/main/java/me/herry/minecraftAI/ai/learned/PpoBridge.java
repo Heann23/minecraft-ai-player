@@ -31,7 +31,22 @@ public final class PpoBridge implements AutoCloseable {
         public Query { transitions = java.util.List.copyOf(transitions); if (transitions.size() > 16) throw new IllegalArgumentException("transition batch too large"); }
     }
     public record Response(String schema, String id, int index, String candidate, double logProbability,
-                           double value, long modelVersion, long environmentSteps) {}
+                           double value, long modelVersion, long environmentSteps, Metadata metadata) {
+        public Response(String schema, String id, int index, String candidate, double logProbability,
+                        double value, long modelVersion, long environmentSteps) {
+            this(schema, id, index, candidate, logProbability, value, modelVersion, environmentSteps, null);
+        }
+    }
+    public record Metadata(String brainId, String trainingStartState, long gradientUpdates,
+                           boolean learningEnabled, String saveState, String checkpointSha256) {
+        public Metadata {
+            UUID.fromString(brainId);
+            if (!java.util.Set.of("fresh", "pretrained", "resume").contains(trainingStartState) || gradientUpdates < 0
+                    || !java.util.Set.of("saved", "updating", "not-saved").contains(saveState)
+                    || checkpointSha256 != null && !checkpointSha256.matches("[0-9a-f]{64}"))
+                throw new IllegalArgumentException("invalid brain metadata");
+        }
+    }
     private final Path directory;
     private final ExecutorService io = new ThreadPoolExecutor(2, 2, 0, TimeUnit.MILLISECONDS,
             new ArrayBlockingQueue<>(32), r -> {
