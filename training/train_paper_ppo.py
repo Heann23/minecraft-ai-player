@@ -153,6 +153,8 @@ class PaperTrainer:
             model.rng.bit_generator.state = restore_state["rng"]
         output.mkdir(parents=True, exist_ok=False)  # A new run never overwrites another model or provenance.
         self.output = output
+        self.session_alias = None
+        self.model_name = restore_state.get("modelName") if restore_state else None
         self.catalog = None if model_catalog_path is None else model_catalog.ModelCatalog(model_catalog_path)
         self.restricted_training_use = bool(parent is not None and parent["notForAutonomousTraining"]
                 or restore_state is not None and restore_state.get("notForAutonomousTraining", False)
@@ -204,12 +206,16 @@ class PaperTrainer:
     def persist_session(self):
         if self.checkpoint_reference is None or self.saved_model_version != self.model.version:
             raise RuntimeError("active brain has no matching durable checkpoint; session not replaced")
-        brain_session.save(self.output / "runtime-session.json", {"schema": brain_session.SCHEMA,
+        state = {"schema": brain_session.SCHEMA,
                 "brainId": self.brain_id, "checkpoint": self.checkpoint_reference, "checkpointSha256": self.saved_checkpoint_sha,
                 "policyVersion": self.model.version, "gradientUpdates": self.model.updates, "learningEnabled": self.learning_enabled,
                 "rng": self.model.rng.bit_generator.state, "initializationOnly": self.model.updates == 0,
                 "pendingRolloutTransitions": len(self.rows), "startState": self.training_start_state, "contract": CONTRACT,
-                "contextUpgrade": self.checkpoint_upgrade, "notForAutonomousTraining": self.restricted_training_use})
+                "contextUpgrade": self.checkpoint_upgrade, "notForAutonomousTraining": self.restricted_training_use,
+                "modelName": self.model_name}
+        brain_session.save(self.output / "runtime-session.json", state)
+        if self.session_alias is not None:
+            brain_session.save(self.session_alias, state)
         self.last_session_save = time.monotonic()
 
     def control(self, packet):
@@ -307,8 +313,12 @@ class PaperTrainer:
         self.poll_training()
         if packet.get("schema") != SCHEMA or packet.get("environment") != "minecraft-paper":
             raise ValueError("only actual Paper bridge schema accepted")
-        if set(packet) - {"schema", "environment", "id", "frame", "transitions"}:
+        if set(packet) - {"schema", "environment", "id", "frame", "transitions", "brainId", "controlEpoch"}:
             raise ValueError("unexpected query data")
+        if packet.get("brainId") is not None and packet["brainId"] != self.brain_id:
+            raise ValueError("query belongs to another brain")
+        if packet.get("controlEpoch") is not None:
+            uuid.UUID(packet["controlEpoch"])
         uuid.UUID(packet["id"])
         frame = packet["frame"]
         inputs(frame)
@@ -439,22 +449,134 @@ class PaperTrainer:
         self.saved_checkpoint_sha = hashlib.sha256(checkpoint_store.encoded(checkpoint)).hexdigest()
         self.persist_session()
 
-    def close(self):
+    def flush_episodes(self):
+        for episode in self.episodes.values():
+            self.write_episode(episode)
+        self.episodes.clear()
+
+    def close(self, *, publish_session=True):
         # An incomplete on-policy buffer is preserved as raw evidence, never relabeled as a trained update.
         try:
             self.poll_training(wait=True)
-            if self.model.updates == 0:
-                self.save_initial_state()  # Preserve the current RNG stream as well as the unchanged initial parameters.
-            self.persist_session()
+            if publish_session:
+                if self.model.updates == 0:
+                    self.save_initial_state()  # Preserve the current RNG stream without claiming training.
+                self.persist_session()
         finally:
             self.worker.shutdown(wait=True)
             try:
-                for episode in self.episodes.values():
-                    self.write_episode(episode)
+                self.flush_episodes()
             finally:
                 self.raw.close()
                 self.discarded_raw.close()
                 self.episode_raw.close()
+
+
+class BrainRuntime:
+    """One active trainer. Explicit load stages a verified checkpoint before atomically publishing its session."""
+    def __init__(self, trainer):
+        self.active = trainer
+        self.root = trainer.output
+        self.maximum = trainer.maximum
+        self.max_bytes = trainer.max_bytes
+        self.steps = self.decisions = self.bytes = self.switches = 0
+        self.require_identity = False
+        self.control_epoch = None
+
+    def __getattr__(self, name):
+        return getattr(self.active, name)
+
+    @staticmethod
+    def counters(trainer):
+        return trainer.steps, trainer.decisions, trainer.bytes + trainer.discarded_bytes + trainer.episode_bytes
+
+    def account(self, trainer, before):
+        after = self.counters(trainer)
+        self.steps += after[0]-before[0]
+        self.decisions += after[1]-before[1]
+        self.bytes += after[2]-before[2]
+
+    def handle(self, packet):
+        if self.require_identity and (packet.get("brainId") != self.active.brain_id or packet.get("controlEpoch") != self.control_epoch):
+            if packet.get("transitions"):
+                evidence = (json.dumps({"reason": "brain-or-load-epoch-mismatch", "query": packet},
+                                      allow_nan=False, separators=(",", ":"))+"\n").encode()
+                if self.bytes + len(evidence) > self.max_bytes:
+                    raise RuntimeError("rejected query evidence budget exhausted")
+                with (self.root / "rejected-brain-queries.jsonl").open("ab") as rejected:
+                    rejected.write(evidence); rejected.flush(); os.fsync(rejected.fileno())
+                self.bytes += len(evidence)
+            raise ValueError("stale or unidentified query after model load")
+        trainer = self.active
+        before = self.counters(trainer)
+        try:
+            return trainer.handle(packet)
+        finally:
+            self.account(trainer, before)
+
+    def control(self, packet):
+        if packet.get("operation") != "model-load":
+            return self.active.control(packet)
+        if set(packet) != {"schema", "id", "operation", "brainId", "name"} or packet["schema"] != CONTROL_SCHEMA:
+            raise ValueError("invalid model load request")
+        uuid.UUID(packet["id"])
+        old = self.active
+        if packet["brainId"] != old.brain_id or old.catalog is None:
+            raise ValueError("load source brain/catalog mismatch; active model retained")
+        if self.switches >= 128:
+            raise ValueError("runtime model switch budget exhausted")
+        revision = old.catalog.load(packet["name"])  # Full state, weights, optimizer and raw-prefix verification first.
+        restored = dict(revision["session"], modelName=revision["name"])
+        old.poll_training(wait=True)
+        before = self.counters(old)
+        old.flush_episodes()
+        self.account(old, before)
+        old.persist_session()
+        remaining, remaining_bytes = self.maximum-self.steps, self.max_bytes-self.bytes
+        if remaining < old.rollout_size or remaining_bytes < MAX_PACKET:
+            raise ValueError("remaining runtime budget cannot admit a model load")
+        output = self.root / "model-loads" / ("load-" + uuid.uuid4().hex)
+        replacement = PaperTrainer(output, seed=777, rollout_size=old.rollout_size, maximum=remaining,
+                max_bytes=remaining_bytes, resume=Path(restored["checkpoint"]), start_state="resume",
+                upgrade_context=restored.get("contextUpgrade", False), restore_state=restored,
+                learning_enabled=old.learning_enabled, session_save_seconds=old.session_save_seconds,
+                model_catalog_path=old.catalog.root)
+        # Stage writes only its own run. The single authoritative runtime session is published last.
+        replacement.session_alias = self.root / "runtime-session.json"
+        try:
+            replacement.persist_session()
+        except (OSError, ValueError, RuntimeError) as failure:
+            replacement.session_alias = None
+            replacement.close(publish_session=False)
+            raise ValueError("new model session was not committed; active model retained") from failure
+        self.active = replacement
+        self.require_identity = True
+        self.control_epoch = packet["id"]
+        self.switches += 1
+        try:
+            return self.finish_load(old, replacement, packet)
+        except (OSError, ValueError, KeyError, TypeError) as failure:
+            raise RuntimeError("model session committed but completion failed; stop and restore the durable session") from failure
+
+    def finish_load(self, old, replacement, packet):
+        # The old primary output is also the authoritative alias. Retirement must not republish its old session.
+        old.session_alias = None
+        old.close(publish_session=False)
+        with (self.root / "model-switches.jsonl").open("a", encoding="utf-8") as journal:
+            journal.write(json.dumps({"id": packet["id"], "previousBrainId": old.brain_id,
+                "brainId": replacement.brain_id, "modelName": packet["name"], "checkpointSha256": replacement.saved_checkpoint_sha,
+                "runtimeTransitions": self.steps, "runtimeDecisions": self.decisions, "learningEnabled": replacement.learning_enabled})+"\n")
+            journal.flush(); os.fsync(journal.fileno())
+        weights_hash = hashlib.sha256(checkpoint_store.encoded({key: value.tolist() for key, value in replacement.model.params.items()})).hexdigest()
+        summary = {"name": packet["name"], "valid": True, "brainId": replacement.brain_id,
+                   "policyVersion": replacement.model.version, "gradientUpdates": replacement.model.updates,
+                   "learningEnabled": replacement.learning_enabled, "initializationOnly": replacement.model.updates == 0}
+        return {"schema": CONTROL_SCHEMA, "id": packet["id"], "ok": True, "operation": "model-load", "name": packet["name"],
+                "previousBrainId": old.brain_id, "status": replacement.status(), "weightsSha256": weights_hash,
+                "models": [summary], "hasMore": False}
+
+    def close(self):
+        self.active.close()
 
 
 def exchange_request(request: Path, channel: Path, trainer: PaperTrainer, pending: dict):
@@ -589,7 +711,8 @@ def main():
         if args.restore_session or args.resume or args.start_state not in (None, "resume"):
             raise ValueError("catalog restore cannot be combined with another weight selection")
         catalog = model_catalog.ModelCatalog(args.catalog)
-        restored = (catalog.load(args.restore_model) if args.restore_model else catalog.selected())["session"]
+        revision = catalog.load(args.restore_model) if args.restore_model else catalog.selected()
+        restored = dict(revision["session"], modelName=revision["name"])
         args.resume = Path(restored["checkpoint"])
         args.start_state = "resume"
         args.upgrade_context = restored.get("contextUpgrade", False)
@@ -608,7 +731,7 @@ def main():
                            restore_state=restored, session_save_seconds=args.session_save_seconds,
                            model_catalog_path=args.model_catalog)
     print("Waiting for real Paper transitions. No Teacher or synthetic game environment. Run:", trainer.run, flush=True)
-    serve(args.channel, trainer, args.stop_file, args.max_decisions)
+    serve(args.channel, BrainRuntime(trainer), args.stop_file, args.max_decisions)
 
 
 if __name__ == "__main__":

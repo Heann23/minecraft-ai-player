@@ -33,6 +33,27 @@ def write_json(path: Path, value):
     temporary.replace(path)
 
 
+def require_runtime_space(output: Path, cache: Path, paper: Path, plugin: Path):
+    """Reject before copying a runtime, rather than truncate source/evidence on an almost-full drive."""
+    size = paper.stat().st_size + plugin.stat().st_size
+    files = 0
+    for name in ("cache", "libraries", "versions"):
+        directory = cache / name
+        if directory.is_dir():
+            for path in directory.rglob("*"):
+                if path.is_file():
+                    size += path.stat().st_size; files += 1
+                    if files > 50000:
+                        raise ValueError("runtime cache scan exceeds budget")
+    parent = output.resolve().parent
+    while not parent.exists() and parent != parent.parent:
+        parent = parent.parent
+    required = size + 128*1024*1024  # Keep headroom for source/checkpoints and normal world generation.
+    if shutil.disk_usage(parent).free < required:
+        raise ValueError("insufficient disk space for isolated runtime and evidence; no server started")
+    return required
+
+
 def read_plan(path: Path):
     if path.stat().st_size > 65536:
         raise ValueError("oversized experiment plan")
@@ -67,13 +88,13 @@ def read_scenario(path: Path):
     for event in scenario["events"]:
         command = event.get("command")
         keys = {"atSeconds", "command", "enabled"} if command == "learning" else \
-               {"atSeconds", "command", "name"} if command in {"model-info", "model-save"} else {"atSeconds", "command"}
+               {"atSeconds", "command", "name"} if command in {"model-info", "model-save", "model-load"} else {"atSeconds", "command"}
         if set(event) != keys or type(event["atSeconds"]) is not int or not previous <= event["atSeconds"] <= 86400 \
-                or event["atSeconds"] < 0 or command not in {"learning", "stop", "start", "stats", "model-list", "model-info", "model-save"}:
+                or event["atSeconds"] < 0 or command not in {"learning", "stop", "start", "stats", "model-list", "model-info", "model-save", "model-load"}:
             raise ValueError("unsupported scenario command or ordering")
         if event["command"] == "learning" and type(event["enabled"]) is not bool:
             raise ValueError("invalid scenario learning flag")
-        if command in {"model-info", "model-save"}:
+        if command in {"model-info", "model-save", "model-load"}:
             from model_catalog import model_name
             model_name(event["name"])
         previous = event["atSeconds"]
@@ -89,6 +110,12 @@ def validate_plan_extension(parent: dict, current: dict):
 
 def validate_options(args):
     plan = read_plan(args.plan)
+    if getattr(args, "admit_models", None):
+        if not getattr(args, "managed_backend", False) or not getattr(args, "catalog", None) or len(args.admit_models) > 8:
+            raise ValueError("additional snapshot admission requires a managed named catalog and at most eight names")
+        from model_catalog import model_name
+        for name in args.admit_models:
+            model_name(name)
     if getattr(args, "player_persistence", False) and not getattr(args, "managed_backend", False):
         raise ValueError("player persistence acceptance requires the plugin-owned backend")
     if getattr(args, "managed_backend", False) and (args.mode != "train" or not getattr(args, "catalog", None)
@@ -199,6 +226,7 @@ def summarize_game_log(path: Path):
 
 def run(args):
     plan = validate_options(args)
+    require_runtime_space(args.output, args.runtime_cache, args.paper, args.plugin)
     scenario = read_scenario(args.scenario) if args.scenario else []
     source = Path(__file__).resolve().parents[1]
     actual_commit = subprocess.check_output(["git", "-c", "safe.directory=" + source.as_posix(),
@@ -241,6 +269,10 @@ def run(args):
         from model_catalog import ModelCatalog
         private_catalog = ModelCatalog(plugin / "brain-catalog")
         private_catalog.save(catalog_state["name"], catalog_state["session"])
+        for name in args.admit_models:
+            if name != catalog_state["name"]:
+                admitted = catalog.load(name)
+                private_catalog.save(name, admitted["session"])
         private_catalog.select(catalog_state["name"])
         config = config.replace("  runtime:\n    enabled: false", "  runtime:\n    enabled: true")
         config = config.replace("    python: python", "    python: " + json.dumps(sys.executable))
@@ -381,7 +413,7 @@ def run(args):
                         send("ai status RLLearner"); send("ai stats RLLearner")
                     elif event["command"] == "model-list":
                         send("ai model list")
-                    elif event["command"] in {"model-info", "model-save"}:
+                    elif event["command"] in {"model-info", "model-save", "model-load"}:
                         send("ai model " + event["command"].removeprefix("model-") + " " + event["name"])
                     else:
                         send("ai " + event["command"] + " RLLearner")
@@ -518,6 +550,7 @@ def main():
     parser.add_argument("--create-model-at-end", help="register a distinct INITIAL model after a normal run, without changing active/selected brain")
     parser.add_argument("--managed-backend", action="store_true", help="acceptance of plugin-owned inference backend; never starts a second external trainer")
     parser.add_argument("--player-persistence", action="store_true", help="enable player persistence in the new isolated managed-backend acceptance server")
+    parser.add_argument("--admit-models", nargs="*", default=[], help="up to eight verified named snapshots admitted to the private managed-backend catalog")
     parser.add_argument("--upgrade-context", action="store_true", help="explicitly expand v1 trained context when resuming PPO")
     parser.add_argument("--start-state", choices=("fresh", "pretrained", "resume"))
     parser.add_argument("--inference-only", action="store_true", help="shared backend with learning disabled, for startup/mode scenarios")

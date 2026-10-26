@@ -16,7 +16,7 @@ import java.util.concurrent.*;
 
 /** Owns one explicit local backend process. Contains no Bukkit, world or player state. */
 public final class ManagedPolicyBackend implements AutoCloseable {
-    private static final String SCHEMA = "minecraft-managed-brain-session/v1";
+    private static final String SCHEMA = "minecraft-managed-brain-session/v2";
     private static final ConcurrentMap<Path, ManagedPolicyBackend> OWNERS = new ConcurrentHashMap<>();
     public record Settings(String python, Path script, Path catalog, Path runs, Path channelRoot,
                            String model, boolean allowTraining, int maxTransitions, int sessionSaveSeconds) {
@@ -96,10 +96,16 @@ public final class ManagedPolicyBackend implements AutoCloseable {
         if (Files.exists(pointer)) {
             JsonObject record = readObject(pointer);
             JsonObject payload = record.getAsJsonObject("payload");
-            if (payload == null || !SCHEMA.equals(payload.get("schema").getAsString())
+            if (payload == null || !java.util.Set.of(SCHEMA, "minecraft-managed-brain-session/v1").contains(payload.get("schema").getAsString())
                     || !digest(gson.toJson(payload)).equals(record.get("sha256").getAsString()))
                 throw new IOException("managed session pointer is corrupt; no automatic initialization");
-            expectedBrain = payload.get("brainId").getAsString(); UUID.fromString(expectedBrain);
+            if ("minecraft-managed-brain-session/v1".equals(payload.get("schema").getAsString())) {
+                expectedBrain = payload.get("brainId").getAsString(); UUID.fromString(expectedBrain);
+            } else {
+                UUID.fromString(payload.get("startupBrainId").getAsString());
+                // Active identity is bound by the checksummed runtime session and verified optimizer checkpoint.
+                // An explicit model load may change it after startup while this owned session reference stays fixed.
+            }
             String relative = payload.get("session").getAsString();
             if (!relative.matches("run-[0-9a-f-]{36}/runtime-session\\.json")) throw new IOException("unsafe session reference");
             restored = settings.runs().resolve(relative).normalize();
@@ -129,7 +135,7 @@ public final class ManagedPolicyBackend implements AutoCloseable {
                         || !settings.allowTraining() && state.get("learningEnabled").getAsBoolean())
                     throw new IOException("managed brain restoration mismatch; no new model selected");
                 JsonObject payload = new JsonObject();
-                payload.addProperty("schema", SCHEMA); payload.addProperty("brainId", brain);
+                payload.addProperty("schema", SCHEMA); payload.addProperty("startupBrainId", brain);
                 payload.addProperty("session", run + "/runtime-session.json");
                 JsonObject record = new JsonObject(); record.add("payload", payload); record.addProperty("sha256", digest(gson.toJson(payload)));
                 replace(pointer, gson.toJson(record));

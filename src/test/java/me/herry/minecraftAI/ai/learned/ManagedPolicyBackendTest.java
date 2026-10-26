@@ -29,11 +29,15 @@ class ManagedPolicyBackendTest {
     }
 
     private Process ready(List<String> command, Path log) throws java.io.IOException {
+        return ready(command, log, brain);
+    }
+
+    private Process ready(List<String> command, Path log, String identity) throws java.io.IOException {
         Path output = Path.of(command.get(command.indexOf("--output") + 1));
         Files.createDirectories(output);
         Files.writeString(output.resolve("run.json"), "{}");
         Files.writeString(output.resolve("runtime-session.json"), "{\"payload\":{\"schema\":\"minecraft-brain-runtime-session/v1\","
-                + "\"brainId\":\"" + brain + "\",\"learningEnabled\":false}}");
+                + "\"brainId\":\"" + identity + "\",\"learningEnabled\":false}}");
         return new Child();
     }
 
@@ -73,6 +77,20 @@ class ManagedPolicyBackendTest {
             assertThrows(ExecutionException.class, () -> backend.start().get(5, TimeUnit.SECONDS));
             assertEquals(0, launches.get());
             assertEquals("corrupt original", Files.readString(pointer));
+        }
+    }
+
+    @Test void v2OwnedSessionReferenceAllowsAnExplicitlyLoadedIdentityAtRestart() throws Exception {
+        var settings = settings();
+        try (var first = new ManagedPolicyBackend(settings, this::ready)) {
+            assertEquals(brain, first.start().get(5, TimeUnit.SECONDS));
+        }
+        String loadedBrain = UUID.randomUUID().toString();
+        try (var restarted = new ManagedPolicyBackend(settings, (command, log) -> {
+            assertTrue(command.contains("--restore-session"));
+            return ready(command, log, loadedBrain);
+        })) {
+            assertEquals(loadedBrain, restarted.start().get(5, TimeUnit.SECONDS));
         }
     }
 

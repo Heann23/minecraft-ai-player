@@ -159,8 +159,8 @@ public class AICommand implements TabExecutor {
     private void model(CommandSender sender, String[] args) {
         String operation = args.length >= 2 ? args[1].toLowerCase(Locale.ROOT) : "";
         if (!(operation.equals("list") && args.length == 2
-                || List.of("info", "save", "new").contains(operation) && args.length == 3)) {
-            error(sender, "사용법: /ai model <list|info 이름|save 이름|new 이름>"); return;
+                || List.of("info", "save", "new", "load").contains(operation) && args.length == 3)) {
+            error(sender, "사용법: /ai model <list|info 이름|save 이름|new 이름|load 이름>"); return;
         }
         String name = operation.equals("list") ? "" : args[2];
         if (!operation.equals("list") && !me.herry.minecraftAI.ai.learned.PpoBridge.validModelName(name)) {
@@ -350,7 +350,7 @@ public class AICommand implements TabExecutor {
                 case "goal" -> filter(goalNames(), args[1]);
                 case "debug" -> filter(List.of("on", "off"), args[1]);
                 case "training" -> filter(List.of("on", "off"), args[1]);
-                case "model" -> filter(List.of("list", "info", "save", "new"), args[1]);
+                case "model" -> filter(List.of("list", "info", "save", "new", "load"), args[1]);
                 case "home" -> filter(List.of("set", "clear"), args[1]);
                 default -> List.of();
             };

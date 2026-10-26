@@ -38,6 +38,7 @@
 !/training/brain_session.py
 !/training/model_catalog.py
 !/training/test_model_catalog.py
+!/training/test_brain_runtime.py
 
 # AI 개발 지침은 하위 폴더에서도 GitHub에 올리지 않는다.
 AGENTS.md

@@ -459,7 +459,7 @@ public final class AIController {
         if (trainingBridge == null) {
             completed.accept(false, List.of("모델 관리 백엔드가 연결되지 않았습니다. 현재 모델은 유지됩니다.")); return;
         }
-        if (!java.util.Set.of("list", "info", "save", "new").contains(operation)
+        if (!java.util.Set.of("list", "info", "save", "new", "load").contains(operation)
                 || (operation.equals("list") ? !name.isEmpty() : !me.herry.minecraftAI.ai.learned.PpoBridge.validModelName(name))) {
             completed.accept(false, List.of("올바른 모델 이름과 관리 명령을 입력하세요.")); return;
         }
@@ -468,7 +468,8 @@ public final class AIController {
         if (identities.size() != 1) {
             completed.accept(false, List.of("/ai stats 로 같은 두뇌의 연결 상태를 먼저 확인하세요.")); return;
         }
-        boolean changing = operation.equals("save");
+        boolean loading = operation.equals("load");
+        boolean changing = operation.equals("save") || loading;
         if (changing ? !trainingBridge.beginTransition() : trainingBridge.isTransitioning()) {
             completed.accept(false, List.of("다른 두뇌 설정 변경을 확인 중입니다.")); return;
         }
@@ -479,7 +480,7 @@ public final class AIController {
             if (changing) for (Entry entry : entries.values()) drains.add(entry.ai.prepareLearningChange());
         } catch (RuntimeException failure) {
             if (changing) trainingBridge.endTransition();
-            completed.accept(false, List.of("현재 행동을 정리하지 못해 모델을 저장하지 않았습니다.")); return;
+            completed.accept(false, List.of("현재 행동을 정리하지 못해 모델 명령을 실행하지 않았습니다.")); return;
         }
         java.util.concurrent.CompletableFuture.allOf(drains.toArray(java.util.concurrent.CompletableFuture[]::new))
                 .thenCompose(ignored -> trainingBridge.modelCommand(identities.getFirst(), operation, name))
@@ -493,13 +494,23 @@ public final class AIController {
                             if (changing && failure == null) for (Entry entry : entries.values()) entry.ai.acceptLearningChange(result.status());
                             if (changing) trainingBridge.endTransition();
                             if (failure != null) {
-                                plugin.getLogger().log(Level.WARNING, "Model command not confirmed; active brain retained", failure);
+                                plugin.getLogger().log(Level.WARNING, "Model command not confirmed; no automatic initialization", failure);
+                                Throwable reason = failure;
+                                while ((reason instanceof java.util.concurrent.CompletionException || reason instanceof java.util.concurrent.ExecutionException)
+                                        && reason.getCause() != null) reason = reason.getCause();
+                                if (loading && !(reason instanceof me.herry.minecraftAI.ai.learned.PpoBridge.ModelRejectedException)) {
+                                    setBackendAvailable(false);
+                                    completed.accept(false, List.of("모델 교체 완료를 확인하지 못해 AI를 정지했습니다.",
+                                            "저장된 세션을 확인하고 서버 재시작으로 복원하세요. 새 초기화로 대체하지 않았습니다."));
+                                    return;
+                                }
                                 completed.accept(false, List.of("모델 명령을 확인하지 못했습니다. 목록 설정·원본·이름 충돌 또는 시험용 자료 제한을 확인하세요.",
                                         "현재 두뇌를 교체하거나 AI를 다시 시작하지 않았습니다."));
                                 return;
                             }
                             var lines = new ArrayList<String>();
                             lines.add(operation.equals("save") ? "현재 두뇌를 '" + name + "' 이름으로 저장했습니다."
+                                    : loading ? "모델 '" + name + "'을 불러왔습니다. 학습 설정과 AI 정지 의사는 유지됩니다."
                                     : operation.equals("new") ? "새 초기 두뇌를 '" + name + "' 이름으로 등록했습니다. 현재 두뇌는 유지됩니다."
                                     : "저장된 모델 " + result.models().size() + "개");
                             for (var model : result.models()) {

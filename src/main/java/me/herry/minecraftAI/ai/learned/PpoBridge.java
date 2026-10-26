@@ -18,7 +18,15 @@ public final class PpoBridge implements AutoCloseable {
     public record ModelSummary(String name, boolean valid, String brainId, long policyVersion,
                                long gradientUpdates, boolean learningEnabled, boolean initializationOnly) {}
     public record ModelResult(String schema, String id, boolean ok, String error, String operation, String name,
-                              String weightsSha256, Status status, java.util.List<ModelSummary> models, boolean hasMore) {}
+                              String weightsSha256, Status status, java.util.List<ModelSummary> models, boolean hasMore,
+                              String previousBrainId) {}
+    public static final class ModelRejectedException extends IOException {
+        public ModelRejectedException() { super("model command rejected before commit"); }
+    }
+    private final Object identityLock = new Object();
+    private long brainGeneration;
+    private String expectedBrainId;
+    private String controlEpoch;
     private final java.util.concurrent.atomic.AtomicBoolean transitioning = new java.util.concurrent.atomic.AtomicBoolean();
     private volatile boolean available = true;
     public boolean isAvailable() { return available; }
@@ -43,8 +51,19 @@ public final class PpoBridge implements AutoCloseable {
         }
         @Override public double[] nextState() { return nextState.clone(); }
     }
-    public record Query(String schema, String environment, String id, PolicyFrame frame, java.util.List<Transition> transitions) {
-        public Query { transitions = java.util.List.copyOf(transitions); if (transitions.size() > 16) throw new IllegalArgumentException("transition batch too large"); }
+    public record Query(String schema, String environment, String id, PolicyFrame frame, java.util.List<Transition> transitions, String brainId, String controlEpoch) {
+        public Query(String schema, String environment, String id, PolicyFrame frame, java.util.List<Transition> transitions) {
+            this(schema, environment, id, frame, transitions, null, null);
+        }
+        public Query(String schema, String environment, String id, PolicyFrame frame, java.util.List<Transition> transitions, String brainId) {
+            this(schema, environment, id, frame, transitions, brainId, null);
+        }
+        public Query {
+            transitions = java.util.List.copyOf(transitions);
+            if (transitions.size() > 16) throw new IllegalArgumentException("transition batch too large");
+            if (brainId != null) UUID.fromString(brainId);
+            if (controlEpoch != null) UUID.fromString(controlEpoch);
+        }
     }
     public record Response(String schema, String id, int index, String candidate, double logProbability,
                            double value, long modelVersion, long environmentSteps, Metadata metadata) {
@@ -81,8 +100,11 @@ public final class PpoBridge implements AutoCloseable {
 
     public CompletableFuture<Response> request(PolicyFrame frame, java.util.List<Transition> transitions) {
         String id = UUID.randomUUID().toString();
-        String payload = gson.toJson(new Query(SCHEMA, "minecraft-paper", id, frame, transitions));
-        return CompletableFuture.supplyAsync(() -> exchange(id, payload, frame), io);
+        synchronized (identityLock) {
+            long generation = brainGeneration;
+            String payload = gson.toJson(new Query(SCHEMA, "minecraft-paper", id, frame, transitions, expectedBrainId, controlEpoch));
+            return CompletableFuture.supplyAsync(() -> exchange(id, payload, frame, generation), io);
+        }
     }
 
     public CompletableFuture<ControlResult> setLearning(String brainId, boolean enabled) {
@@ -94,13 +116,16 @@ public final class PpoBridge implements AutoCloseable {
 
     public CompletableFuture<ModelResult> modelCommand(String brainId, String operation, String name) {
         UUID.fromString(brainId);
-        if (!java.util.Set.of("list", "info", "save", "new").contains(operation)
+        if (!java.util.Set.of("list", "info", "save", "new", "load").contains(operation)
                 || (operation.equals("list") ? !name.isEmpty() : !validModelName(name)))
             throw new IllegalArgumentException("invalid model command");
         String id = UUID.randomUUID().toString();
         var command = new ModelCommand(CONTROL_SCHEMA, id, "model-" + operation, brainId, name);
         String payload = gson.toJson(command);
-        return CompletableFuture.supplyAsync(() -> exchangeModel(command, payload), io);
+        synchronized (identityLock) {
+            long generation = brainGeneration;
+            return CompletableFuture.supplyAsync(() -> exchangeModel(command, payload, generation), io);
+        }
     }
 
     public static boolean validModelName(String name) {
@@ -108,7 +133,7 @@ public final class PpoBridge implements AutoCloseable {
                 && !name.startsWith("revision-") && !name.matches("con|prn|aux|nul|com[0-9]|lpt[0-9]");
     }
 
-    private ModelResult exchangeModel(ModelCommand command, String payload) {
+    private ModelResult exchangeModel(ModelCommand command, String payload, long generation) {
         Path temporary = directory.resolve(command.id() + ".control.tmp");
         Path request = directory.resolve(command.id() + ".control.json");
         Path response = directory.resolve(command.id() + ".control-response.json");
@@ -122,11 +147,12 @@ public final class PpoBridge implements AutoCloseable {
                     var result = gson.fromJson(Files.readString(response), ModelResult.class);
                     if (result == null || !CONTROL_SCHEMA.equals(result.schema()) || !command.id().equals(result.id()))
                         throw new IOException("invalid model response identity");
-                    if (!result.ok()) throw new IOException("model command rejected; catalog or source is unavailable");
+                    if (!result.ok()) throw new ModelRejectedException();
                     var status = result.status();
+                    boolean loading = command.operation().equals("model-load");
                     if (!command.operation().equals(result.operation()) || !command.name().equals(result.name())
                             || status == null || status.metadata() == null || status.modelVersion() < 0 || status.environmentSteps() < 0
-                            || !command.brainId().equals(status.metadata().brainId())
+                            || (loading ? !command.brainId().equals(result.previousBrainId()) : !command.brainId().equals(status.metadata().brainId()))
                             || result.weightsSha256() == null || !result.weightsSha256().matches("[0-9a-f]{64}")
                             || result.models() == null || result.models().size() > 32
                             || !command.operation().equals("model-list") && result.models().size() != 1)
@@ -154,6 +180,17 @@ public final class PpoBridge implements AutoCloseable {
                                 || saved.gradientUpdates() != status.metadata().gradientUpdates()
                                 || saved.learningEnabled() != status.metadata().learningEnabled())
                             throw new IOException("saved model differs from active brain");
+                    }
+                    if (loading) {
+                        var loaded = result.models().getFirst();
+                        if (!loaded.valid() || !loaded.brainId().equals(status.metadata().brainId())
+                                || loaded.policyVersion() != status.modelVersion() || loaded.gradientUpdates() != status.metadata().gradientUpdates()
+                                || loaded.learningEnabled() != status.metadata().learningEnabled())
+                            throw new IOException("loaded model differs from runtime acknowledgement");
+                        synchronized (identityLock) {
+                            if (brainGeneration != generation) throw new IOException("stale model load acknowledgement");
+                            expectedBrainId = loaded.brainId(); controlEpoch = command.id(); brainGeneration++;
+                        }
                     }
                     return result;
                 }
@@ -201,7 +238,7 @@ public final class PpoBridge implements AutoCloseable {
         }
     }
 
-    private Response exchange(String id, String payload, PolicyFrame frame) {
+    private Response exchange(String id, String payload, PolicyFrame frame, long generation) {
         Path temporary = directory.resolve(id + ".request.tmp");
         Path request = directory.resolve(id + ".request.json");
         Path response = directory.resolve(id + ".response.json");
@@ -219,6 +256,12 @@ public final class PpoBridge implements AutoCloseable {
                             || !Double.isFinite(result.logProbability()) || result.logProbability() > 0
                             || !Double.isFinite(result.value()) || result.modelVersion() < 0 || result.environmentSteps() < 0)
                         throw new IOException("invalid/stale PPO response");
+                    synchronized (identityLock) {
+                        if (brainGeneration != generation) throw new IOException("policy response predates model load");
+                        if (expectedBrainId != null && (result.metadata() == null || !expectedBrainId.equals(result.metadata().brainId())))
+                            throw new IOException("policy response belongs to another brain");
+                        if (result.metadata() != null) expectedBrainId = result.metadata().brainId();
+                    }
                     return result;
                 }
                 Thread.sleep(10);
