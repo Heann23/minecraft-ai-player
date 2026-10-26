@@ -153,7 +153,9 @@ class PaperTrainer:
         output.mkdir(parents=True, exist_ok=False)  # A new run never overwrites another model or provenance.
         self.output = output
         self.catalog = None if model_catalog_path is None else model_catalog.ModelCatalog(model_catalog_path)
-        self.restricted_training_use = parent is not None and parent["notForAutonomousTraining"]
+        self.restricted_training_use = bool(parent is not None and parent["notForAutonomousTraining"]
+                or restore_state is not None and restore_state.get("notForAutonomousTraining", False)
+                or model_catalog.restricted_training_use(output / "optimizer-checkpoint.json"))
         write_atomic(output / "catalog-use.json", {"notForAutonomousTraining": self.restricted_training_use})
         self.run = str(uuid.uuid4())
         self.brain_id = self.run if parent is None else parent["brainId"]

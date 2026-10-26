@@ -89,6 +89,9 @@ def validate_plan_extension(parent: dict, current: dict):
 
 def validate_options(args):
     plan = read_plan(args.plan)
+    if getattr(args, "managed_backend", False) and (args.mode != "train" or not getattr(args, "catalog", None)
+            or not getattr(args, "inference_only", False) or args.resume is not None or getattr(args, "save_model_at_end", None)):
+        raise ValueError("managed backend acceptance requires a named inference-only model and no external resume/final snapshot")
     if getattr(args, "save_model_at_end", None):
         from model_catalog import model_name
         model_name(args.save_model_at_end)
@@ -215,7 +218,15 @@ def run(args):
     config = (source / "src/main/resources/config.yml").read_text(encoding="utf-8")
     # Disable persistence and chat in the new experiment only. No old AI state or credentials are loaded.
     config = config.replace("enabled: true", "enabled: false")
-    if args.mode == "train":
+    if args.managed_backend:
+        from model_catalog import ModelCatalog
+        private_catalog = ModelCatalog(plugin / "brain-catalog")
+        private_catalog.save(catalog_state["name"], catalog_state["session"])
+        private_catalog.select(catalog_state["name"])
+        config = config.replace("  runtime:\n    enabled: false", "  runtime:\n    enabled: true")
+        config = config.replace("    python: python", "    python: " + json.dumps(sys.executable))
+        config = config.replace("    script: training/train_paper_ppo.py", "    script: " + json.dumps(str(source / "training/train_paper_ppo.py")))
+    elif args.mode == "train":
         config = config.replace("mode: learned", "mode: training").replace("allow-training: false", "allow-training: true")
     else:
         (plugin / "models").mkdir()
@@ -238,6 +249,7 @@ def run(args):
                 "tools": {name: sha256(source / "training" / name) for name in ("paper_lab.py", "rl_actor.py", "train_paper_ppo.py", "checkpoint_store.py", "brain_session.py", "model_catalog.py")},
                 "teacherLabels": False, "grantedItems": False, "teleportDuringEpisode": False,
                 "allWorldAutonomyProven": False}
+    manifest["backendOwner"] = "plugin" if args.managed_backend else "external-lab"
     if args.save_model_at_end:
         manifest.update({"requestedFinalModelSave": args.save_model_at_end, "finalModelSaveAcknowledged": False,
                          "finalModelSaveVerified": False})
@@ -275,11 +287,12 @@ def run(args):
     write_json(output / "manifest.json", manifest)
     trainer = process = reader = None
     started, gameplay_start, reason = time.monotonic(), None, "startup-failed"
+    server_ready, managed_ready = False, False
     events = queue.Queue()
     with (output / "trainer.log").open("w", encoding="utf-8") as trainer_log, \
             (output / "server-console.log").open("w", encoding="utf-8") as log:
         try:
-            if args.mode == "train":
+            if args.mode == "train" and not args.managed_backend:
                 command = [sys.executable, "-u", str(source / "training/train_paper_ppo.py"), "--channel",
                     str(plugin / "training-session/channel"), "--output", str(output / "training"),
                     "--max-transitions", str(args.steps), "--rollout-size", "32", "--seed", str(args.policy_seed),
@@ -358,7 +371,13 @@ def run(args):
                     reason = "gameplay-time-budget"; break
                 try:
                     line = events.get(timeout=0.5)
-                    if "Done (" in line and gameplay_start is None:
+                    if "Done (" in line:
+                        server_ready = True
+                    if args.managed_backend and "Managed brain ready:" in line:
+                        managed_ready = True
+                    if args.managed_backend and "Managed brain unavailable;" in line:
+                        reason = "managed-startup-failed"; break
+                    if server_ready and (not args.managed_backend or managed_ready) and gameplay_start is None:
                         gameplay_start = time.monotonic()
                         for text in ("seed", "time set " + str(args.start_time), "ai spawn RLLearner", "ai start RLLearner", "ai debug on"):
                             send(text)
@@ -419,6 +438,15 @@ def run(args):
             manifest.update({"stopReason": reason, "serverExitCode": process.returncode if process else None,
                              "trainerExitCode": trainer.returncode if trainer else None,
                              "elapsedSeconds": round(time.monotonic()-started), "serverReady": gameplay_start is not None})
+            if args.managed_backend:
+                import brain_session
+                sessions = []
+                for path in sorted((plugin / "brain-runtime").glob("run-*/runtime-session.json")):
+                    state = brain_session.load(path)
+                    sessions.append({key: state[key] for key in ("brainId", "checkpointSha256", "policyVersion",
+                                                                "gradientUpdates", "learningEnabled", "initializationOnly")})
+                manifest["managedRuntimeSessions"] = sessions
+                manifest["managedBackendReady"] = managed_ready
             write_json(output / "result.json", manifest)
             write_json(output / "observed-gameplay.json", summarize_game_log(server / "logs/latest.log"))
     print(json.dumps(manifest, ensure_ascii=False), flush=True)
@@ -442,6 +470,7 @@ def main():
     parser.add_argument("--restore-model", help="catalog model name; omitted uses the saved selection")
     parser.add_argument("--model-catalog", type=Path, help="explicit private catalog for in-game list/info/save")
     parser.add_argument("--save-model-at-end", help="save the normal live brain after gameplay, await acknowledgement and verify its reference")
+    parser.add_argument("--managed-backend", action="store_true", help="acceptance of plugin-owned inference backend; never starts a second external trainer")
     parser.add_argument("--upgrade-context", action="store_true", help="explicitly expand v1 trained context when resuming PPO")
     parser.add_argument("--start-state", choices=("fresh", "pretrained", "resume"))
     parser.add_argument("--inference-only", action="store_true", help="shared backend with learning disabled, for startup/mode scenarios")

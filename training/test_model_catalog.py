@@ -140,6 +140,26 @@ class ModelCatalogTests(unittest.TestCase):
             finally:
                 trainer.close()
 
+    def test_nested_plugin_runs_and_restored_session_flags_cannot_hide_prepared_provenance(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            nested = root / "lab/server/plugins/MinecraftAI/brain-runtime/run-fixture"
+            state = self.initial(nested)
+            (root / "lab/manifest.json").write_text(json.dumps({"preparedScenario": True}))
+            self.assertTrue(model_catalog.restricted_training_use(state["checkpoint"]))
+            with self.assertRaises(ValueError):
+                model_catalog.ModelCatalog(root / "catalog").save("nested", state)
+            normal = self.initial(root / "normal")
+            marked = dict(normal, notForAutonomousTraining=True)
+            trainer = PaperTrainer(root / "restored", seed=9, rollout_size=32, maximum=32, max_bytes=4*1024*1024,
+                    start_state="resume", resume=Path(normal["checkpoint"]), restore_state=marked, learning_enabled=False)
+            try:
+                self.assertTrue(trainer.restricted_training_use)
+            finally:
+                trainer.close()
+            with self.assertRaises(ValueError):
+                model_catalog.ModelCatalog(root / "catalog").save("restored", brain_session.load(root / "restored/runtime-session.json"))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -42,11 +42,16 @@ def write_record(path, payload):
 def restricted_training_use(checkpoint):
     checkpoint = Path(checkpoint)
     run = checkpoint.parent.parent.parent if checkpoint.parent.parent.name == "checkpoints" else checkpoint.parent
-    for path in (run / "catalog-use.json", run.parent / "manifest.json", run.parent / "result.json"):
-        if path.is_file():
-            value = json.loads(path.read_bytes())
-            if value.get("notForAutonomousTraining") or value.get("preparedScenario"):
-                return True
+    # A plugin-owned run is nested below server/plugins/<plugin>/brain-runtime, unlike the external lab backend.
+    for ancestor in [run, *list(run.parents)[:7]]:
+        for name in ("catalog-use.json", "manifest.json", "result.json"):
+            path = ancestor / name
+            if path.is_file():
+                if path.is_symlink() or path.stat().st_size > 131072:
+                    raise ValueError("unsafe model-use provenance")
+                value = json.loads(path.read_bytes())
+                if value.get("notForAutonomousTraining") or value.get("preparedScenario"):
+                    return True
     return False
 
 
