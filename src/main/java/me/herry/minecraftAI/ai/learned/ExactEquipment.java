@@ -84,6 +84,8 @@ final class ExactEquipment {
         var source = menu.getSlot(menuSlot(choice.source()));
         var target = menu.getSlot(menuSlot(choice.destination()));
         var from = source.getItem(); var to = target.getItem();
+        if (!from.isEmpty() && from.getCount() > source.getMaxStackSize(from)
+                || !to.isEmpty() && to.getCount() > target.getMaxStackSize(to)) return false;
         if (!from.isEmpty() && (!source.mayPickup(handle) || !target.mayPlace(from))) return false;
         if (!to.isEmpty() && (!target.mayPickup(handle) || !source.mayPlace(to) || to.getCount() > source.getMaxStackSize(to))) return false;
         return amounts(from.getCount(), to.getCount(), from.isEmpty() ? 64 : target.getMaxStackSize(from)) != null;
