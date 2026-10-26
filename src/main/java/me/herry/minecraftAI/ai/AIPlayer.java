@@ -123,7 +123,7 @@ public final class AIPlayer {
             return;
         }
         if (state == AIState.RUNNING) {
-            String text = services.config().learnedControl ? (services.config().trainingControl ? "학습 모드" : "자율 플레이")
+            String text = services.config().learnedControl ? brain.policyLabel()
                     : brain.getCurrentGoal().name() + (brain.getForcedGoal() != null ? " (고정)" : "");
             label.update(body.getPlayer(), text, NamedTextColor.YELLOW);
         } else {
@@ -534,10 +534,13 @@ public final class AIPlayer {
     public boolean acceptsLegacyGoals() { return !services.config().learnedControl; }
 
     public java.util.List<String> policyDetails() { return brain.policyDetails(); }
+    public String connectedBrainId() { return brain.connectedBrainId(); }
+    public java.util.concurrent.CompletableFuture<Void> prepareLearningChange() { requireMainThread(); return brain.prepareLearningChange(); }
+    public void acceptLearningChange(me.herry.minecraftAI.ai.learned.PpoBridge.Status status) { requireMainThread(); brain.acceptLearningChange(status); }
 
     public String policyStatus() {
         if (!services.config().learnedControl) return "기존 규칙 정책 (명시적 teacher 모드)";
-        if (services.config().trainingControl) return services.trainingBridge() == null ? "학습 연결 준비 안 됨" : "강화학습 연결 모드 (학습 완료와 구분)";
+        if (services.config().trainingControl) return services.trainingBridge() == null ? "학습 연결 준비 안 됨" : brain.policyLabel() + " (실제 성능과 구분)";
         return services.learnedPolicy() == null ? "호환 학습 모델 없음 — 자율 실행 중지"
                 : "학습 가중치 추론 " + services.learnedPolicy().sha256().substring(0, 12);
     }

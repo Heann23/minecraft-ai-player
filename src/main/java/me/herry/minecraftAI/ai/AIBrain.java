@@ -417,6 +417,7 @@ final class AIBrain {
 
     /** Learned mode owns the same Plan/input lane; GoalSystem, heuristic utilities and Teacher are not consulted. */
     private void tickLearned(long now) {
+        if (trainingControl != null && trainingControl.isTransitioning()) return;
         if (!learnedLane || !ai.getWorldId().equals(learnedWorld)) {
             if (trainingControl != null && learnedLane) trainingControl.end(ai, activeLearned, (int) Math.min(2400, now - learnedStartedAt));
             if (plan != null) plan.cancel(ai);
@@ -495,6 +496,20 @@ final class AIBrain {
         if (trainingControl != null) return trainingControl.details();
         if (learnedPolicy != null) return learnedPolicy.details();
         return List.of(ai.getConfig().learnedControl ? "호환 모델 없음 — 실행 중지" : "Teacher 진단 모드 — 학습 모델 아님");
+    }
+
+    String policyLabel() { return trainingControl == null ? "자율 플레이" : trainingControl.modeLabel(); }
+    String connectedBrainId() { return trainingControl == null ? null : trainingControl.brainId(); }
+    java.util.concurrent.CompletableFuture<Void> prepareLearningChange() {
+        if (trainingControl == null) return java.util.concurrent.CompletableFuture.failedFuture(new IllegalStateException("backend unavailable"));
+        var drained = trainingControl.endAsync(ai, activeLearned, (int) Math.min(2400, ai.getTicks() - learnedStartedAt));
+        if (plan != null) plan.cancel(ai);
+        plan = null; activeLearned = null;
+        ai.getNavigation().stop(); ai.getBody().clearInputs();
+        return drained;
+    }
+    void acceptLearningChange(me.herry.minecraftAI.ai.learned.PpoBridge.Status status) {
+        if (trainingControl != null) trainingControl.acceptControl(status);
     }
 
     private Choice choose(Situation situation, long now) {

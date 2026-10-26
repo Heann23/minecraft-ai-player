@@ -30,7 +30,7 @@ import java.util.function.Function;
  */
 public class AICommand implements TabExecutor {
     public static final String PERMISSION = "minecraftai.admin";
-    private static final List<String> SUB_COMMANDS = List.of("spawn", "remove", "start", "stop", "status", "stats", "inv", "goal", "debug",
+    private static final List<String> SUB_COMMANDS = List.of("spawn", "remove", "start", "stop", "status", "stats", "training", "inv", "goal", "debug",
             "why", "brain", "plan", "observe", "learn", "memory", "perf", "home", "say", "save");
     // 디버그를 켜고 끄는 말. "/ai debug start" 처럼 입력해도 알아듣게 한다.
     private static final List<String> SWITCH_ON = List.of("on", "start", "true", "enable", "켜기");
@@ -63,6 +63,7 @@ public class AICommand implements TabExecutor {
             case "stop" -> stop(sender, args);
             case "status" -> status(sender, args);
             case "stats" -> inspect(sender, args, "두뇌와 학습 상태", AIPlayer::policyDetails);
+            case "training" -> training(sender, args);
             case "inv", "inventory" -> inventory(sender, args);
             case "goal" -> goal(sender, args);
             case "debug" -> debug(sender, args);
@@ -138,6 +139,15 @@ public class AICommand implements TabExecutor {
         }
         String text = String.join(" ", Arrays.copyOfRange(args, 2, args.length));
         controller.tell(ai, sender.getName(), text);
+    }
+
+    private void training(CommandSender sender, String[] args) {
+        if (args.length != 2 || !List.of("on", "off").contains(args[1].toLowerCase(Locale.ROOT))) {
+            error(sender, "사용법: /ai training <on|off>"); return;
+        }
+        controller.changeLearning(args[1].equalsIgnoreCase("on"), (success, message) -> {
+            if (success) info(sender, message); else error(sender, message);
+        });
     }
 
     private void save(CommandSender sender) {
@@ -322,6 +332,7 @@ public class AICommand implements TabExecutor {
                         filter(names(), args[1]);
                 case "goal" -> filter(goalNames(), args[1]);
                 case "debug" -> filter(List.of("on", "off"), args[1]);
+                case "training" -> filter(List.of("on", "off"), args[1]);
                 case "home" -> filter(List.of("set", "clear"), args[1]);
                 default -> List.of();
             };

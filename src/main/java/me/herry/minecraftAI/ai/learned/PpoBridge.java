@@ -10,6 +10,14 @@ import java.util.concurrent.*;
 /** Local development-only file transport. World access never leaves the server thread. No network or LLM commands. */
 public final class PpoBridge implements AutoCloseable {
     public static final String SCHEMA = "minecraft-paper-ppo/v2";
+    public static final String CONTROL_SCHEMA = "minecraft-brain-control/v1";
+    public record Status(long modelVersion, long environmentSteps, Metadata metadata) {}
+    public record Control(String schema, String id, String operation, String brainId, boolean enabled) {}
+    public record ControlResult(String schema, String id, boolean ok, String error, String weightsSha256, Status status) {}
+    private final java.util.concurrent.atomic.AtomicBoolean transitioning = new java.util.concurrent.atomic.AtomicBoolean();
+    public boolean beginTransition() { return transitioning.compareAndSet(false, true); }
+    public boolean isTransitioning() { return transitioning.get(); }
+    public void endTransition() { transitioning.set(false); }
     public record Transition(String session, long sequence, PolicyFrame frame, int index,
                              double logProbability, double value, long modelVersion, double reward,
                              int elapsedTicks, boolean terminated, boolean truncated, long appliedTick, String nextWorld, double[] nextState) {
@@ -67,6 +75,46 @@ public final class PpoBridge implements AutoCloseable {
         String id = UUID.randomUUID().toString();
         String payload = gson.toJson(new Query(SCHEMA, "minecraft-paper", id, frame, transitions));
         return CompletableFuture.supplyAsync(() -> exchange(id, payload, frame), io);
+    }
+
+    public CompletableFuture<ControlResult> setLearning(String brainId, boolean enabled) {
+        UUID.fromString(brainId);
+        String id = UUID.randomUUID().toString();
+        String payload = gson.toJson(new Control(CONTROL_SCHEMA, id, "learning", brainId, enabled));
+        return CompletableFuture.supplyAsync(() -> exchangeControl(id, payload, brainId, enabled), io);
+    }
+
+    private ControlResult exchangeControl(String id, String payload, String brainId, boolean enabled) {
+        Path temporary = directory.resolve(id + ".control.tmp");
+        Path request = directory.resolve(id + ".control.json");
+        Path response = directory.resolve(id + ".control-response.json");
+        try {
+            Files.writeString(temporary, payload, StandardOpenOption.CREATE_NEW);
+            Files.move(temporary, request, StandardCopyOption.ATOMIC_MOVE);
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+            while (System.nanoTime() < deadline && !Thread.currentThread().isInterrupted()) {
+                if (Files.isRegularFile(response)) {
+                    if (Files.size(response) > 16384) throw new IOException("oversized brain control response");
+                    var result = gson.fromJson(Files.readString(response), ControlResult.class);
+                    if (result == null || !CONTROL_SCHEMA.equals(result.schema()) || !id.equals(result.id()))
+                        throw new IOException("invalid brain control response identity");
+                    if (!result.ok()) throw new IOException("brain state change rejected");
+                    var status = result.status();
+                    if (status == null || status.metadata() == null || status.modelVersion() < 0 || status.environmentSteps() < 0
+                            || !brainId.equals(status.metadata().brainId()) || status.metadata().learningEnabled() != enabled
+                            || result.weightsSha256() == null || !result.weightsSha256().matches("[0-9a-f]{64}"))
+                        throw new IOException("brain control acknowledgement mismatch");
+                    return result;
+                }
+                Thread.sleep(10);
+            }
+            throw new IOException("brain control timeout; change not confirmed");
+        } catch (IOException | InterruptedException | RuntimeException failure) {
+            if (failure instanceof InterruptedException) Thread.currentThread().interrupt();
+            throw new CompletionException(failure);
+        } finally {
+            for (Path path : new Path[]{temporary, request, response}) try { Files.deleteIfExists(path); } catch (IOException ignored) {}
+        }
     }
 
     private Response exchange(String id, String payload, PolicyFrame frame) {

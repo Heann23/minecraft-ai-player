@@ -12,7 +12,7 @@ import numpy as np
 import brain_session
 
 from rl_actor import ActorCritic, inputs, generalized_advantages, STATE_SIZE, ACTION_SIZE
-from train_paper_ppo import PaperTrainer, SCHEMA, resume_checkpoint, serve, exchange_request
+from train_paper_ppo import PaperTrainer, SCHEMA, CONTROL_SCHEMA, resume_checkpoint, serve, exchange_request
 
 
 def frame():
@@ -146,6 +146,28 @@ class ActorTests(unittest.TestCase):
 
 
 class BridgeProtocolTests(unittest.TestCase):
+    def test_learning_controls_preserve_the_same_weights_identity_and_durable_disabled_state(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            trainer = PaperTrainer(Path(temporary) / "run", seed=7, rollout_size=32, maximum=32, max_bytes=16*1024*1024)
+            def control(enabled, brain=None):
+                return trainer.control({"schema": CONTROL_SCHEMA, "id": str(uuid.uuid4()), "operation": "learning",
+                                        "brainId": brain or trainer.brain_id, "enabled": enabled})
+            try:
+                off = control(False)
+                self.assertFalse(off["status"]["metadata"]["learningEnabled"])
+                self.assertFalse(brain_session.load(trainer.output / "runtime-session.json")["learningEnabled"])
+                trainer.handle({"schema": SCHEMA, "id": str(uuid.uuid4()), "environment": "minecraft-paper", "frame": frame()})
+                on = control(True)
+                self.assertTrue(on["status"]["metadata"]["learningEnabled"])
+                self.assertEqual(off["weightsSha256"], on["weightsSha256"])
+                self.assertEqual(off["status"]["metadata"]["brainId"], on["status"]["metadata"]["brainId"])
+                self.assertEqual(trainer.model.updates, 0)
+                with self.assertRaises(ValueError):
+                    control(False, str(uuid.uuid4()))
+                self.assertTrue(trainer.learning_enabled)
+            finally:
+                trainer.close()
+
     def test_session_restores_the_same_fresh_brain_rng_and_disabled_learning_without_world_data(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

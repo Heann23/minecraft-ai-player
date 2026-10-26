@@ -22,7 +22,7 @@ public final class TrainingControl {
     private CompletableFuture<PpoBridge.Response> pending;
     private double objectiveReward;
     private long warnAfter;
-    private PpoBridge.Response latestResponse;
+    private PpoBridge.Status latestStatus;
     private long latestReceivedTick;
 
     public TrainingControl(PpoBridge bridge, Consumer<String> warn) { this.bridge = bridge; this.warn = warn; }
@@ -32,15 +32,17 @@ public final class TrainingControl {
         if (pending != null && pending.isDone()) {
             try {
                 var response = pending.join();
-                latestResponse = response; latestReceivedTick = now;
+                latestStatus = new PpoBridge.Status(response.modelVersion(), response.environmentSteps(), response.metadata()); latestReceivedTick = now;
                 // Acknowledgement is independent of whether this delayed decision can still be executed.
                 outbox.removeAll(sent);
                 if (ai.getWorldId().equals(requested.frame().world()) && now >= requested.frame().serverTick()
                         && now - requested.frame().serverTick() <= 40 && ai.getBody().isUsable()) {
                     var actual = PolicyCandidates.observe(ai, active, activeTicks);
                     PolicyFrame after = new PolicyFrame(ai.getWorldId(), now, actual.features(), requested.frame().options(), false);
-                    var previous = episode.finish(after, actual.body(), actual.stock(), false, false, objectiveReward);
+                    boolean learning = response.metadata() == null || response.metadata().learningEnabled();
+                    var previous = episode.finish(after, actual.body(), actual.stock(), false, !learning, objectiveReward);
                     if (previous != null) { outbox.add(previous); objectiveReward = 0; }
+                    if (!learning) episode = new TrainingEpisode();
                     return new Decision(requested, requested.candidates().get(response.index()), response, actual, now);
                 }
             } catch (RuntimeException failure) {
@@ -61,17 +63,27 @@ public final class TrainingControl {
     }
 
     public void applied(Decision decision) {
+        if (decision.response().metadata() != null && !decision.response().metadata().learningEnabled()) return;
         episode.begin(decision.requested(), decision.response(), decision.appliedState(), decision.appliedTick());
     }
 
+    public boolean isTransitioning() { return bridge.isTransitioning(); }
+    public String brainId() { return latestStatus == null || latestStatus.metadata() == null ? null : latestStatus.metadata().brainId(); }
+    public void acceptControl(PpoBridge.Status status) { latestStatus = status; latestReceivedTick = Integer.toUnsignedLong(Bukkit.getCurrentTick()); }
+    public String modeLabel() {
+        if (bridge.isTransitioning()) return "학습 설정 전환 중";
+        if (latestStatus == null || latestStatus.metadata() == null) return "두뇌 연결 대기";
+        return latestStatus.metadata().learningEnabled() ? "학습 중" : "고정 가중치 추론";
+    }
+
     public List<String> details() {
-        if (latestResponse == null) return List.of("두뇌 상태: 아직 학습 프로세스의 상태 응답을 받지 못함");
-        var metadata = latestResponse.metadata();
+        if (latestStatus == null) return List.of("두뇌 상태: 아직 학습 프로세스의 상태 응답을 받지 못함");
+        var metadata = latestStatus.metadata();
         if (metadata == null) return List.of("두뇌 상태: 이전 프로토콜 응답 — 상세 정보 미기록");
         return List.of("두뇌 ID: " + metadata.brainId(), "학습 당시 시작 상태: " + metadata.trainingStartState(),
                 "초기 가중치 상태: " + (metadata.initializationOnly() == null ? "미기록" : metadata.initializationOnly()),
-                "학습 활성화: " + metadata.learningEnabled(), "최근 수신 정책 버전: " + latestResponse.modelVersion(),
-                "누적 수집 전이: " + latestResponse.environmentSteps(), "가중치 갱신: " + metadata.gradientUpdates(),
+                "학습 활성화: " + metadata.learningEnabled(), "최근 수신 정책 버전: " + latestStatus.modelVersion(),
+                "누적 수집 전이: " + latestStatus.environmentSteps(), "가중치 갱신: " + metadata.gradientUpdates(),
                 "정책 저장 상태: " + metadata.saveState(),
                 "체크포인트 해시: " + (metadata.checkpointSha256() == null ? "아직 없음" : metadata.checkpointSha256()),
                 "상태 수신 후 경과 틱: " + Math.max(0, Integer.toUnsignedLong(Bukkit.getCurrentTick()) - latestReceivedTick),
@@ -83,6 +95,13 @@ public final class TrainingControl {
     }
 
     public void end(AIPlayer ai, PolicyCandidates.Candidate active, int activeTicks) {
+        endAsync(ai, active, activeTicks).whenComplete((ignored, failure) -> {
+            if (failure != null) warn.accept("Final PPO acknowledgement unavailable; do not assume the terminal transition was learned");
+        });
+    }
+
+    public CompletableFuture<Void> endAsync(AIPlayer ai, PolicyCandidates.Candidate active, int activeTicks) {
+        CompletableFuture<Void> result = CompletableFuture.completedFuture(null);
         if (pending != null) pending.cancel(false);
         pending = null;
         try {
@@ -97,14 +116,14 @@ public final class TrainingControl {
                 var last = outbox.getLast();
                 PolicyFrame terminal = new PolicyFrame(ai.getWorldId(), Integer.toUnsignedLong(Bukkit.getCurrentTick()),
                         last.nextState(), last.frame().options(), false);
-                bridge.request(terminal, List.copyOf(outbox)).whenComplete((ignored, failure) -> {
-                    if (failure != null) warn.accept("Final PPO acknowledgement unavailable; do not assume the terminal transition was learned");
-                });
+                result = bridge.request(terminal, List.copyOf(outbox)).thenApply(ignored -> null);
             }
         } catch (RuntimeException failure) {
             warn.accept("Could not capture final RL state; missing transition is not converted into success");
+            result = CompletableFuture.failedFuture(failure);
         } finally {
             outbox.clear(); sent = List.of(); requested = null; objectiveReward = 0; episode = new TrainingEpisode();
         }
+        return result;
     }
 }

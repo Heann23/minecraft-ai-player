@@ -83,6 +83,7 @@ public final class AIController {
     private @Nullable BukkitTask tickTask;
     private long serverTicks;
     private long lastSaveTick;
+    private long policyControlGeneration;
 
     /**
      * @param store AI 상태를 저장할 곳. null 이면 저장하지 않는다.
@@ -383,9 +384,55 @@ public final class AIController {
     }
 
     /**
-     * 플러그인이 꺼질 때 호출된다. 상태를 저장하고, 모든 AI 를 내보내고, 틱 작업을 멈춘다.
+     * 공유 두뇌의 실행 전이를 확인한 뒤 같은 가중치의 학습 여부만 비동기로 변경한다.
      */
+    public void changeLearning(boolean enabled, BiConsumer<Boolean, String> completed) {
+        if (!Bukkit.isPrimaryThread()) throw new IllegalStateException("brain control must start on server thread");
+        if (trainingBridge == null) {
+            boolean alreadyOff = !enabled && services.learnedPolicy() != null;
+            completed.accept(alreadyOff, alreadyOff ? "현재 두뇌는 이미 고정 가중치 추론 상태입니다."
+                    : "현재 두뇌의 학습 연결이 준비되지 않았습니다. 모델을 초기화하거나 다른 모델로 바꾸지 않았습니다.");
+            return;
+        }
+        var identities = entries.values().stream().map(entry -> entry.ai.connectedBrainId()).filter(java.util.Objects::nonNull).distinct().toList();
+        if (identities.size() != 1) {
+            completed.accept(false, "같은 두뇌의 상태 응답을 먼저 확인해야 합니다. /ai stats 로 연결 상태를 확인하세요.");
+            return;
+        }
+        if (!trainingBridge.beginTransition()) { completed.accept(false, "다른 두뇌 설정 변경을 확인 중입니다."); return; }
+        long generation = ++policyControlGeneration;
+        var drains = new ArrayList<java.util.concurrent.CompletableFuture<Void>>();
+        try {
+            for (Entry entry : entries.values()) drains.add(entry.ai.prepareLearningChange());
+        } catch (RuntimeException failure) {
+            trainingBridge.endTransition(); completed.accept(false, "현재 행동을 안전하게 정리하지 못해 설정을 바꾸지 않았습니다."); return;
+        }
+        java.util.concurrent.CompletableFuture.allOf(drains.toArray(java.util.concurrent.CompletableFuture[]::new))
+                .thenCompose(ignored -> trainingBridge.setLearning(identities.getFirst(), enabled))
+                .whenComplete((result, failure) -> {
+                    if (!plugin.isEnabled()) { trainingBridge.endTransition(); return; }
+                    try {
+                        Bukkit.getScheduler().runTask(plugin, () -> {
+                            if (generation != policyControlGeneration) return;
+                            if (failure == null) for (Entry entry : entries.values()) entry.ai.acceptLearningChange(result.status());
+                            trainingBridge.endTransition();
+                            if (failure != null) {
+                                plugin.getLogger().log(Level.WARNING, "Brain learning change not confirmed; no model initialization", failure);
+                                completed.accept(false, "학습 상태 변경을 확인하지 못했습니다. 두뇌를 초기화하지 않았으며 다음 상태 응답을 확인해야 합니다.");
+                            } else {
+                                plugin.getLogger().info("Brain " + identities.getFirst() + " learning=" + enabled + " weights=" + result.weightsSha256());
+                                completed.accept(true, "같은 두뇌의 학습을 " + (enabled ? "켰습니다." : "껐습니다. 고정 가중치로 추론합니다."));
+                            }
+                        });
+                    } catch (RuntimeException stopped) {
+                        trainingBridge.endTransition();
+                        plugin.getLogger().warning("Server stopped before brain state acknowledgement could be delivered");
+                    }
+                });
+    }
+
     public void shutdown() {
+        policyControlGeneration++;
         saveAll(false, "shutdown");
         List<Entry> all = new ArrayList<>(entries.values());
         entries.clear();

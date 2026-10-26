@@ -24,6 +24,7 @@ import checkpoint_store
 import brain_session
 
 SCHEMA = "minecraft-paper-ppo/v2"
+CONTROL_SCHEMA = "minecraft-brain-control/v1"
 MAX_PACKET = 4 * 1024 * 1024
 
 
@@ -203,6 +204,34 @@ class PaperTrainer:
                 "contextUpgrade": self.checkpoint_upgrade})
         self.last_session_save = time.monotonic()
 
+    def control(self, packet):
+        if set(packet) != {"schema", "id", "operation", "brainId", "enabled"} \
+                or packet["schema"] != CONTROL_SCHEMA or packet["operation"] != "learning":
+            raise ValueError("unsupported brain control request")
+        uuid.UUID(packet["id"])
+        if packet["brainId"] != self.brain_id or type(packet["enabled"]) is not bool:
+            raise ValueError("brain identity/learning flag mismatch")
+        # The caller drains its active transition first. Finish an already submitted optimizer before acknowledging pause.
+        self.poll_training(wait=True)
+        previous = self.learning_enabled
+        self.learning_enabled = packet["enabled"]
+        try:
+            self.persist_session()  # Durable mode first; failure is never acknowledged as a completed switch.
+        except Exception:
+            self.learning_enabled = previous
+            raise
+        weights_hash = hashlib.sha256(checkpoint_store.encoded({key: value.tolist() for key, value in self.model.params.items()})).hexdigest()
+        return {"schema": CONTROL_SCHEMA, "id": packet["id"], "ok": True, "weightsSha256": weights_hash,
+                "status": self.status()}
+
+    def status(self):
+        return {"modelVersion": self.model.version, "environmentSteps": self.parent_steps + self.steps,
+                "metadata": {"brainId": self.brain_id, "trainingStartState": self.training_start_state,
+                             "initializationOnly": self.model.updates == 0,
+                             "gradientUpdates": self.model.updates, "learningEnabled": self.learning_enabled,
+                             "saveState": "updating" if self.training is not None else "saved" if self.saved_model_version == self.model.version else "not-saved",
+                             "checkpointSha256": self.saved_checkpoint_sha}}
+
     def save_initial_state(self):
         empty_hash = hashlib.sha256(b"").hexdigest()
         initial = {"schema": "minecraft-paper-checkpoint/v1", "environment": "minecraft-paper", "initializationOnly": True,
@@ -270,12 +299,7 @@ class PaperTrainer:
         self.decisions += 1
         if time.monotonic() - self.last_session_save >= self.session_save_seconds:
             self.persist_session()
-        return {"schema": SCHEMA, "id": packet["id"], **result, "environmentSteps": self.parent_steps + self.steps,
-                "metadata": {"brainId": self.brain_id, "trainingStartState": self.training_start_state,
-                             "initializationOnly": self.model.updates == 0,
-                             "gradientUpdates": self.model.updates, "learningEnabled": self.learning_enabled,
-                             "saveState": "updating" if self.training is not None else "saved" if self.saved_model_version == self.model.version else "not-saved",
-                             "checkpointSha256": self.saved_checkpoint_sha}}
+        return {"schema": SCHEMA, "id": packet["id"], **result, **self.status()}
 
     def preserve_discard(self, transition, reason):
         encoded = (json.dumps({"reason": reason, "activePolicyVersion": self.model.version, "transition": transition},
@@ -416,11 +440,48 @@ def exchange_request(request: Path, channel: Path, trainer: PaperTrainer, pendin
             pass
 
 
+def exchange_control(request: Path, channel: Path, trainer: PaperTrainer, pending: dict):
+    handling = False
+    try:
+        if request not in pending:
+            if len(pending) >= 64:
+                raise RuntimeError("brain control retry budget exhausted")
+            if request.is_symlink() or request.stat().st_size > 16384:
+                raise ValueError("control request size/retry budget exceeded")
+            packet = json.loads(request.read_text(encoding="utf-8"))
+            if request.name != str(uuid.UUID(packet["id"])) + ".control.json":
+                raise ValueError("control identity mismatch")
+            handling = True
+            try:
+                result = trainer.control(packet)
+            except ValueError as failure:
+                result = {"schema": CONTROL_SCHEMA, "id": packet["id"], "ok": False, "error": str(failure)[:160]}
+            handling = False
+            pending[request] = {"response": result, "published": False}
+        saved = pending[request]
+        if not saved["published"] and request.exists():
+            write_atomic(channel / (request.stem.removesuffix(".control") + ".control-response.json"), saved["response"])
+            saved["published"] = True
+        request.unlink(missing_ok=True); pending.pop(request, None)
+    except FileNotFoundError:
+        pending.pop(request, None)
+    except PermissionError:
+        if handling:
+            raise
+    except (ValueError, KeyError, TypeError):
+        # Invalid controls never select another model or affect world actions.
+        try:
+            request.unlink(missing_ok=True); pending.pop(request, None)
+        except PermissionError:
+            pending[request] = {"response": None, "published": True}
+
+
 def serve(channel: Path, trainer: PaperTrainer, stop_file: Path | None = None, max_decisions: int | None = None):
     if max_decisions is not None and (type(max_decisions) is not int or max_decisions < 1):
         raise ValueError("max-decisions must be positive")
     channel.mkdir(parents=True, exist_ok=True)
     pending = {}
+    controls = {}
     max_decisions = max_decisions or max(1000, trainer.maximum * 16)
     try:
         while trainer.steps < trainer.maximum or trainer.training is not None:
@@ -429,6 +490,10 @@ def serve(channel: Path, trainer: PaperTrainer, stop_file: Path | None = None, m
             if stop_file is not None and stop_file.is_file():
                 break
             trainer.poll_training()
+            for disappeared in [path for path in controls if not path.exists()]:
+                controls.pop(disappeared, None)
+            for request in sorted(channel.glob("*.control.json")):
+                exchange_control(request, channel, trainer, controls)
             for disappeared in [path for path in pending if not path.exists()]:
                 pending.pop(disappeared, None)
             for request in sorted(channel.glob("*.request.json")):
