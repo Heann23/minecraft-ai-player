@@ -21,6 +21,8 @@ public final class TrainingControl {
     private PolicyCandidates.Capture requested;
     private CompletableFuture<PpoBridge.Response> pending;
     private double objectiveReward;
+    private final AdvancementRewards advancementRewards = new AdvancementRewards();
+    private final List<String> objectiveEvents = new ArrayList<>();
     private long warnAfter;
     private PpoBridge.Status latestStatus;
     private long latestReceivedTick;
@@ -40,8 +42,10 @@ public final class TrainingControl {
                     var actual = PolicyCandidates.observe(ai, active, activeTicks);
                     PolicyFrame after = new PolicyFrame(ai.getWorldId(), now, actual.features(), requested.frame().options(), false);
                     boolean learning = response.metadata() == null || response.metadata().learningEnabled();
-                    var previous = episode.finish(after, actual.body(), actual.stock(), false, !learning, objectiveReward);
-                    if (previous != null) { outbox.add(previous); objectiveReward = 0; }
+                    var previous = episode.finish(after, actual.body(), actual.stock(), false, !learning, objectiveReward, objectiveEvents);
+                    if (previous != null) outbox.add(previous);
+                    // Invalidated clocks do not transfer old progress credit to a later action.
+                    objectiveReward = 0; objectiveEvents.clear();
                     if (!learning) episode = new TrainingEpisode();
                     return new Decision(requested, requested.candidates().get(response.index()), response, actual, now);
                 }
@@ -95,6 +99,11 @@ public final class TrainingControl {
         if (episode.active() && Double.isFinite(actualReward)) objectiveReward = Math.clamp(objectiveReward + actualReward, -100, 100);
     }
 
+    public void advancement(String key, boolean completed, boolean displayed) {
+        double reward = advancementRewards.observe(key, completed, displayed, episode.active() && objectiveEvents.size() < 32);
+        if (reward > 0) { objective(reward); objectiveEvents.add("advancement:" + key); }
+    }
+
     public void end(AIPlayer ai, PolicyCandidates.Candidate active, int activeTicks) {
         endAsync(ai, active, activeTicks).whenComplete((ignored, failure) -> {
             if (failure != null) warn.accept("Final PPO acknowledgement unavailable; do not assume the terminal transition was learned");
@@ -110,7 +119,7 @@ public final class TrainingControl {
                 long now = Integer.toUnsignedLong(Bukkit.getCurrentTick());
                 var actual = PolicyCandidates.observe(ai, active, activeTicks);
                 PolicyFrame after = new PolicyFrame(ai.getWorldId(), now, actual.features(), episode.before().options(), false);
-                var ended = episode.finish(after, actual.body(), actual.stock(), ai.getPlayer().isDead(), true, objectiveReward);
+                var ended = episode.finish(after, actual.body(), actual.stock(), ai.getPlayer().isDead(), true, objectiveReward, objectiveEvents);
                 if (ended != null) outbox.add(ended);
             }
             if (!outbox.isEmpty()) {
@@ -123,7 +132,7 @@ public final class TrainingControl {
             warn.accept("Could not capture final RL state; missing transition is not converted into success");
             result = CompletableFuture.failedFuture(failure);
         } finally {
-            outbox.clear(); sent = List.of(); requested = null; objectiveReward = 0; episode = new TrainingEpisode();
+            outbox.clear(); sent = List.of(); requested = null; objectiveReward = 0; objectiveEvents.clear(); episode = new TrainingEpisode();
         }
         return result;
     }

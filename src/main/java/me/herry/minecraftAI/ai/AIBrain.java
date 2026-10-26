@@ -492,6 +492,10 @@ final class AIBrain {
         if (learnedLane && trainingControl != null) trainingControl.objective(actualReward);
     }
 
+    void recordLearningAdvancement(String key, boolean completed, boolean displayed) {
+        if (learnedLane && trainingControl != null) trainingControl.advancement(key, completed, displayed);
+    }
+
     List<String> policyDetails() {
         if (trainingControl != null) return trainingControl.details();
         if (learnedPolicy != null) return learnedPolicy.details();

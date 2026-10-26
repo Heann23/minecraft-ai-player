@@ -72,6 +72,15 @@ public class AIPlayerListener implements Listener {
         if (ai != null) ai.recordLearningObjective(50);
     }
 
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onAdvancementCompleted(org.bukkit.event.player.PlayerAdvancementDoneEvent event) {
+        AIPlayer ai = controller.getByEntity(event.getPlayer());
+        if (ai == null) return;
+        var advancement = event.getAdvancement();
+        ai.recordLearningAdvancement(advancement.getKey().toString(),
+                event.getPlayer().getAdvancementProgress(advancement).isDone(), advancement.getDisplay() != null);
+    }
+
     // 가짜 플레이어는 접속을 끊으라는 패킷을 받을 클라이언트가 없어서 킥을 당해도 서버에 그대로 남는다.
     // 킥이나 밴을 당하면 직접 제거해서 진짜 플레이어가 킥당했을 때와 같은 결과가 되게 한다.
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)

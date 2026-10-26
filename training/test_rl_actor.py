@@ -12,7 +12,7 @@ import numpy as np
 import brain_session
 
 from rl_actor import ActorCritic, inputs, generalized_advantages, STATE_SIZE, ACTION_SIZE
-from train_paper_ppo import PaperTrainer, SCHEMA, CONTROL_SCHEMA, resume_checkpoint, serve, exchange_request
+from train_paper_ppo import PaperTrainer, SCHEMA, CONTROL_SCHEMA, resume_checkpoint, serve, exchange_request, validate_transition
 
 
 def frame():
@@ -37,6 +37,39 @@ def row(model, session="a", sequence=0, reward=1, terminal=True):
 
 
 class ActorTests(unittest.TestCase):
+    def test_reward_versions_preserve_legacy_rows_and_validate_actual_progress_event_metadata(self):
+        model = ActorCritic(7, hidden=4)
+        sample = row(model, session=str(uuid.uuid4()))
+        sample.pop("nextValue")
+        validate_transition(sample)
+        sample.update(rewardContract="survival-progress/v2", objectiveEvents=["advancement:minecraft:story/mine_stone"])
+        validate_transition(sample)
+        for invalid in (dict(sample, rewardContract="survival-progress/v1"),
+                        dict(sample, objectiveEvents=["Teacher says mine"]),
+                        dict(sample, objectiveEvents=sample["objectiveEvents"] * 2)):
+            with self.assertRaises(ValueError):
+                validate_transition(invalid)
+
+    def test_checkpoint_report_counts_only_the_reward_contracts_of_its_accepted_rollout(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "run"
+            trainer = PaperTrainer(output, seed=7, rollout_size=32, maximum=32, max_bytes=4*1024*1024)
+            session = str(uuid.uuid4())
+            try:
+                for start in (0, 16):
+                    rows = []
+                    for sequence in range(start, start+16):
+                        sample = row(trainer.model, session=session, sequence=sequence)
+                        sample.pop("nextValue")
+                        sample.update(rewardContract="survival-progress/v2", objectiveEvents=[])
+                        rows.append(sample)
+                    trainer.handle({"schema": SCHEMA, "environment": "minecraft-paper", "id": str(uuid.uuid4()),
+                                    "frame": frame(), "transitions": rows})
+            finally:
+                trainer.close()
+            report = json.loads((output / "training-report.json").read_bytes())
+            self.assertEqual(report["rewardContracts"], {"survival-progress/v2": 32})
+
     def test_explicit_context_upgrade_preserves_legacy_actor_critic_and_adam_without_inventing_learning(self):
         model = ActorCritic(7, hidden=4)
         model.fit([row(model)], epochs=1)

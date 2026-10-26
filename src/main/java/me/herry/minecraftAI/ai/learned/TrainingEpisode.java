@@ -9,7 +9,7 @@ import java.util.UUID;
 
 /** Actual game outcomes produce rewards; no Teacher decision, action score or assumed success is used as a label. */
 public final class TrainingEpisode {
-    public static final String REWARD_CONTRACT = "survival-progress/v1";
+    public static final String REWARD_CONTRACT = "survival-progress/v2";
     private final String session = UUID.randomUUID().toString();
     private final Set<String> observedItems = new HashSet<>();
     private long sequence;
@@ -26,6 +26,11 @@ public final class TrainingEpisode {
 
     public PpoBridge.Transition finish(PolicyFrame next, SurvivalObservation.Body body, Map<String, Integer> stock,
                                        boolean terminated, boolean truncated, double actualObjectiveReward) {
+        return finish(next, body, stock, terminated, truncated, actualObjectiveReward, java.util.List.of());
+    }
+
+    public PpoBridge.Transition finish(PolicyFrame next, SurvivalObservation.Body body, Map<String, Integer> stock,
+                                       boolean terminated, boolean truncated, double actualObjectiveReward, java.util.List<String> objectiveEvents) {
         if (before == null) return null;
         long elapsed = next.serverTick() - appliedTick;
         if (elapsed < 0 || elapsed > 2400) {
@@ -39,7 +44,7 @@ public final class TrainingEpisode {
                 + discoveries * 0.2 + actualObjectiveReward - (terminated ? 10 : 0);
         reward = Math.clamp(reward, -100, 100);
         var transition = new PpoBridge.Transition(session, sequence++, before, chosen.index(), chosen.logProbability(),
-                chosen.value(), chosen.modelVersion(), reward, (int) elapsed, terminated, truncated, appliedTick, next.world().toString(), next.state());
+                chosen.value(), chosen.modelVersion(), reward, (int) elapsed, terminated, truncated, appliedTick, next.world().toString(), next.state(), REWARD_CONTRACT, objectiveEvents);
         before = null; beforeBody = null; chosen = null;
         return transition;
     }

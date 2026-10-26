@@ -598,6 +598,10 @@ public final class AIPlayer {
         requireMainThread(); brain.recordLearningObjective(actualReward);
     }
 
+    public void recordLearningAdvancement(String key, boolean completed, boolean displayed) {
+        requireMainThread(); brain.recordLearningAdvancement(key, completed, displayed);
+    }
+
     public DecisionLog getDecisionLog() {
         return brain.getLog();
     }

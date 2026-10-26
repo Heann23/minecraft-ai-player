@@ -36,8 +36,22 @@ public final class PpoBridge implements AutoCloseable {
     public void endTransition() { transitioning.set(false); }
     public record Transition(String session, long sequence, PolicyFrame frame, int index,
                              double logProbability, double value, long modelVersion, double reward,
-                             int elapsedTicks, boolean terminated, boolean truncated, long appliedTick, String nextWorld, double[] nextState) {
+                             int elapsedTicks, boolean terminated, boolean truncated, long appliedTick, String nextWorld, double[] nextState,
+                             String rewardContract, java.util.List<String> objectiveEvents) {
+        public Transition(String session, long sequence, PolicyFrame frame, int index,
+                          double logProbability, double value, long modelVersion, double reward,
+                          int elapsedTicks, boolean terminated, boolean truncated, long appliedTick, String nextWorld, double[] nextState) {
+            this(session, sequence, frame, index, logProbability, value, modelVersion, reward, elapsedTicks,
+                    terminated, truncated, appliedTick, nextWorld, nextState, "survival-progress/v1", java.util.List.of());
+        }
         public Transition {
+            if (!java.util.Set.of("survival-progress/v1", "survival-progress/v2").contains(rewardContract))
+                throw new IllegalArgumentException("unsupported actual reward contract");
+            objectiveEvents = java.util.List.copyOf(objectiveEvents);
+            if (objectiveEvents.size() > 32 || objectiveEvents.stream().distinct().count() != objectiveEvents.size()
+                    || objectiveEvents.stream().anyMatch(key -> key.length() > 268 || !key.matches("advancement:[a-z0-9_.-]+:[a-z0-9_./-]+"))
+                    || !objectiveEvents.isEmpty() && !rewardContract.equals("survival-progress/v2"))
+                throw new IllegalArgumentException("invalid observed objective events");
             UUID.fromString(session); UUID.fromString(nextWorld);
             if (appliedTick < frame.serverTick() || appliedTick > 0xffff_ffffL || nextState.length != PolicyFrame.STATE_SIZE)
                 throw new IllegalArgumentException("invalid applied tick/next state");

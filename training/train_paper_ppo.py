@@ -11,6 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
 import math
+import re
 import secrets
 from pathlib import Path
 import time
@@ -40,8 +41,15 @@ def write_atomic(path: Path, value: dict):
 def validate_transition(row: dict):
     required = {"session", "sequence", "frame", "index", "logProbability", "value", "modelVersion", "reward",
                 "elapsedTicks", "terminated", "truncated", "appliedTick", "nextWorld", "nextState"}
-    if set(row) != required:
+    if set(row) - {"rewardContract", "objectiveEvents"} != required:
         raise ValueError("transition schema mismatch; Teacher labels are not accepted")
+    if row.get("rewardContract", "survival-progress/v1") not in ("survival-progress/v1", "survival-progress/v2"):
+        raise ValueError("unsupported observed reward contract")
+    events = row.get("objectiveEvents", [])
+    if not isinstance(events, list) or len(events) > 32 or any(not isinstance(key, str) or len(key) > 268
+            or not re.fullmatch(r"advancement:[a-z0-9_.-]+:[a-z0-9_./-]+", key) for key in events) \
+            or len(set(events)) != len(events) or events and row.get("rewardContract") != "survival-progress/v2":
+        raise ValueError("invalid observed progress events")
     uuid.UUID(row["session"])
     uuid.UUID(row["nextWorld"])
     if not isinstance(row["appliedTick"], int) or not row["frame"]["serverTick"] <= row["appliedTick"] <= 0xffff_ffff:
@@ -209,6 +217,7 @@ class PaperTrainer:
         self.discarded_raw = (output / "discarded-transitions.jsonl").open("ab")
         self.discarded_bytes = 0
         self.discard_reasons = {}
+        self.reward_contracts = {}
         self.episode_raw = (output / "episode-outcomes.jsonl").open("ab")
         self.episodes = {}
         self.completed_episodes = self.death_episodes = self.episode_bytes = 0
@@ -405,11 +414,13 @@ class PaperTrainer:
                         raise RuntimeError("raw Paper rollout byte budget exhausted")
                     self.raw.write(encoded); self.raw.flush(); self.digest.update(encoded); self.bytes += len(encoded)
                     self.rows.append(row); self.steps += 1; self.ticks += row["elapsedTicks"]
+                    contract = row.get("rewardContract", "survival-progress/v1")
+                    self.reward_contracts[contract] = self.reward_contracts.get(contract, 0) + 1
                     if len(self.rows) >= self.rollout_size or self.steps == self.maximum:
                         rows = self.rows
                         self.rows = []
                         self.training_metadata = {"steps": self.steps, "ticks": self.ticks, "bytes": self.bytes,
-                                                  "sha256": self.digest.hexdigest()}
+                                                  "sha256": self.digest.hexdigest(), "rewardContracts": dict(self.reward_contracts)}
                         self.training = self.worker.submit(self.fit_snapshot, copy.deepcopy(self.model), rows)
                 else:
                     self.preserve_discard(previous, "transition-budget-complete")
@@ -487,6 +498,7 @@ class PaperTrainer:
                      "environmentSteps": total_steps, "runEnvironmentSteps": metadata["steps"], "parents": self.parents,
                      "actualServerTicks": metadata["ticks"], "gradientUpdates": self.model.updates,
                      "modelVersion": self.model.version, "rolloutSha256": metadata["sha256"], "rolloutBytesUsed": metadata["bytes"],
+                     "rewardContracts": metadata.get("rewardContracts", {}),
                      "discardedOffPolicy": self.discarded_off_policy,
                      "discardedDuringUpdate": self.discarded_during_update,
                      "discardedEvidenceBytes": self.discarded_bytes, "discardReasons": dict(self.discard_reasons),
