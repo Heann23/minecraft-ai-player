@@ -12,6 +12,7 @@ import os
 from pathlib import Path
 import queue
 import re
+import secrets
 import shutil
 import subprocess
 import sys
@@ -57,7 +58,10 @@ def require_runtime_space(output: Path, cache: Path, paper: Path, plugin: Path):
 def read_plan(path: Path):
     if path.stat().st_size > 65536:
         raise ValueError("oversized experiment plan")
-    plan = json.loads(path.read_text(encoding="utf-8"))
+    return validate_plan(json.loads(path.read_text(encoding="utf-8")))
+
+
+def validate_plan(plan):
     if set(plan) != {"schema", "trainSeeds", "evaluationSeeds"} or plan["schema"] != "minecraft-paper-seed-plan/v1":
         raise ValueError("experiment plan schema mismatch")
     groups = []
@@ -75,6 +79,50 @@ def read_plan(path: Path):
     if groups[0] & groups[1]:
         raise ValueError("training and held-out world seeds overlap")
     return plan
+
+
+def reserve_random_seed(directory: Path, base: dict, mode: str, *, draw=None):
+    """Persist a unique signed-64-bit seed before use. One registry covers BOTH train/evaluation partitions."""
+    from checkpoint_store import durable_replace, encoded
+    validate_plan(base)
+    if mode not in ("train", "evaluate") or directory.is_symlink():
+        raise ValueError("invalid random seed campaign")
+    directory.mkdir(parents=True, exist_ok=True)
+    lock = directory / "seed-campaign.lock"
+    descriptor = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    try:
+        os.write(descriptor, encoded({"pid": os.getpid()}))
+        path = directory / "seed-campaign.json"
+        plan = json.loads(encoded(base))
+        if path.exists() or path.is_symlink():
+            if path.is_symlink() or path.stat().st_size > 131072:
+                raise ValueError("unsafe seed campaign; original preserved")
+            record = json.loads(path.read_bytes())
+            if not isinstance(record, dict) or set(record) != {"payload", "sha256"} \
+                    or hashlib.sha256(encoded(record["payload"])).hexdigest() != record["sha256"]:
+                raise ValueError("seed campaign integrity mismatch; no random reset")
+            plan = validate_plan(record["payload"])
+            for key in ("trainSeeds", "evaluationSeeds"):
+                plan[key] = sorted(set(plan[key]) | set(base[key]))
+            validate_plan(plan)  # A seed must never migrate between train and evaluation.
+        split = "trainSeeds" if mode == "train" else "evaluationSeeds"
+        if len(plan[split]) >= 1000:
+            raise ValueError("seed campaign partition budget exhausted")
+        used = set(plan["trainSeeds"]) | set(plan["evaluationSeeds"])
+        draw = secrets.randbits if draw is None else draw
+        for _ in range(64):
+            value = draw(64)
+            if type(value) is not int or not 0 <= value < 2**64:
+                raise ValueError("invalid random seed source")
+            seed = str(value if value < 2**63 else value - 2**64)
+            if seed not in used:
+                plan[split].append(seed)
+                durable_replace(path, encoded({"payload": plan, "sha256": hashlib.sha256(encoded(plan)).hexdigest()}))
+                return plan, seed
+        raise ValueError("random seed collision budget exhausted; no reuse")
+    finally:
+        os.close(descriptor)
+        lock.unlink()  # Interrupted owners leave a visible lock; never remove someone else's lock.
 
 
 def read_scenario(path: Path):
@@ -108,8 +156,8 @@ def validate_plan_extension(parent: dict, current: dict):
             raise ValueError("campaign extension cannot remove or reassign existing world seeds")
 
 
-def validate_options(args):
-    plan = read_plan(args.plan)
+def validate_options(args, *, plan=None):
+    plan = read_plan(args.plan) if plan is None else validate_plan(plan)
     learning = getattr(args, "learning", None)
     if learning not in (None, "on", "off") or learning is not None and (args.mode != "train"
             or getattr(args, "inference_only", False) or getattr(args, "managed_backend", False)):
@@ -234,7 +282,16 @@ def named_session(revision):
 
 
 def run(args):
-    plan = validate_options(args)
+    random_seed = getattr(args, "random_world_seed", False)
+    if random_seed:
+        if args.world_seed is not None or args.seed_campaign is None:
+            raise ValueError("random world selection requires one explicit shared seed campaign")
+        plan, args.world_seed = reserve_random_seed(args.seed_campaign, read_plan(args.plan), args.mode)
+        plan = validate_options(args, plan=plan)
+    else:
+        if getattr(args, "seed_campaign", None) is not None:
+            raise ValueError("seed campaign requires random world selection")
+        plan = validate_options(args)
     require_runtime_space(args.output, args.runtime_cache, args.paper, args.plugin)
     scenario = read_scenario(args.scenario) if args.scenario else []
     source = Path(__file__).resolve().parents[1]
@@ -253,7 +310,10 @@ def run(args):
         import brain_session
         brain_session.save(output / "catalog-source-session.json", named_session(catalog_state))
         args.resume = Path(catalog_state["session"]["checkpoint"])
-    shutil.copy2(args.plan, output / "seed-plan.json")
+    if random_seed:
+        write_json(output / "seed-plan.json", plan)
+    else:
+        shutil.copy2(args.plan, output / "seed-plan.json")
     if args.scenario:
         shutil.copy2(args.scenario, output / "control-scenario.json")
     server = output / "server"
@@ -314,6 +374,7 @@ def run(args):
                 "teacherLabels": False, "grantedItems": False, "teleportDuringEpisode": False,
                 "allWorldAutonomyProven": False}
     manifest["backendOwner"] = "plugin" if args.managed_backend else "external-lab"
+    manifest["seedSelection"] = "random-per-world-run" if random_seed else "explicit-frozen-plan"
     manifest["playerPersistence"] = args.player_persistence
     if args.save_model_at_end:
         manifest.update({"requestedFinalModelSave": args.save_model_at_end, "finalModelSaveAcknowledged": False,
@@ -549,7 +610,10 @@ def main():
     for name in ("plan", "output", "paper", "plugin", "java", "eula", "runtime-cache"):
         parser.add_argument("--" + name, type=Path, required=True)
     parser.add_argument("--mode", choices=("train", "evaluate"), required=True)
-    parser.add_argument("--world-seed", required=True)
+    worlds = parser.add_mutually_exclusive_group(required=True)
+    worlds.add_argument("--world-seed")
+    worlds.add_argument("--random-world-seed", action="store_true", help="new random seed per world run; observations/actions stay in the same world")
+    parser.add_argument("--seed-campaign", type=Path, help="shared private train/evaluation reservation registry, required for random worlds")
     parser.add_argument("--source-commit", required=True)
     parser.add_argument("--port", type=int, required=True)
     parser.add_argument("--seconds", type=int, required=True)

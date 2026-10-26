@@ -9,6 +9,22 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.*;
 
 class LocalPolicyContextTest {
+    @Test void betweenScanTicksRevalidatedPositiveSightingsSurviveButAbsenceRemainsUnknown() {
+        double[] state = new double[PolicyFrame.STATE_SIZE];
+        LocalPolicyContext.entityContext(state, false, () -> {
+            state[113] = 1 / 16.0;
+            state[114] = 2 / 32.0;
+            return true;
+        }, () -> true);
+        assertEquals(1 / 16.0, state[113]);
+        assertEquals(2 / 32.0, state[114]);
+        assertEquals(0, state[112]);
+        LocalPolicyContext.entityContext(state, true, () -> true, () -> false);
+        assertEquals(0, state[112]);
+        LocalPolicyContext.entityContext(state, true, () -> true, () -> true);
+        assertEquals(1, state[112]);
+    }
+
     @Test void hiddenOrUnloadedCellsRemainUnknownRatherThanClearOrSafe() {
         double[] state = new double[PolicyFrame.STATE_SIZE];
         LocalPolicyContext.encodeCell(state, 0, false, true, true, true);

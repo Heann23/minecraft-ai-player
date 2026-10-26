@@ -7,10 +7,56 @@ import tempfile
 import unittest
 from unittest import mock
 
-from paper_lab import read_plan, validate_options, summarize_game_log, validate_plan_extension, read_scenario, confirm_model_save, confirm_model_command
+from paper_lab import read_plan, validate_options, summarize_game_log, validate_plan_extension, read_scenario, confirm_model_save, confirm_model_command, reserve_random_seed
 
 
 class SeedPlanTests(unittest.TestCase):
+    def test_random_campaign_rejects_reuse_across_runs_and_partitions_and_preserves_base(self):
+        base = {"schema": "minecraft-paper-seed-plan/v1", "trainSeeds": ["1"], "evaluationSeeds": ["2"]}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plan, training = reserve_random_seed(root, base, "train", draw=mock.Mock(side_effect=[1, 2, 3]))
+            self.assertEqual(training, "3")
+            self.assertIn("3", plan["trainSeeds"])
+            plan, evaluation = reserve_random_seed(root, base, "evaluate", draw=mock.Mock(side_effect=[3, 2**64-1]))
+            self.assertEqual(evaluation, "-1")
+            self.assertIn("3", plan["trainSeeds"])
+            self.assertIn("-1", plan["evaluationSeeds"])
+            self.assertFalse(set(plan["trainSeeds"]) & set(plan["evaluationSeeds"]))
+            self.assertEqual(base["trainSeeds"], ["1"])
+
+    def test_corrupt_or_locked_campaign_is_never_reinitialized_or_unlocked(self):
+        base = {"schema": "minecraft-paper-seed-plan/v1", "trainSeeds": ["1"], "evaluationSeeds": ["2"]}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            reserve_random_seed(root, base, "train", draw=lambda _: 3)
+            record = root / "seed-campaign.json"
+            record.write_text("corrupt")
+            draw = mock.Mock(return_value=4)
+            with self.assertRaises(ValueError):
+                reserve_random_seed(root, base, "train", draw=draw)
+            draw.assert_not_called()
+            self.assertEqual(record.read_text(), "corrupt")
+            lock = root / "seed-campaign.lock"
+            lock.write_text("another owner")
+            with self.assertRaises(FileExistsError):
+                reserve_random_seed(root, base, "train", draw=draw)
+            self.assertEqual(lock.read_text(), "another owner")
+
+    def test_seed_reassignment_and_collision_exhaustion_preserve_campaign(self):
+        base = {"schema": "minecraft-paper-seed-plan/v1", "trainSeeds": ["1"], "evaluationSeeds": ["2"]}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            reserve_random_seed(root, base, "train", draw=lambda _: 2**63)
+            record = root / "seed-campaign.json"
+            previous = record.read_bytes()
+            with self.assertRaises(ValueError):
+                reserve_random_seed(root, dict(base, evaluationSeeds=["2", str(-(2**63))]), "evaluate")
+            self.assertEqual(record.read_bytes(), previous)
+            with self.assertRaisesRegex(ValueError, "collision"):
+                reserve_random_seed(root, base, "train", draw=lambda _: 1)
+            self.assertEqual(record.read_bytes(), previous)
+
     def test_final_model_save_requires_the_matching_asynchronous_acknowledgement(self):
         process = mock.Mock()
         process.poll.return_value = None

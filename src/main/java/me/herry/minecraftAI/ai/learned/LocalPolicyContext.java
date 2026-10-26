@@ -38,11 +38,11 @@ final class LocalPolicyContext {
         var at = player.getLocation();
         var stamp = ai.getPerception().getEntityScanStamp();
         long now = Integer.toUnsignedLong(Bukkit.getCurrentTick());
-        if (fresh(stamp, player.getWorld().getUID(), now, at.getX(), at.getY(), at.getZ())) {
-            boolean hostiles = entities(ai, ai.getPerception().getHostiles(), state, 113);
-            boolean animals = entities(ai, ai.getPerception().getAnimals(), state, 119);
-            state[112] = hostiles && animals && stamp.range() >= 32 ? 1 : 0;
-        }
+        // Async decisions are often applied between scan ticks. Revalidate known LIVE entities now;
+        // a stale scan may still provide positive current sightings, never evidence of current absence.
+        entityContext(state, fresh(stamp, player.getWorld().getUID(), now, at.getX(), at.getY(), at.getZ()) && stamp.range() >= 32,
+                () -> entities(ai, ai.getPerception().getHostiles(), state, 113),
+                () -> entities(ai, ai.getPerception().getAnimals(), state, 119));
         state[126] = player.getNoDamageTicks() / (double) Math.max(1, player.getMaximumNoDamageTicks());
         var velocity = player.getVelocity();
         state[127] = Math.hypot(velocity.getX(), velocity.getZ()) / 2;
@@ -53,6 +53,14 @@ final class LocalPolicyContext {
         for (int[] direction : new int[][]{{1, 0}, {-1, 0}, {0, 1}, {0, -1}})
             for (int y = -1; y <= 1; y++) result.add(feet.offset(direction[0], y, direction[1]));
         return List.copyOf(result);
+    }
+
+    static void entityContext(double[] state, boolean completeCurrentScan,
+                              java.util.function.BooleanSupplier currentHostiles,
+                              java.util.function.BooleanSupplier currentAnimals) {
+        boolean hostiles = currentHostiles.getAsBoolean();
+        boolean animals = currentAnimals.getAsBoolean();
+        state[112] = completeCurrentScan && hostiles && animals ? 1 : 0;
     }
 
     static void encodeCell(double[] state, int cell, boolean known, boolean solid, boolean water, boolean lava) {
