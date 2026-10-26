@@ -21,16 +21,25 @@ import java.util.*;
 /** Enumerates supported concrete inputs. No Goal score, utility, progression order, best-food/tool or Teacher selection. */
 public final class PolicyCandidates {
     public record Candidate(String id, PrimitiveCommand command, RecipeOption recipe, SurvivalObservation.Item consumable,
-                            PolicyFrame.Option encoded, int commitmentTicks, String inputId) {
+                            PolicyFrame.Option encoded, int commitmentTicks, String inputId, ExactEquipment.Choice equipment) {
         public Candidate(String id, PrimitiveCommand command, RecipeOption recipe, SurvivalObservation.Item consumable, PolicyFrame.Option encoded) {
-            this(id, command, recipe, consumable, encoded, 0, id);
+            this(id, command, recipe, consumable, encoded, 0, id, null);
+        }
+        public Candidate(String id, PrimitiveCommand command, RecipeOption recipe, SurvivalObservation.Item consumable,
+                         PolicyFrame.Option encoded, int commitmentTicks, String inputId) {
+            this(id, command, recipe, consumable, encoded, commitmentTicks, inputId, null);
+        }
+        public PrimitiveType type() {
+            return equipment != null ? PrimitiveType.EQUIP_ITEM : recipe != null ? PrimitiveType.CRAFT_ITEM
+                    : consumable != null ? PrimitiveType.USE_ITEM : command.type();
         }
         public Candidate committed(int ticks) {
             double[] features = encoded.features(); features[30] = ticks / 600.0;
             String choice = inputId + "@" + ticks;
-            return new Candidate(choice, command, recipe, consumable, new PolicyFrame.Option(choice, features), ticks, inputId);
+            return new Candidate(choice, command, recipe, consumable, new PolicyFrame.Option(choice, features), ticks, inputId, equipment);
         }
         public Action create(AIPlayer ai) {
+            if (equipment != null) return new EquipExactAction(equipment);
             if (recipe != null) return new CraftItemAction(Material.valueOf(recipe.result()), recipe.resultAmount(), recipe.id());
             if (consumable != null) return new ConsumeExactAction(ai.getWorldId(), consumable);
             if (command instanceof PrimitiveCommand.Attack hit) return new StrikeExactAction(ai.getWorldId(), hit.entityId());
@@ -45,6 +54,7 @@ public final class PolicyCandidates {
     private int recipeCursor;
     private long recipeRevision = Long.MIN_VALUE;
     private int miningCursor;
+    private int equipmentCursor;
 
     public record Observed(me.herry.minecraftAI.ai.primitive.control.PrimitiveSnapshot snapshot,
                            SurvivalObservation.Body body, Map<String, Integer> stock, double[] features) {
@@ -67,7 +77,7 @@ public final class PolicyCandidates {
         body[14] = Math.cos(p.getWorld().getTime() * 2 * Math.PI / 24000); body[15] = p.getWorld().hasStorm() ? 1 : 0;
         for (var effect : SurvivalCapture.effects(p)) body[16 + bucket(effect.key(), 16)] += Math.min(1, (effect.amplifier() + 1) / 8.0);
         if (active != null) {
-            String activeKind = active.recipe() != null ? "CRAFT_ITEM" : active.consumable() != null ? "USE_ITEM" : active.command().type().name();
+            String activeKind = active.type().name();
             body[40 + bucket(activeKind, 7)] = 1;
             body[47] = Math.min(1, activeTicks / 200.0);
         }
@@ -104,6 +114,7 @@ public final class PolicyCandidates {
             add(ai, found, "look:" + yaw, new PrimitiveCommand.LookAt(target), null, null, -Math.sin(angle) * 4, 0, Math.cos(angle) * 4, "", true);
         }
         add(ai, found, "jump", new PrimitiveCommand.Jump(), null, null, 0, 0, 0, "", true);
+        equipment(ai, found);
         List<BlockPoint> targets = new ArrayList<>();
         var feet = ai.getPosition();
         boolean rayLoaded = true;
@@ -128,11 +139,9 @@ public final class PolicyCandidates {
                     delta.x(), delta.y(), delta.z(), block.material() + ":" + slot.material(), true)) mined++;
         }
         miningCursor = pairs == 0 ? 0 : Math.floorMod(miningCursor + attempted, pairs);
-        int equipped = 0, placed = 0;
+        int placed = 0;
         for (var slot : state.inventory()) {
             if (slot.slot() >= 36 || slot.amount() == 0 || ai.getWorkBudget().isExhausted()) continue;
-            if (equipped++ < 12) add(ai, found, "equip:" + slot.slot(), new PrimitiveCommand.Equip(
-                    new ToolChoice(slot.slot(), slot.material(), slot.enchantments())), null, null, 0, 0, 0, slot.material(), true);
             var item = SurvivalCapture.item(ai, slot.slot());
             if (ConsumeExactAction.supported(item)) add(ai, found, "consume:" + slot.slot(), null, null, item, 0, 0, 0, item.material(), false);
             Material material = Material.matchMaterial(slot.material());
@@ -171,8 +180,9 @@ public final class PolicyCandidates {
             if (candidate.commitmentTicks() > 0) {
                 double[] retained = candidate.encoded().features(); retained[55] = 1;
                 expanded.add(new Candidate(candidate.id(), candidate.command(), candidate.recipe(), candidate.consumable(),
-                        new PolicyFrame.Option(candidate.id(), retained), candidate.commitmentTicks(), candidate.inputId()));
-            } else for (int ticks : new int[]{5, 20, 80, 600}) expanded.add(candidate.committed(ticks));
+                        new PolicyFrame.Option(candidate.id(), retained), candidate.commitmentTicks(), candidate.inputId(), candidate.equipment()));
+            } else if (candidate.equipment() != null) expanded.add(candidate.committed(5));
+            else for (int ticks : new int[]{5, 20, 80, 600}) expanded.add(candidate.committed(ticks));
         }
         var candidates = selectFair(expanded, active == null ? "" : active.id());
         Map<String, Integer> stockCounts = new HashMap<>();
@@ -180,6 +190,43 @@ public final class PolicyCandidates {
         return new Capture(new PolicyFrame(ai.getWorldId(), Integer.toUnsignedLong(Bukkit.getCurrentTick()), body,
                 candidates.stream().map(Candidate::encoded).toList(), inspected.complete() && !ai.getWorkBudget().isExhausted()
                 && recipeCursor >= Material.values().length && expanded.size() <= PolicyFrame.MAX_OPTIONS), candidates, survival, stockCounts);
+    }
+
+    private void equipment(AIPlayer ai, Map<String, Candidate> found) {
+        var player = ai.getPlayer();
+        int held = player.getInventory().getHeldItemSlot();
+        Map<Integer, ExactEquipment.Stack> targets = new LinkedHashMap<>();
+        for (int slot : new int[]{held, 40, 39, 38, 37, 36}) {
+            if (ai.getWorkBudget().isExhausted()) return;
+            targets.put(slot, ExactEquipment.read(player, slot));
+        }
+        int inspected = 0;
+        while (inspected < 8 && !ai.getWorkBudget().isExhausted()) {
+            int source = Math.floorMod(equipmentCursor++, 41); inspected++;
+            var from = targets.containsKey(source) ? targets.get(source) : ExactEquipment.read(player, source);
+            if (source >= 36 && from.amount() == 0) continue;
+            for (var target : targets.entrySet()) {
+                if (ai.getWorkBudget().isExhausted() || found.size() >= 512) return;
+                if (source == target.getKey()) continue;
+                var choice = new ExactEquipment.Choice(ai.getWorldId(), source, target.getKey(), held, from, target.getValue());
+                if (!ExactEquipment.offered(player, choice)) continue;
+                String id = "equip-exact:" + source + ":" + target.getKey();
+                double[] features = new double[PolicyFrame.ACTION_SIZE];
+                features[PrimitiveType.EQUIP_ITEM.ordinal()] = 1;
+                features[27] = Math.min(16, from.amount() / 64.0); features[28] = Math.min(16, target.getValue().amount() / 64.0);
+                features[29] = source / 40.0; features[56] = from.damageFraction();
+                features[58] = target.getValue().amount() == 0 ? 1 : 0; features[60] = from.amount() == 0 ? 1 : 0;
+                features[59] = from.enchantments().getOrDefault("minecraft:binding_curse", 0) > 0 ? 1 : 0;
+                features[61] = choice.selectHotbar() ? 1 : 0; features[62] = target.getKey() / 40.0; features[63] = 1;
+                if (from.amount() > 0) features[32 + bucket(from.material(), 16)] = 1;
+                if (target.getValue().amount() > 0) features[64 + bucket(target.getValue().material(), 16)] = 1;
+                from.enchantments().forEach((key, level) -> {
+                    int index = 80 + bucket(key, 16);
+                    features[index] = Math.clamp(features[index] + level / 8.0, 0, 16);
+                });
+                found.putIfAbsent(id, new Candidate(id, null, null, null, new PolicyFrame.Option(id, features), 0, id, choice));
+            }
+        }
     }
 
     private void advanceRecipes(AIPlayer ai) {
@@ -261,8 +308,7 @@ public final class PolicyCandidates {
         for (Candidate candidate : all) if (candidate.id().equals(activeId) && ids.add(candidate.id())) selected.add(candidate);
         Map<PrimitiveType, ArrayDeque<Candidate>> groups = new EnumMap<>(PrimitiveType.class);
         for (Candidate candidate : all) {
-            PrimitiveType type = candidate.recipe() != null ? PrimitiveType.CRAFT_ITEM
-                    : candidate.consumable() != null ? PrimitiveType.USE_ITEM : candidate.command().type();
+            PrimitiveType type = candidate.type();
             groups.computeIfAbsent(type, ignored -> new ArrayDeque<>()).add(candidate);
         }
         boolean remaining = true;
