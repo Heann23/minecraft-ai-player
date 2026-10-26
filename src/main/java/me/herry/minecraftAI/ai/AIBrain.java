@@ -493,7 +493,8 @@ final class AIBrain {
     }
 
     void recordLearningAdvancement(String key, boolean completed, boolean displayed) {
-        if (learnedLane && trainingControl != null) trainingControl.advancement(key, completed, displayed);
+        // Retain observed completion while stopped too; the ledger itself requires an active transition for credit.
+        if (trainingControl != null) trainingControl.advancement(key, completed, displayed);
     }
 
     List<String> policyDetails() {
