@@ -56,6 +56,67 @@ class BrainRuntimeTests(unittest.TestCase):
         return {"schema": "minecraft-brain-control/v1", "id": str(uuid.uuid4()), "operation": "model-load",
                 "brainId": runtime.active.brain_id, "name": name}
 
+    def test_named_active_mode_and_rng_refresh_after_commit_without_changing_selection(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            runtime, first, second = self.pair(root)
+            catalog = runtime.active.catalog
+            catalog.select("first")
+            selected = (catalog.root / "selected-model.json").read_bytes()
+            try:
+                runtime.control(self.packet(runtime, "second"))
+                self.assertFalse(catalog.load("second")["session"]["learningEnabled"])
+                active = runtime.active
+                active.model.rng.random()
+                active.persist_session()
+                saved = catalog.load("second")["session"]
+                self.assertEqual(saved["rng"], active.model.rng.bit_generator.state)
+                self.assertEqual(saved, brain_session.load(root / "active/runtime-session.json"))
+                revisions = len(list(catalog.root.glob("revision-*.json")))
+                active.persist_session()
+                self.assertEqual(len(list(catalog.root.glob("revision-*.json"))), revisions)
+                self.assertEqual((catalog.root / "selected-model.json").read_bytes(), selected)
+                self.assertEqual(active.catalog_sync_state, "saved")
+            finally:
+                runtime.close()
+
+    def test_catalog_lock_failure_preserves_durable_runtime_mode_then_retries(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            runtime, first, second = self.pair(root)
+            try:
+                runtime.control(self.packet(runtime, "second"))
+                active = runtime.active
+                lock = active.catalog.root / "catalog.lock"
+                lock.write_text("another writer")
+                response = active.control({"schema": "minecraft-brain-control/v1", "id": str(uuid.uuid4()),
+                        "operation": "learning", "brainId": active.brain_id, "enabled": True})
+                self.assertTrue(response["ok"])
+                self.assertTrue(brain_session.load(root / "active/runtime-session.json")["learningEnabled"])
+                self.assertEqual(active.catalog_sync_state, "failed")
+                self.assertFalse(active.catalog.load("second")["session"]["learningEnabled"])
+                lock.unlink()
+                active.persist_session()
+                self.assertTrue(active.catalog.load("second")["session"]["learningEnabled"])
+                self.assertEqual(active.catalog_sync_state, "saved")
+            finally:
+                runtime.close()
+
+    def test_prepared_runtime_never_refreshes_autonomous_catalog(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            runtime, first, second = self.pair(root)
+            try:
+                runtime.control(self.packet(runtime, "second"))
+                before = (runtime.catalog.root / "second.json").read_bytes()
+                runtime.active.restricted_training_use = True
+                runtime.active.model.rng.random()
+                runtime.active.persist_session()
+                self.assertEqual((runtime.catalog.root / "second.json").read_bytes(), before)
+                self.assertEqual(runtime.active.catalog_sync_state, "excluded-prepared-scenario")
+            finally:
+                runtime.close()
+
     def test_selected_model_rng_and_learning_off_survive_primary_session_restart(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -90,6 +151,7 @@ class BrainRuntimeTests(unittest.TestCase):
             runtime, first, second = self.pair(root)
             old = runtime.active
             before = (root / "active/runtime-session.json").read_bytes()
+            catalog_before = (old.catalog.root / "second.json").read_bytes()
             original = brain_session.save
             def interrupted(path, state):
                 if path == root / "active/runtime-session.json" and state["brainId"] == second["brainId"]:
@@ -103,6 +165,7 @@ class BrainRuntimeTests(unittest.TestCase):
                         runtime.control(self.packet(runtime, "second"))
                 self.assertIs(runtime.active, old)
                 self.assertEqual((root / "active/runtime-session.json").read_bytes(), before)
+                self.assertEqual((old.catalog.root / "second.json").read_bytes(), catalog_before)
                 self.assertFalse(runtime.require_identity)
             finally:
                 runtime.close()

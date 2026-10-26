@@ -157,6 +157,7 @@ class PaperTrainer:
         self.session_alias = None
         self.model_name = restore_state.get("modelName") if restore_state else None
         self.catalog = None if model_catalog_path is None else model_catalog.ModelCatalog(model_catalog_path)
+        self.catalog_sync_state = "not-attempted"
         self.restricted_training_use = bool(parent is not None and parent["notForAutonomousTraining"]
                 or restore_state is not None and restore_state.get("notForAutonomousTraining", False)
                 or model_catalog.restricted_training_use(output / "optimizer-checkpoint.json"))
@@ -203,9 +204,9 @@ class PaperTrainer:
                      "resumeRecovery": None if parent is None else parent.get("recoveredCheckpoint"),
                      "gammaPerServerTick": 0.99997, "gaeLambda": 0.95,
                      "ppoClip": 0.2, "epochsPerUpdate": 4, "trained": False, "evaluationComplete": False})
-        self.persist_session()
+        self.persist_session(sync_catalog=False)  # Construction can be a staged, not-yet-active model load.
 
-    def persist_session(self):
+    def persist_session(self, *, sync_catalog=True):
         if self.checkpoint_reference is None or self.saved_model_version != self.model.version:
             raise RuntimeError("active brain has no matching durable checkpoint; session not replaced")
         state = {"schema": brain_session.SCHEMA,
@@ -220,6 +221,34 @@ class PaperTrainer:
         if self.session_alias is not None:
             brain_session.save(self.session_alias, state)
         self.last_session_save = time.monotonic()
+        if sync_catalog:
+            self.refresh_named_model(state)
+
+    def refresh_named_model(self, state):
+        # The authoritative runtime session is durable BEFORE this independent named reference.
+        # Catalog failure must not roll back a committed learning flag or lose the current optimizer.
+        if self.catalog is None or self.model_name is None:
+            self.catalog_sync_state = "unbound"
+            return
+        if self.restricted_training_use:
+            self.catalog_sync_state = "excluded-prepared-scenario"
+            return
+        try:
+            revision = self.catalog.save(self.model_name, state, require_existing=True)
+            result = {"state": "saved", "name": self.model_name, "brainId": self.brain_id,
+                      "checkpointSha256": state["checkpointSha256"], "policyVersion": state["policyVersion"],
+                      "gradientUpdates": state["gradientUpdates"],
+                      "revisionSha256": hashlib.sha256(checkpoint_store.encoded(revision)).hexdigest()}
+        except (OSError, ValueError, KeyError, TypeError) as failure:
+            result = {"state": "failed", "name": self.model_name, "brainId": self.brain_id,
+                      "error": type(failure).__name__, "message": str(failure)[:512]}
+        self.catalog_sync_state = result["state"]
+        try:
+            write_atomic(self.output / "catalog-sync.json", result)
+        except OSError as failure:
+            print("Catalog sync diagnostic could not be saved:", type(failure).__name__, file=sys.stderr, flush=True)
+        if result["state"] == "failed":
+            print("Named model refresh failed; durable runtime retained:", result["message"], file=sys.stderr, flush=True)
 
     def control(self, packet):
         if packet.get("operation") in {"model-list", "model-info", "model-save", "model-new"}:
@@ -294,7 +323,8 @@ class PaperTrainer:
                              "initializationOnly": self.model.updates == 0,
                              "gradientUpdates": self.model.updates, "learningEnabled": self.learning_enabled,
                              "saveState": "updating" if self.training is not None else "saved" if self.saved_model_version == self.model.version else "not-saved",
-                             "checkpointSha256": self.saved_checkpoint_sha}}
+                             "checkpointSha256": self.saved_checkpoint_sha,
+                             "catalogSyncState": self.catalog_sync_state}}
 
     def save_initial_state(self):
         empty_hash = hashlib.sha256(b"").hexdigest()
@@ -548,7 +578,7 @@ class BrainRuntime:
         # Stage writes only its own run. The single authoritative runtime session is published last.
         replacement.session_alias = self.root / "runtime-session.json"
         try:
-            replacement.persist_session()
+            replacement.persist_session(sync_catalog=False)
         except (OSError, ValueError, RuntimeError) as failure:
             replacement.session_alias = None
             replacement.close(publish_session=False)
@@ -566,6 +596,7 @@ class BrainRuntime:
         # The old primary output is also the authoritative alias. Retirement must not republish its old session.
         old.session_alias = None
         old.close(publish_session=False)
+        replacement.refresh_named_model(brain_session.load(replacement.output / "runtime-session.json"))
         with (self.root / "model-switches.jsonl").open("a", encoding="utf-8") as journal:
             journal.write(json.dumps({"id": packet["id"], "previousBrainId": old.brain_id,
                 "brainId": replacement.brain_id, "modelName": packet["name"], "checkpointSha256": replacement.saved_checkpoint_sha,

@@ -111,17 +111,23 @@ class ModelCatalog:
             verify_state(state)
         return revision
 
-    def save(self, name, state):
+    def save(self, name, state, *, require_existing=False):
         name = model_name(name)
         # Copy through JSON: a caller cannot later mutate a stored session/RNG reference.
         state = verify_state(json.loads(encoded(state)))
         with self.locked():
+            if require_existing and not (self.root / (name + ".json")).exists():
+                raise ValueError("automatic refresh requires an existing named model; reference not recreated")
             if (self.root / (name + ".json")).exists():
-                old = self.load(name)["session"]
+                previous = self.load(name)
+                old = previous["session"]
                 if old["brainId"] != state["brainId"] or old["policyVersion"] > state["policyVersion"] \
                         or old["gradientUpdates"] > state["gradientUpdates"] \
+                        or old.get("environmentSteps", 0) > state.get("environmentSteps", 0) \
                         or old["policyVersion"] == state["policyVersion"] and optimizer_identity(old) != optimizer_identity(state):
                     raise ValueError("name already belongs to another brain or newer/different weights; choose another name")
+                if old == state:
+                    return previous  # Idle persistence does not create unlimited identical revisions.
             revision = {"schema": SCHEMA, "name": name, "session": state}
             filename = "revision-" + uuid.uuid4().hex + ".json"
             write_record(self.root / filename, revision)
@@ -161,7 +167,9 @@ class ModelCatalog:
             raise ValueError("invalid catalog list limit")
         if not self.root.exists():
             return []
-        paths = sorted(self.root.glob("*.json"))
+        # Immutable history grows during automatic snapshots; the budget counts named models, not revisions.
+        paths = sorted(path for path in self.root.glob("*.json")
+                       if path.name != "selected-model.json" and not path.name.startswith("revision-"))
         if len(paths) > 10000:
             raise ValueError("catalog scan exceeds budget")
         result = []

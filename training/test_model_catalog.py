@@ -11,6 +11,20 @@ from train_paper_ppo import PaperTrainer
 
 
 class ModelCatalogTests(unittest.TestCase):
+    def test_automatic_refresh_never_recreates_missing_name_or_rewinds_environment_steps(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            state = self.initial(root / "source")
+            catalog = model_catalog.ModelCatalog(root / "catalog")
+            with self.assertRaises(ValueError):
+                catalog.save("missing", state, require_existing=True)
+            self.assertFalse((catalog.root / "missing.json").exists())
+            catalog.save("brain", dict(state, environmentSteps=10))
+            before = (catalog.root / "brain.json").read_bytes()
+            with self.assertRaises(ValueError):
+                catalog.save("brain", dict(state, environmentSteps=9), require_existing=True)
+            self.assertEqual((catalog.root / "brain.json").read_bytes(), before)
+
     def initial(self, output, *, seed=7):
         trainer = PaperTrainer(output, seed=seed, rollout_size=32, maximum=32, max_bytes=4*1024*1024,
                                start_state="fresh", learning_enabled=False)
