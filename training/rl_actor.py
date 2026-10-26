@@ -141,9 +141,9 @@ class ActorCritic:
         self.version += 1
         return {key: float(np.mean([report[key] for report in stats])) for key in ("loss", "entropy")}
 
-    def optimizer_state(self) -> dict:
+    def optimizer_state(self, *, allow_initial=False) -> dict:
         """Development checkpoint, including critic/Adam; the deployment actor alone cannot resume PPO."""
-        if self.updates <= 0 or self.version <= 0:
+        if (self.updates <= 0 or self.version <= 0) and not (allow_initial and self.updates == 0 and self.version == 0):
             raise ValueError("initialization is not a trained checkpoint")
         return {"schema": "minecraft-ppo-optimizer/v1", "contract": CONTRACT,
                 "updates": self.updates, "version": self.version,
@@ -169,13 +169,15 @@ class ActorCritic:
         return cls.from_optimizer_state(upgraded)
 
     @classmethod
-    def from_optimizer_state(cls, state: dict):
+    def from_optimizer_state(cls, state: dict, *, allow_initial=False):
         if set(state) != {"schema", "contract", "updates", "version", "params", "first", "second", "rng"} \
                 or state["schema"] != "minecraft-ppo-optimizer/v1" or state["contract"] != CONTRACT:
             raise ValueError("incompatible optimizer checkpoint")
         for name in ("updates", "version"):
-            if type(state[name]) is not int or not 0 < state[name] <= 10**12:
+            if type(state[name]) is not int or not (0 if allow_initial else 1) <= state[name] <= 10**12:
                 raise ValueError("invalid trained optimizer counters")
+        if (state["updates"] == 0) != (state["version"] == 0):
+            raise ValueError("initialization counters must both be zero")
         hidden = len(state["params"]["actor_b"])
         model = cls(0, hidden)
         for group in ("params", "first", "second"):
@@ -200,6 +202,15 @@ class ActorCritic:
         return {"schema": "minecraft-rl-actor/v1", "contract": CONTRACT, "algorithm": "ppo",
                 "environment": "minecraft-paper", "environmentSteps": environment_steps,
                 "trainingRun": training_run, "rolloutSha256": rollout_sha256,
+                "hiddenWeights": p["actor_w"].tolist(), "hiddenBias": p["actor_b"].tolist(),
+                "outputWeights": p["actor_out"].tolist(), "outputBias": float(p["actor_bias"][0])}
+
+    def initial_artifact(self, *, brain_id: str, training_run: str) -> dict:
+        if self.updates != 0 or self.version != 0:
+            raise ValueError("only an actual untrained initial state may use the initial-actor schema")
+        p = self.params
+        return {"schema": "minecraft-rl-initial-actor/v1", "contract": CONTRACT, "initializationOnly": True,
+                "brainId": brain_id, "trainingRun": training_run, "environmentSteps": 0,
                 "hiddenWeights": p["actor_w"].tolist(), "hiddenBias": p["actor_b"].tolist(),
                 "outputWeights": p["actor_out"].tolist(), "outputBias": float(p["actor_bias"][0])}
 

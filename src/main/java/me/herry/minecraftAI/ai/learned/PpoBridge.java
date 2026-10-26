@@ -38,7 +38,11 @@ public final class PpoBridge implements AutoCloseable {
         }
     }
     public record Metadata(String brainId, String trainingStartState, long gradientUpdates,
-                           boolean learningEnabled, String saveState, String checkpointSha256) {
+                           boolean learningEnabled, String saveState, String checkpointSha256, Boolean initializationOnly) {
+        public Metadata(String brainId, String trainingStartState, long gradientUpdates,
+                        boolean learningEnabled, String saveState, String checkpointSha256) {
+            this(brainId, trainingStartState, gradientUpdates, learningEnabled, saveState, checkpointSha256, null);
+        }
         public Metadata {
             UUID.fromString(brainId);
             if (!java.util.Set.of("fresh", "pretrained", "resume").contains(trainingStartState) || gradientUpdates < 0

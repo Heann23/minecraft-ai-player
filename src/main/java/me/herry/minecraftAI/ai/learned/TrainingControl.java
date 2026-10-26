@@ -69,6 +69,7 @@ public final class TrainingControl {
         var metadata = latestResponse.metadata();
         if (metadata == null) return List.of("두뇌 상태: 이전 프로토콜 응답 — 상세 정보 미기록");
         return List.of("두뇌 ID: " + metadata.brainId(), "학습 당시 시작 상태: " + metadata.trainingStartState(),
+                "초기 가중치 상태: " + (metadata.initializationOnly() == null ? "미기록" : metadata.initializationOnly()),
                 "학습 활성화: " + metadata.learningEnabled(), "최근 수신 정책 버전: " + latestResponse.modelVersion(),
                 "누적 수집 전이: " + latestResponse.environmentSteps(), "가중치 갱신: " + metadata.gradientUpdates(),
                 "정책 저장 상태: " + metadata.saveState(),

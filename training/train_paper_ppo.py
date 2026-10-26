@@ -57,12 +57,13 @@ def validate_transition(row: dict):
         raise ValueError("invalid transition conditions")
 
 
-def resume_checkpoint(path: Path, *, upgrade_context=False):
+def resume_checkpoint(path: Path, *, upgrade_context=False, allow_initial=False):
     if path.is_dir():
         failures = []
+        allow_initial_recovery = allow_initial and not checkpoint_store.has_trained_history(path)
         for candidate in checkpoint_store.candidates(path):
             try:
-                model, parent = resume_checkpoint(candidate, upgrade_context=upgrade_context)
+                model, parent = resume_checkpoint(candidate, upgrade_context=upgrade_context, allow_initial=allow_initial_recovery)
                 parent["recoveredCheckpoint"] = str(candidate.relative_to(path))
                 print("Verified checkpoint recovery:", parent["recoveredCheckpoint"], flush=True)
                 return model, parent
@@ -75,15 +76,19 @@ def resume_checkpoint(path: Path, *, upgrade_context=False):
     checkpoint_hash = hashlib.sha256(encoded).hexdigest()
     report = json.loads((path.parent / "training-report.json").read_text(encoding="utf-8"))
     checkpoint = json.loads(encoded)
+    initial = checkpoint.get("initializationOnly", False)
+    if type(initial) is not bool or initial != report.get("initializationOnly", False) or initial and not allow_initial:
+        raise ValueError("initial state is not a trained/pretrained checkpoint")
     if checkpoint_hash != report.get("checkpointSha256") or checkpoint.get("environment") != "minecraft-paper" \
             or checkpoint.get("schema") != "minecraft-paper-checkpoint/v1" \
             or checkpoint.get("run") != report.get("run") \
             or checkpoint.get("environmentSteps") != report.get("environmentSteps") \
-            or type(checkpoint.get("environmentSteps")) is not int or checkpoint["environmentSteps"] <= 0:
+            or type(checkpoint.get("environmentSteps")) is not int \
+            or (checkpoint["environmentSteps"] != 0 if initial else checkpoint["environmentSteps"] <= 0):
         raise ValueError("checkpoint provenance mismatch")
     # Verify the exact raw prefix used by this update, including all failed outcomes in that prefix.
     prefix_bytes = report["rolloutBytesUsed"]
-    if type(prefix_bytes) is not int or prefix_bytes <= 0:
+    if type(prefix_bytes) is not int or (prefix_bytes != 0 if initial else prefix_bytes <= 0):
         raise ValueError("invalid rollout prefix")
     remaining, digest = prefix_bytes, hashlib.sha256()
     raw_path = path.parent / "paper-rollouts.jsonl"
@@ -102,13 +107,16 @@ def resume_checkpoint(path: Path, *, upgrade_context=False):
     if upgrade_context:
         model = ActorCritic.upgrade_legacy_context(checkpoint["optimizer"])
     else:
-        model = ActorCritic.from_optimizer_state(checkpoint["optimizer"])
+        model = ActorCritic.from_optimizer_state(checkpoint["optimizer"], allow_initial=initial)
+    if initial and (model.updates != 0 or model.version != 0):
+        raise ValueError("initial state contains learned counters")
     if model.version != report.get("modelVersion") or model.updates != report.get("gradientUpdates"):
         raise ValueError("optimizer/report version mismatch")
     origin = checkpoint.get("brainId") or (checkpoint.get("parents") or [{"trainingRun": checkpoint["run"]}])[0]["trainingRun"]
     uuid.UUID(origin)
     return model, {"checkpointSha256": checkpoint_hash, "trainingRun": checkpoint["run"], "contextUpgrade": upgrade_context,
                    "brainId": origin,
+                   "initializationOnly": initial,
                    "environmentSteps": checkpoint["environmentSteps"], "lineage": checkpoint.get("parents", [])}
 
 
@@ -124,7 +132,8 @@ class PaperTrainer:
             raise ValueError("starting weights must match the explicitly selected fresh/pretrained/resume source")
         if type(learning_enabled) is not bool:
             raise ValueError("learning state must be an explicit boolean")
-        model, parent = (ActorCritic(seed), None) if resume is None else resume_checkpoint(resume, upgrade_context=upgrade_context)
+        model, parent = (ActorCritic(seed), None) if resume is None else resume_checkpoint(
+                resume, upgrade_context=upgrade_context, allow_initial=start_state != "pretrained")
         output.mkdir(parents=True, exist_ok=False)  # A new run never overwrites another model or provenance.
         self.output = output
         self.run = str(uuid.uuid4())
@@ -153,15 +162,31 @@ class PaperTrainer:
         self.episode_raw = (output / "episode-outcomes.jsonl").open("ab")
         self.episodes = {}
         self.completed_episodes = self.death_episodes = self.episode_bytes = 0
+        if self.model.updates == 0:
+            self.save_initial_state()
         write_atomic(output / "run.json", {"schema": SCHEMA, "contract": CONTRACT, "algorithm": "ppo",
                      "brainId": self.brain_id, "trainingStartState": self.training_start_state,
                      "learningEnabled": self.learning_enabled,
                      "environment": "minecraft-paper", "run": self.run, "seed": seed,
                      "maxTransitions": maximum, "rolloutSize": rollout_size, "teacherLabels": False,
-                     "initialWeights": "random" if parent is None else "verified-ppo-checkpoint", "parents": self.parents,
+                     "initialWeights": "random" if parent is None else "verified-initial-state" if parent.get("initializationOnly") else "verified-ppo-checkpoint", "parents": self.parents,
                      "resumeRecovery": None if parent is None else parent.get("recoveredCheckpoint"),
                      "gammaPerServerTick": 0.99997, "gaeLambda": 0.95,
                      "ppoClip": 0.2, "epochsPerUpdate": 4, "trained": False, "evaluationComplete": False})
+
+    def save_initial_state(self):
+        empty_hash = hashlib.sha256(b"").hexdigest()
+        initial = {"schema": "minecraft-paper-checkpoint/v1", "environment": "minecraft-paper", "initializationOnly": True,
+                   "run": self.run, "brainId": self.brain_id, "environmentSteps": 0, "rolloutSha256": empty_hash,
+                   "parents": self.parents, "optimizer": self.model.optimizer_state(allow_initial=True)}
+        report = {"run": self.run, "brainId": self.brain_id, "environment": "minecraft-paper", "initializationOnly": True,
+                  "environmentSteps": 0, "runEnvironmentSteps": 0, "gradientUpdates": 0, "modelVersion": 0,
+                  "rolloutBytesUsed": 0, "rolloutSha256": empty_hash, "learningEnabled": self.learning_enabled,
+                  "trainingStartState": self.training_start_state, "evaluationComplete": False, "allWorldAutonomyProven": False}
+        self.raw.flush(); os.fsync(self.raw.fileno())
+        checkpoint_store.publish(self.output, self.model.initial_artifact(brain_id=self.brain_id, training_run=self.run), initial, report)
+        self.saved_model_version = 0
+        self.saved_checkpoint_sha = hashlib.sha256(checkpoint_store.encoded(initial)).hexdigest()
 
     def handle(self, packet: dict) -> dict:
         self.poll_training()
@@ -214,6 +239,7 @@ class PaperTrainer:
         self.decisions += 1
         return {"schema": SCHEMA, "id": packet["id"], **result, "environmentSteps": self.parent_steps + self.steps,
                 "metadata": {"brainId": self.brain_id, "trainingStartState": self.training_start_state,
+                             "initializationOnly": self.model.updates == 0,
                              "gradientUpdates": self.model.updates, "learningEnabled": self.learning_enabled,
                              "saveState": "updating" if self.training is not None else "saved" if self.saved_model_version == self.model.version else "not-saved",
                              "checkpointSha256": self.saved_checkpoint_sha}}

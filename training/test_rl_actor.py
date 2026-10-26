@@ -145,6 +145,30 @@ class ActorTests(unittest.TestCase):
 
 
 class BridgeProtocolTests(unittest.TestCase):
+    def test_fresh_initial_state_can_resume_without_becoming_a_pretrained_model(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            trainer = PaperTrainer(base / "fresh", seed=7, rollout_size=32, maximum=32, max_bytes=16*1024*1024,
+                                   learning_enabled=False, start_state="fresh")
+            original = {key: value.copy() for key, value in trainer.model.params.items()}
+            identity = trainer.brain_id
+            trainer.close()
+            self.assertFalse((base / "fresh/minecraft-rl-actor.json").exists())
+            with self.assertRaises(ValueError):
+                resume_checkpoint(base / "fresh")
+            resumed = PaperTrainer(base / "resume", seed=99, rollout_size=32, maximum=32, max_bytes=16*1024*1024,
+                                   resume=base / "fresh", learning_enabled=False)
+            try:
+                self.assertEqual(resumed.brain_id, identity)
+                self.assertEqual(resumed.model.updates, 0)
+                for key, value in original.items():
+                    np.testing.assert_array_equal(value, resumed.model.params[key])
+            finally:
+                resumed.close()
+            with self.assertRaises(ValueError):
+                PaperTrainer(base / "pretrained", seed=99, rollout_size=32, maximum=32, max_bytes=16*1024*1024,
+                             resume=base / "fresh", start_state="pretrained", learning_enabled=False)
+
     def test_fresh_inference_uses_the_same_network_without_updates_or_retroactive_learning(self):
         with tempfile.TemporaryDirectory() as temporary:
             trainer = PaperTrainer(Path(temporary) / "run", seed=7, rollout_size=32, maximum=32,
@@ -232,6 +256,10 @@ class BridgeProtocolTests(unittest.TestCase):
             self.assertEqual(parent["environmentSteps"], 32)
             self.assertIn("checkpoints/version-", parent["recoveredCheckpoint"])
             self.assertTrue(latest.exists())
+            older = output / parent["recoveredCheckpoint"]
+            (older.parent / "minecraft-rl-actor.json").write_text("also corrupted fixture")
+            with self.assertRaises(ValueError):
+                resume_checkpoint(output, allow_initial=True)
 
     def test_episode_diagnostics_include_excluded_death_and_keep_unfinished_episodes_incomplete(self):
         with tempfile.TemporaryDirectory() as temporary:

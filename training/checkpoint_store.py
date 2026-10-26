@@ -47,6 +47,8 @@ def publish(root: Path, artifact: dict, checkpoint: dict, report: dict):
                     "manifestSha256": hashlib.sha256(manifest_bytes).hexdigest()}))
     # Compatibility aliases are deliberately non-authoritative. Directory recovery reads the immutable bundle.
     for name in FILES:
+        if name == "minecraft-rl-actor.json" and report.get("initializationOnly"):
+            continue  # Initial weights are stored inside their marked bundle, never exposed as the deployment actor.
         durable_replace(root / name, encoded(report) if name == "training-report.json" else payloads[name])
     return destination
 
@@ -106,3 +108,19 @@ def candidates(root: Path):
                 continue
     if not found and not pointer.exists() and not generations.exists() and (root / "optimizer-checkpoint.json").is_file():
         yield root / "optimizer-checkpoint.json"  # Legacy run, still subject to full existing verification.
+
+
+def has_trained_history(root: Path):
+    for path in (root / "checkpoints").glob("version-*"):
+        match = re.fullmatch(r"version-([0-9]{12})-[0-9a-f]{32}", path.name)
+        if match and int(match[1]) > 0:
+            return True
+    report = root / "training-report.json"
+    if report.is_file():
+        try:
+            if report.stat().st_size > 65536:
+                return True
+            return json.loads(report.read_bytes()).get("initializationOnly") is not True
+        except (OSError, ValueError, TypeError):
+            return True  # Unknown history must never authorize resetting a learned brain to initialization.
+    return False
