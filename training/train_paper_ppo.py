@@ -328,6 +328,8 @@ class PaperTrainer:
         # An incomplete on-policy buffer is preserved as raw evidence, never relabeled as a trained update.
         try:
             self.poll_training(wait=True)
+            if self.model.updates == 0:
+                self.save_initial_state()  # Preserve the current RNG stream as well as the unchanged initial parameters.
         finally:
             self.worker.shutdown(wait=True)
             try:

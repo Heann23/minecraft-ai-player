@@ -78,6 +78,10 @@ def validate_options(args):
         raise ValueError("evaluation requires a frozen actor and cannot resume/update an optimizer")
     if getattr(args, "upgrade_context", False) and (args.mode != "train" or args.resume is None):
         raise ValueError("context upgrade requires explicit training resume")
+    if getattr(args, "inference_only", False) and args.mode != "train":
+        raise ValueError("backend inference uses the shared backend experiment lane; evaluate is standalone Java inference")
+    if getattr(args, "max_decisions", None) is not None and args.max_decisions < 1:
+        raise ValueError("max-decisions must be positive")
     if not re.fullmatch(r"[0-9a-f]{40}", args.source_commit):
         raise ValueError("full source commit required")
     # Only reuse clean runtime libraries. Never copy historical worlds, plugin state or experience.
@@ -164,7 +168,9 @@ def run(args):
                 "worldSeed": args.world_seed, "seedPlanSha256": sha256(output / "seed-plan.json"),
                 "paperJarSha256": sha256(server / "paper.jar"), "pluginSha256": sha256(plugin.parent / "MinecraftAI.jar"),
                 "configurationSha256": sha256(plugin / "config.yml"), "serverPropertiesSha256": sha256(server / "server.properties"),
-                "port": args.port, "maxSeconds": args.seconds, "maxTransitions": args.steps if args.mode == "train" else 0,
+                "port": args.port, "maxSeconds": args.seconds, "maxTransitions": args.steps if args.mode == "train" and not args.inference_only else 0,
+                "backendLearningEnabled": args.mode == "train" and not args.inference_only,
+                "requestedStartState": args.start_state, "maxDecisions": args.max_decisions,
                 "preEpisodeWorldTime": args.start_time,
                 "tools": {name: sha256(source / "training" / name) for name in ("paper_lab.py", "rl_actor.py", "train_paper_ppo.py", "checkpoint_store.py")},
                 "teacherLabels": False, "grantedItems": False, "teleportDuringEpisode": False,
@@ -210,6 +216,12 @@ def run(args):
                     command.extend(["--resume", str(args.resume.resolve())])
                 if args.upgrade_context:
                     command.append("--upgrade-context")
+                if args.inference_only:
+                    command.append("--inference-only")
+                if args.start_state:
+                    command.extend(["--start-state", args.start_state])
+                if args.max_decisions is not None:
+                    command.extend(["--max-decisions", str(args.max_decisions)])
                 env = dict(os.environ, OPENBLAS_NUM_THREADS="1", OMP_NUM_THREADS="1", MKL_NUM_THREADS="1")
                 trainer = subprocess.Popen(command, stdout=trainer_log, stderr=subprocess.STDOUT, env=env)
                 ready_deadline = time.monotonic() + 30
@@ -220,6 +232,9 @@ def run(args):
                         raise RuntimeError("trainer initialization deadline exceeded before server startup")
                     time.sleep(0.1)
                 initialized = json.loads((output / "training/run.json").read_text(encoding="utf-8"))
+                manifest["actualStartState"] = initialized.get("trainingStartState")
+                manifest["actualLearningEnabled"] = initialized.get("learningEnabled")
+                write_json(output / "manifest.json", manifest)
                 if initialized.get("parents"):
                     manifest["resolvedParentCheckpointSha256"] = initialized["parents"][-1]["checkpointSha256"]
                     manifest["resumeRecovery"] = initialized.get("resumeRecovery")
@@ -265,7 +280,7 @@ def run(args):
                     print(json.dumps({"elapsedSeconds": round(now-started), "ready": gameplay_start is not None,
                           "environmentSteps": status.get("environmentSteps", 0), "modelVersion": status.get("modelVersion")}), flush=True)
                 if trainer and trainer.poll() is not None:
-                    reason = "trainer-budget-complete" if trainer.returncode == 0 else "trainer-failed"; break
+                    reason = ("backend-inference-budget-complete" if args.inference_only else "trainer-budget-complete") if trainer.returncode == 0 else "trainer-failed"; break
         finally:
             if process and process.poll() is None:
                 if gameplay_start is None:
@@ -313,6 +328,9 @@ def main():
     parser.add_argument("--model", type=Path)
     parser.add_argument("--resume", type=Path)
     parser.add_argument("--upgrade-context", action="store_true", help="explicitly expand v1 trained context when resuming PPO")
+    parser.add_argument("--start-state", choices=("fresh", "pretrained", "resume"))
+    parser.add_argument("--inference-only", action="store_true", help="shared backend with learning disabled, for startup/mode scenarios")
+    parser.add_argument("--max-decisions", type=int)
     run(parser.parse_args())
 
 
