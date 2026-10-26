@@ -24,6 +24,7 @@ from rl_actor import ActorCritic, CONTRACT, STATE_SIZE, inputs
 import checkpoint_store
 import brain_session
 import model_catalog
+import sys
 
 SCHEMA = "minecraft-paper-ppo/v2"
 CONTROL_SCHEMA = "minecraft-brain-control/v1"
