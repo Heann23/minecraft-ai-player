@@ -166,7 +166,7 @@ def run(args):
                 "configurationSha256": sha256(plugin / "config.yml"), "serverPropertiesSha256": sha256(server / "server.properties"),
                 "port": args.port, "maxSeconds": args.seconds, "maxTransitions": args.steps if args.mode == "train" else 0,
                 "preEpisodeWorldTime": args.start_time,
-                "tools": {name: sha256(source / "training" / name) for name in ("paper_lab.py", "rl_actor.py", "train_paper_ppo.py")},
+                "tools": {name: sha256(source / "training" / name) for name in ("paper_lab.py", "rl_actor.py", "train_paper_ppo.py", "checkpoint_store.py")},
                 "teacherLabels": False, "grantedItems": False, "teleportDuringEpisode": False,
                 "allWorldAutonomyProven": False}
     if args.model:
