@@ -84,6 +84,11 @@ def validate_plan_extension(parent: dict, current: dict):
 
 def validate_options(args):
     plan = read_plan(args.plan)
+    if getattr(args, "restore_model", None) and not getattr(args, "catalog", None):
+        raise ValueError("restore-model requires a catalog")
+    if getattr(args, "catalog", None) and (args.mode != "train" or args.resume is not None
+                                            or getattr(args, "start_state", None) not in (None, "resume")):
+        raise ValueError("catalog restore requires the shared backend and no other weight selection")
     split = "trainSeeds" if args.mode == "train" else "evaluationSeeds"
     if args.world_seed not in plan[split]:
         raise ValueError("world seed is not assigned to this experiment split")
@@ -157,6 +162,15 @@ def run(args):
         raise ValueError("source commit does not match this tool checkout")
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=False)
+    catalog_state = None
+    if args.catalog:
+        from model_catalog import ModelCatalog
+        catalog = ModelCatalog(args.catalog)
+        catalog_state = catalog.load(args.restore_model) if args.restore_model else catalog.selected()
+        # Pin this exact revision before process startup; later catalog edits cannot change this run's model.
+        import brain_session
+        brain_session.save(output / "catalog-source-session.json", catalog_state["session"])
+        args.resume = Path(catalog_state["session"]["checkpoint"])
     shutil.copy2(args.plan, output / "seed-plan.json")
     if args.scenario:
         shutil.copy2(args.scenario, output / "control-scenario.json")
@@ -194,9 +208,12 @@ def run(args):
                 "backendLearningEnabled": args.mode == "train" and not args.inference_only,
                 "requestedStartState": args.start_state, "maxDecisions": args.max_decisions,
                 "preEpisodeWorldTime": args.start_time,
-                "tools": {name: sha256(source / "training" / name) for name in ("paper_lab.py", "rl_actor.py", "train_paper_ppo.py", "checkpoint_store.py", "brain_session.py")},
+                "tools": {name: sha256(source / "training" / name) for name in ("paper_lab.py", "rl_actor.py", "train_paper_ppo.py", "checkpoint_store.py", "brain_session.py", "model_catalog.py")},
                 "teacherLabels": False, "grantedItems": False, "teleportDuringEpisode": False,
                 "allWorldAutonomyProven": False}
+    if catalog_state:
+        manifest.update({"catalogName": catalog_state["name"], "catalogBrainId": catalog_state["session"]["brainId"],
+                         "catalogSessionSha256": sha256(output / "catalog-source-session.json")})
     if args.scenario:
         manifest.update({"preparedScenario": True, "notForAutonomousTraining": True,
                          "scenarioSha256": sha256(output / "control-scenario.json")})
@@ -237,7 +254,9 @@ def run(args):
                     str(plugin / "training-session/channel"), "--output", str(output / "training"),
                     "--max-transitions", str(args.steps), "--rollout-size", "32", "--seed", str(args.policy_seed),
                     "--stop-file", str(output / "trainer.stop.request")]
-                if args.resume:
+                if catalog_state:
+                    command.extend(["--restore-session", str(output / "catalog-source-session.json")])
+                elif args.resume:
                     command.extend(["--resume", str(args.resume.resolve())])
                 if args.upgrade_context:
                     command.append("--upgrade-context")
@@ -365,6 +384,8 @@ def main():
     parser.add_argument("--start-time", type=int, default=0, help="explicit world time prepared before spawning; no time changes during play")
     parser.add_argument("--model", type=Path)
     parser.add_argument("--resume", type=Path)
+    parser.add_argument("--catalog", type=Path, help="restore an exact named catalog snapshot using the shared backend")
+    parser.add_argument("--restore-model", help="catalog model name; omitted uses the saved selection")
     parser.add_argument("--upgrade-context", action="store_true", help="explicitly expand v1 trained context when resuming PPO")
     parser.add_argument("--start-state", choices=("fresh", "pretrained", "resume"))
     parser.add_argument("--inference-only", action="store_true", help="shared backend with learning disabled, for startup/mode scenarios")

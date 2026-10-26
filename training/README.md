@@ -182,3 +182,19 @@ Fresh 생성 직후에도 초기 가중치·가치망·최적화0상태/난수/�
 
 연결된 공유 두뇌는 /ai training on|off로 같은 모델의 학습 여부를 전환할 수 있습니다. 모든 AI의 정책 입력을 잠시 정지하고 실제 마지막 전이의 수신을 확인한 뒤, 같은 brainId에만 제어 요청을 보냅니다. 이미 진행 중인 최적화는 끝까지 확인하고 학습 설정을 세션에 저장한 뒤 응답합니다. 서버 메인 스레드는 기다리지 않습니다. 응답 ID/brainId/원하는 상태/버전/가중치 hash를 확인하며, 같은 요청의 파일 잠금 재시도는 같은 결과를 반환합니다. 중간에 AI를 명시 정지해도 전환 완료가 AI를 다시 켜지 않습니다. 연결된 Python 런타임이 없는 Java 고정 추론에서 학습 on은 현재 거절하며, 모델 등록·백엔드 자동 시작 통합은 후속 단계입니다. mode 전환은 새 가중치 초기화가 아니고 평가 실패를 성능 개선으로 바꾸지 않습니다.
 
+이름으로 관리하는 개발용 모델 목록은 `model_catalog.py`를 사용합니다. 새 네트워크 구현이 아니라 기존 전체 체크포인트와 세션의 검증된 참조입니다. 모델 이름은 소문자 영숫자/밑줄/하이픈 1~64자로 제한합니다. 상대 파일을 옮기거나 삭제하면 해당 모델을 사용할 수 없으며, 가중치/원시 전이/부모 계보를 함께 보존해야 합니다.
+
+```text
+python training/model_catalog.py --catalog <private-catalog> import survival-v1 --checkpoint <training-directory> --learning off
+python training/model_catalog.py --catalog <private-catalog> save survival-v1 --session <runtime-session.json>
+python training/model_catalog.py --catalog <private-catalog> list
+python training/model_catalog.py --catalog <private-catalog> info survival-v1
+python training/model_catalog.py --catalog <private-catalog> select survival-v1
+python training/model_catalog.py --catalog <private-catalog> restore survival-v1 --output <new-session.json>
+python training/model_catalog.py --catalog <private-catalog> new fresh-v1 --output <new-initial-directory> --seed 777 --learning off
+```
+
+`new`는 실제 ActorCritic의 초기 가중치·최적화0상태를 보존할 뿐 학습하거나 서버를 시작하지 않습니다. `import`는 실제 학습 이력이 있는 PPO 체크포인트만 허용합니다. `save`는 불변 세션 개정본을 쓴 뒤 이름 참조를 원자 교체합니다. 같은 이름에 다른 두뇌·오래된 정책·동일 버전의 다른 가중치/최적화를 덮어쓰지 않습니다. 선택은 이름과 두뇌 ID를 보존하며, 읽기 실패·손상·기존 작성 잠금을 새 초기화로 우회하지 않습니다. 준비된 전환 시나리오의 모델과 그 후속 체크포인트는 자율 모델 목록 등록을 거절합니다.
+
+백엔드의 기존 실행 인자에 `--catalog <private-catalog> --restore-model survival-v1`을 추가하면 같은 두뇌/가중치/최적화/난수/학습 설정을 복원합니다. 모델 이름을 생략하면 저장된 선택을 사용합니다. `--resume`, `--restore-session`, Fresh 선택과 함께 사용할 수 없습니다. 목록은 실행 중인 프로세스를 자동 교체하지 않으며, 실행 이후 모델/세션 저장은 명시적인 `save`로 등록합니다. 격리 실행 도구도 같은 인자를 지원하고 서버 시작 전에 선택한 세션을 고정하여 중간 목록 변경이 실행 모델을 바꾸지 않게 합니다. 제품의 인게임 모델 관리 명령·자동 프로세스 시작·자동 목록 갱신·서버 재시작 복원은 아직 후속 통합 범위입니다.
+

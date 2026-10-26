@@ -22,6 +22,7 @@ for variable in ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS"):
 from rl_actor import ActorCritic, CONTRACT, STATE_SIZE, inputs
 import checkpoint_store
 import brain_session
+import model_catalog
 
 SCHEMA = "minecraft-paper-ppo/v2"
 CONTROL_SCHEMA = "minecraft-brain-control/v1"
@@ -120,7 +121,8 @@ def resume_checkpoint(path: Path, *, upgrade_context=False, allow_initial=False)
                    "brainId": origin,
                    "initializationOnly": initial,
                    "checkpointPath": str(path.resolve()),
-                   "environmentSteps": checkpoint["environmentSteps"], "lineage": checkpoint.get("parents", [])}
+                   "environmentSteps": checkpoint["environmentSteps"], "lineage": checkpoint.get("parents", []),
+                   "notForAutonomousTraining": model_catalog.restricted_training_use(path)}
 
 
 class PaperTrainer:
@@ -150,6 +152,8 @@ class PaperTrainer:
             model.rng.bit_generator.state = restore_state["rng"]
         output.mkdir(parents=True, exist_ok=False)  # A new run never overwrites another model or provenance.
         self.output = output
+        self.restricted_training_use = parent is not None and parent["notForAutonomousTraining"]
+        write_atomic(output / "catalog-use.json", {"notForAutonomousTraining": self.restricted_training_use})
         self.run = str(uuid.uuid4())
         self.brain_id = self.run if parent is None else parent["brainId"]
         self.training_start_state = start_state
@@ -201,7 +205,7 @@ class PaperTrainer:
                 "policyVersion": self.model.version, "gradientUpdates": self.model.updates, "learningEnabled": self.learning_enabled,
                 "rng": self.model.rng.bit_generator.state, "initializationOnly": self.model.updates == 0,
                 "pendingRolloutTransitions": len(self.rows), "startState": self.training_start_state, "contract": CONTRACT,
-                "contextUpgrade": self.checkpoint_upgrade})
+                "contextUpgrade": self.checkpoint_upgrade, "notForAutonomousTraining": self.restricted_training_use})
         self.last_session_save = time.monotonic()
 
     def control(self, packet):
@@ -521,10 +525,22 @@ def main():
     parser.add_argument("--max-decisions", type=int, help="finite sampling budget, including inference without updates")
     parser.add_argument("--restore-session", type=Path, help="restore exact saved brain/learning flag/RNG; invalid state never initializes a new model")
     parser.add_argument("--session-save-seconds", type=int, default=30)
+    parser.add_argument("--catalog", type=Path, help="private named model catalog; read-only during this run")
+    parser.add_argument("--restore-model", help="restore a named model, or the catalog selection when omitted")
     args = parser.parse_args()
     if args.max_decisions is not None and args.max_decisions < 1:
         raise ValueError("max-decisions must be positive")
     restored = None
+    if args.restore_model and not args.catalog:
+        raise ValueError("restore-model requires a catalog")
+    if args.catalog:
+        if args.restore_session or args.resume or args.start_state not in (None, "resume"):
+            raise ValueError("catalog restore cannot be combined with another weight selection")
+        catalog = model_catalog.ModelCatalog(args.catalog)
+        restored = (catalog.load(args.restore_model) if args.restore_model else catalog.selected())["session"]
+        args.resume = Path(restored["checkpoint"])
+        args.start_state = "resume"
+        args.upgrade_context = restored.get("contextUpgrade", False)
     if args.restore_session:
         if args.resume is not None or args.start_state not in (None, "resume"):
             raise ValueError("session restore cannot be combined with another weight selection")
