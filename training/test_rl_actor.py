@@ -145,6 +145,34 @@ class ActorTests(unittest.TestCase):
 
 
 class BridgeProtocolTests(unittest.TestCase):
+    def test_fresh_inference_uses_the_same_network_without_updates_or_retroactive_learning(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            trainer = PaperTrainer(Path(temporary) / "run", seed=7, rollout_size=32, maximum=32,
+                                   max_bytes=16*1024*1024, start_state="fresh", learning_enabled=False)
+            before = {key: value.copy() for key, value in trainer.model.params.items()}
+            try:
+                transition = row(trainer.model, session=str(uuid.uuid4()))
+                transition.pop("nextValue")
+                packet = {"schema": SCHEMA, "environment": "minecraft-paper", "id": str(uuid.uuid4()),
+                          "frame": frame(), "transitions": [transition]}
+                response = trainer.handle(packet)
+                self.assertFalse(response["metadata"]["learningEnabled"])
+                self.assertEqual(response["metadata"]["trainingStartState"], "fresh")
+                self.assertEqual(trainer.steps, 0)
+                self.assertEqual(trainer.model.updates, 0)
+                self.assertEqual(trainer.model.version, 0)
+                for key, value in before.items():
+                    np.testing.assert_array_equal(value, trainer.model.params[key])
+                self.assertEqual(trainer.discard_reasons, {"learning-disabled": 1})
+                # Even if a later authorized controller enables learning, this old off-period row stays excluded.
+                trainer.learning_enabled = True
+                packet["id"] = str(uuid.uuid4())
+                trainer.handle(packet)
+                self.assertEqual(trainer.steps, 0)
+                self.assertFalse((trainer.output / "minecraft-rl-actor.json").exists())
+            finally:
+                trainer.close()
+
     def test_checkpoint_permission_failure_is_not_hidden_as_a_transport_retry(self):
         with tempfile.TemporaryDirectory() as temporary:
             channel = Path(temporary)
@@ -299,6 +327,17 @@ class BridgeProtocolTests(unittest.TestCase):
                 self.assertEqual(continued.parents[-1]["trainingRun"], trainer.run)
             finally:
                 continued.close()
+            pretrained = PaperTrainer(Path(temporary) / "pretrained-inference", seed=99, rollout_size=32, maximum=32,
+                                      max_bytes=16*1024*1024, resume=checkpoint, start_state="pretrained", learning_enabled=False)
+            try:
+                self.assertEqual(pretrained.brain_id, trainer.brain_id)
+                self.assertEqual(pretrained.training_start_state, "pretrained")
+                self.assertFalse(pretrained.learning_enabled)
+                for key, value in trainer.model.params.items():
+                    np.testing.assert_array_equal(value, pretrained.model.params[key])
+                self.assertEqual(pretrained.model.updates, trainer.model.updates)
+            finally:
+                pretrained.close()
             with self.assertRaises((ValueError, KeyError)):
                 resume_checkpoint(output / "minecraft-rl-actor.json")
             raw = output / "paper-rollouts.jsonl"

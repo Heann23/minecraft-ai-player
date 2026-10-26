@@ -114,19 +114,26 @@ def resume_checkpoint(path: Path, *, upgrade_context=False):
 
 class PaperTrainer:
     def __init__(self, output: Path, *, seed: int, rollout_size: int, maximum: int, max_bytes: int,
-                 resume: Path | None = None, upgrade_context=False):
+                 resume: Path | None = None, upgrade_context=False, learning_enabled=True, start_state=None):
         if not 32 <= rollout_size <= 4096 or maximum < rollout_size or max_bytes < MAX_PACKET:
             raise ValueError("invalid training budget")
         if upgrade_context and resume is None:
             raise ValueError("context upgrade requires an actual trained legacy checkpoint")
+        start_state = start_state or ("fresh" if resume is None else "resume")
+        if start_state not in {"fresh", "pretrained", "resume"} or (start_state == "fresh") != (resume is None):
+            raise ValueError("starting weights must match the explicitly selected fresh/pretrained/resume source")
+        if type(learning_enabled) is not bool:
+            raise ValueError("learning state must be an explicit boolean")
         model, parent = (ActorCritic(seed), None) if resume is None else resume_checkpoint(resume, upgrade_context=upgrade_context)
         output.mkdir(parents=True, exist_ok=False)  # A new run never overwrites another model or provenance.
         self.output = output
         self.run = str(uuid.uuid4())
         self.brain_id = self.run if parent is None else parent["brainId"]
-        self.training_start_state = "fresh" if parent is None else "resume"
-        self.saved_model_version = -1
-        self.saved_checkpoint_sha = None
+        self.training_start_state = start_state
+        self.learning_enabled = learning_enabled
+        self.decisions = 0
+        self.saved_model_version = -1 if parent is None else model.version
+        self.saved_checkpoint_sha = None if parent is None else parent["checkpointSha256"]
         self.model, self.parent = model, parent
         self.parent_steps = 0 if parent is None else parent["environmentSteps"]
         self.parents = [] if parent is None else [*parent["lineage"], {key: parent[key] for key in ("checkpointSha256", "trainingRun", "environmentSteps", "contextUpgrade")}]
@@ -148,6 +155,7 @@ class PaperTrainer:
         self.completed_episodes = self.death_episodes = self.episode_bytes = 0
         write_atomic(output / "run.json", {"schema": SCHEMA, "contract": CONTRACT, "algorithm": "ppo",
                      "brainId": self.brain_id, "trainingStartState": self.training_start_state,
+                     "learningEnabled": self.learning_enabled,
                      "environment": "minecraft-paper", "run": self.run, "seed": seed,
                      "maxTransitions": maximum, "rolloutSize": rollout_size, "teacherLabels": False,
                      "initialWeights": "random" if parent is None else "verified-ppo-checkpoint", "parents": self.parents,
@@ -176,7 +184,9 @@ class PaperTrainer:
             if sequence > self.last_sequence.get(session, -1):
                 self.last_sequence[session] = sequence
                 self.observe_episode(previous)
-                if previous["modelVersion"] != self.model.version:
+                if not self.learning_enabled:
+                    self.preserve_discard(previous, "learning-disabled")
+                elif previous["modelVersion"] != self.model.version:
                     self.discarded_off_policy += 1
                     self.preserve_discard(previous, "off-policy-version")
                 elif self.training is not None:
@@ -201,9 +211,10 @@ class PaperTrainer:
                 else:
                     self.preserve_discard(previous, "transition-budget-complete")
         result = self.model.sample(frame)
+        self.decisions += 1
         return {"schema": SCHEMA, "id": packet["id"], **result, "environmentSteps": self.parent_steps + self.steps,
                 "metadata": {"brainId": self.brain_id, "trainingStartState": self.training_start_state,
-                             "gradientUpdates": self.model.updates, "learningEnabled": True,
+                             "gradientUpdates": self.model.updates, "learningEnabled": self.learning_enabled,
                              "saveState": "updating" if self.training is not None else "saved" if self.saved_model_version == self.model.version else "not-saved",
                              "checkpointSha256": self.saved_checkpoint_sha}}
 
@@ -340,11 +351,16 @@ def exchange_request(request: Path, channel: Path, trainer: PaperTrainer, pendin
             pass
 
 
-def serve(channel: Path, trainer: PaperTrainer, stop_file: Path | None = None):
+def serve(channel: Path, trainer: PaperTrainer, stop_file: Path | None = None, max_decisions: int | None = None):
+    if max_decisions is not None and (type(max_decisions) is not int or max_decisions < 1):
+        raise ValueError("max-decisions must be positive")
     channel.mkdir(parents=True, exist_ok=True)
     pending = {}
+    max_decisions = max_decisions or max(1000, trainer.maximum * 16)
     try:
         while trainer.steps < trainer.maximum or trainer.training is not None:
+            if trainer.decisions >= max_decisions:
+                break
             if stop_file is not None and stop_file.is_file():
                 break
             trainer.poll_training()
@@ -370,12 +386,18 @@ def main():
     parser.add_argument("--resume", type=Path, help="verified optimizer checkpoint; never a Teacher/BC or deployment actor")
     parser.add_argument("--upgrade-context", action="store_true", help="explicit v1->v2 zero-influence context expansion while resuming")
     parser.add_argument("--stop-file", type=Path, help="explicit cooperative shutdown request; incomplete buffers stay raw")
+    parser.add_argument("--start-state", choices=("fresh", "pretrained", "resume"), help="weight source, independent of learning")
+    parser.add_argument("--inference-only", action="store_true", help="same actor/critic, fixed weights; never retroactively trains these transitions")
+    parser.add_argument("--max-decisions", type=int, help="finite sampling budget, including inference without updates")
     args = parser.parse_args()
+    if args.max_decisions is not None and args.max_decisions < 1:
+        raise ValueError("max-decisions must be positive")
     trainer = PaperTrainer(args.output, seed=args.seed, rollout_size=args.rollout_size,
                            maximum=args.max_transitions, max_bytes=args.max_megabytes * 1024 * 1024,
-                           resume=args.resume, upgrade_context=args.upgrade_context)
+                           resume=args.resume, upgrade_context=args.upgrade_context,
+                           start_state=args.start_state, learning_enabled=not args.inference_only)
     print("Waiting for real Paper transitions. No Teacher or synthetic game environment. Run:", trainer.run, flush=True)
-    serve(args.channel, trainer, args.stop_file)
+    serve(args.channel, trainer, args.stop_file, args.max_decisions)
 
 
 if __name__ == "__main__":
