@@ -127,6 +127,13 @@ def resume_checkpoint(path: Path, *, upgrade_context=False, allow_initial=False)
                    "notForAutonomousTraining": model_catalog.restricted_training_use(path)}
 
 
+def resolve_learning_mode(saved_state=None, *, learning=None, inference_only=False):
+    if learning not in (None, "on", "off") or inference_only and learning is not None:
+        raise ValueError("choose one explicit learning mode")
+    return False if inference_only else learning == "on" if learning is not None else \
+        saved_state["learningEnabled"] if saved_state is not None else True
+
+
 def verify_runtime_session(state):
     brain_session.validate(state)
     model, parent = resume_checkpoint(Path(state["checkpoint"]),
@@ -741,7 +748,9 @@ def main():
     parser.add_argument("--upgrade-context", action="store_true", help="explicit v1->v2 zero-influence context expansion while resuming")
     parser.add_argument("--stop-file", type=Path, help="explicit cooperative shutdown request; incomplete buffers stay raw")
     parser.add_argument("--start-state", choices=("fresh", "pretrained", "resume"), help="weight source, independent of learning")
-    parser.add_argument("--inference-only", action="store_true", help="same actor/critic, fixed weights; never retroactively trains these transitions")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--inference-only", action="store_true", help="same actor/critic, fixed weights; never retroactively trains these transitions")
+    mode.add_argument("--learning", choices=("on", "off"), help="explicit learning state independent of restored weights; default preserves saved mode")
     parser.add_argument("--max-decisions", type=int, help="finite sampling budget, including inference without updates")
     parser.add_argument("--restore-session", type=Path, help="restore exact saved brain/learning flag/RNG; invalid state never initializes a new model")
     parser.add_argument("--session-save-seconds", type=int, default=30)
@@ -775,7 +784,7 @@ def main():
                            maximum=args.max_transitions, max_bytes=args.max_megabytes * 1024 * 1024,
                            resume=args.resume, upgrade_context=args.upgrade_context,
                            start_state=args.start_state,
-                           learning_enabled=False if args.inference_only else restored["learningEnabled"] if restored else True,
+                           learning_enabled=resolve_learning_mode(restored, learning=args.learning, inference_only=args.inference_only),
                            restore_state=restored, session_save_seconds=args.session_save_seconds,
                            model_catalog_path=args.model_catalog)
     if recovery is not None:

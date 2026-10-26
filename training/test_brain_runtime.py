@@ -12,6 +12,20 @@ from train_paper_ppo import PaperTrainer, BrainRuntime, SCHEMA, resume_checkpoin
 
 
 class BrainRuntimeTests(unittest.TestCase):
+    def test_named_pin_preserves_name_without_mutating_saved_mode_and_override_is_explicit(self):
+        from paper_lab import named_session
+        from train_paper_ppo import resolve_learning_mode
+        original = {"learningEnabled": False, "modelName": "older-alias"}
+        pinned = named_session({"name": "current", "session": original})
+        self.assertEqual(pinned["modelName"], "current")
+        self.assertEqual(original["modelName"], "older-alias")
+        self.assertFalse(resolve_learning_mode(pinned))
+        self.assertTrue(resolve_learning_mode(pinned, learning="on"))
+        self.assertFalse(resolve_learning_mode({"learningEnabled": True}, learning="off"))
+        self.assertFalse(resolve_learning_mode({"learningEnabled": True}, inference_only=True))
+        with self.assertRaises(ValueError):
+            resolve_learning_mode(pinned, learning="on", inference_only=True)
+
     def test_corrupt_or_missing_session_restores_exact_committed_state_without_rewriting_source(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

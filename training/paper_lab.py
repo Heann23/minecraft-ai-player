@@ -110,6 +110,10 @@ def validate_plan_extension(parent: dict, current: dict):
 
 def validate_options(args):
     plan = read_plan(args.plan)
+    learning = getattr(args, "learning", None)
+    if learning not in (None, "on", "off") or learning is not None and (args.mode != "train"
+            or getattr(args, "inference_only", False) or getattr(args, "managed_backend", False)):
+        raise ValueError("explicit learning mode requires the external training backend and no inference-only override")
     if getattr(args, "admit_models", None):
         if not getattr(args, "managed_backend", False) or not getattr(args, "catalog", None) or len(args.admit_models) > 8:
             raise ValueError("additional snapshot admission requires a managed named catalog and at most eight names")
@@ -224,6 +228,11 @@ def summarize_game_log(path: Path):
             "limitations": "Periodic diagnostics are partial; input success is not task completion or proof of learned competence."}
 
 
+def named_session(revision):
+    from model_catalog import model_name
+    return dict(revision["session"], modelName=model_name(revision["name"]))
+
+
 def run(args):
     plan = validate_options(args)
     require_runtime_space(args.output, args.runtime_cache, args.paper, args.plugin)
@@ -242,7 +251,7 @@ def run(args):
         catalog_state = catalog.load(args.restore_model) if args.restore_model else catalog.selected()
         # Pin this exact revision before process startup; later catalog edits cannot change this run's model.
         import brain_session
-        brain_session.save(output / "catalog-source-session.json", catalog_state["session"])
+        brain_session.save(output / "catalog-source-session.json", named_session(catalog_state))
         args.resume = Path(catalog_state["session"]["checkpoint"])
     shutil.copy2(args.plan, output / "seed-plan.json")
     if args.scenario:
@@ -289,12 +298,16 @@ def run(args):
         f"level-name=world\nlevel-seed={args.world_seed}\nlevel-type=minecraft:normal\n"
         "gamemode=survival\ndifficulty=normal\nspawn-protection=0\npause-when-empty-seconds=-1\n"
         "view-distance=4\nsimulation-distance=4\nmax-players=2\n", encoding="ascii")
+    from train_paper_ppo import resolve_learning_mode
+    learning_enabled = args.mode == "train" and resolve_learning_mode(
+            None if catalog_state is None else catalog_state["session"],
+            learning=getattr(args, "learning", None), inference_only=args.inference_only)
     manifest = {"schema": "minecraft-paper-lab/v1", "sourceCommit": args.source_commit, "mode": args.mode,
                 "worldSeed": args.world_seed, "seedPlanSha256": sha256(output / "seed-plan.json"),
                 "paperJarSha256": sha256(server / "paper.jar"), "pluginSha256": sha256(plugin.parent / "MinecraftAI.jar"),
                 "configurationSha256": sha256(plugin / "config.yml"), "serverPropertiesSha256": sha256(server / "server.properties"),
-                "port": args.port, "maxSeconds": args.seconds, "maxTransitions": args.steps if args.mode == "train" and not args.inference_only else 0,
-                "backendLearningEnabled": args.mode == "train" and not args.inference_only,
+                "port": args.port, "maxSeconds": args.seconds, "maxTransitions": args.steps if learning_enabled else 0,
+                "backendLearningEnabled": learning_enabled, "requestedLearningOverride": getattr(args, "learning", None),
                 "requestedStartState": args.start_state, "maxDecisions": args.max_decisions,
                 "preEpisodeWorldTime": args.start_time,
                 "tools": {name: sha256(source / "training" / name) for name in ("paper_lab.py", "rl_actor.py", "train_paper_ppo.py", "checkpoint_store.py", "brain_session.py", "model_catalog.py")},
@@ -362,6 +375,8 @@ def run(args):
                     command.append("--upgrade-context")
                 if args.inference_only:
                     command.append("--inference-only")
+                if getattr(args, "learning", None) is not None:
+                    command.extend(["--learning", args.learning])
                 if args.start_state:
                     command.extend(["--start-state", args.start_state])
                 if args.max_decisions is not None:
@@ -554,6 +569,7 @@ def main():
     parser.add_argument("--upgrade-context", action="store_true", help="explicitly expand v1 trained context when resuming PPO")
     parser.add_argument("--start-state", choices=("fresh", "pretrained", "resume"))
     parser.add_argument("--inference-only", action="store_true", help="shared backend with learning disabled, for startup/mode scenarios")
+    parser.add_argument("--learning", choices=("on", "off"), help="explicit external-backend learning state; omitted preserves the restored mode")
     parser.add_argument("--max-decisions", type=int)
     parser.add_argument("--scenario", type=Path, help="prepared control scenario; outputs must never enter autonomous training")
     run(parser.parse_args())
