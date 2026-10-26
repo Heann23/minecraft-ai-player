@@ -145,6 +145,37 @@ class ActorTests(unittest.TestCase):
 
 
 class BridgeProtocolTests(unittest.TestCase):
+    def test_episode_diagnostics_include_excluded_death_and_keep_unfinished_episodes_incomplete(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            trainer = PaperTrainer(Path(temporary) / "run", seed=7, rollout_size=32, maximum=32, max_bytes=16*1024*1024)
+            session = str(uuid.uuid4())
+            try:
+                first = row(trainer.model, session=session, sequence=0, terminal=False)
+                first.pop("nextValue")
+                second = row(trainer.model, session=session, sequence=2, reward=-10, terminal=True)
+                second.pop("nextValue"); second["modelVersion"] = 1
+                trainer.handle({"schema": SCHEMA, "environment": "minecraft-paper", "id": str(uuid.uuid4()),
+                                "frame": frame(), "transitions": [first, second]})
+                record = json.loads((trainer.output / "episode-outcomes.jsonl").read_text())
+                self.assertEqual(record["observedTransitions"], 2)
+                self.assertEqual(record["missingSequenceCount"], 1)
+                self.assertEqual(record["actualServerTicks"], 10)
+                self.assertEqual(record["rewardSum"], -9)
+                self.assertFalse(record["completeObservedSequence"])
+                self.assertTrue(record["terminated"])
+                self.assertEqual(trainer.steps, 1)
+                self.assertEqual(trainer.death_episodes, 1)
+                unfinished = row(trainer.model, session=str(uuid.uuid4()), terminal=False)
+                unfinished.pop("nextValue")
+                trainer.handle({"schema": SCHEMA, "environment": "minecraft-paper", "id": str(uuid.uuid4()),
+                                "frame": frame(), "transitions": [unfinished]})
+            finally:
+                trainer.close()
+            records = [json.loads(line) for line in (trainer.output / "episode-outcomes.jsonl").read_text().splitlines()]
+            self.assertEqual(len(records), 2)
+            self.assertFalse(records[1]["episodeEnded"])
+            self.assertFalse(records[1]["completeObservedSequence"])
+
     def test_explicit_stop_closes_the_trainer_without_inventing_an_update_from_an_incomplete_buffer(self):
         with tempfile.TemporaryDirectory() as temporary:
             base = Path(temporary)

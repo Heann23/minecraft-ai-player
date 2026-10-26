@@ -119,6 +119,9 @@ class PaperTrainer:
         self.discarded_raw = (output / "discarded-transitions.jsonl").open("ab")
         self.discarded_bytes = 0
         self.discard_reasons = {}
+        self.episode_raw = (output / "episode-outcomes.jsonl").open("ab")
+        self.episodes = {}
+        self.completed_episodes = self.death_episodes = self.episode_bytes = 0
         write_atomic(output / "run.json", {"schema": SCHEMA, "contract": CONTRACT, "algorithm": "ppo",
                      "environment": "minecraft-paper", "run": self.run, "seed": seed,
                      "maxTransitions": maximum, "rolloutSize": rollout_size, "teacherLabels": False,
@@ -146,6 +149,7 @@ class PaperTrainer:
             session, sequence = previous["session"], previous["sequence"]
             if sequence > self.last_sequence.get(session, -1):
                 self.last_sequence[session] = sequence
+                self.observe_episode(previous)
                 if previous["modelVersion"] != self.model.version:
                     self.discarded_off_policy += 1
                     self.preserve_discard(previous, "off-policy-version")
@@ -158,7 +162,7 @@ class PaperTrainer:
                     # A cross-world boundary is not bootstrapped from an unrelated world's body state.
                     row["nextValue"] = 0 if row["terminated"] or row["nextWorld"] != row["frame"]["world"] else next_value
                     encoded = (json.dumps(row, ensure_ascii=False, allow_nan=False, separators=(",", ":")) + "\n").encode()
-                    if self.bytes + self.discarded_bytes + len(encoded) > self.max_bytes:
+                    if self.bytes + self.discarded_bytes + self.episode_bytes + len(encoded) > self.max_bytes:
                         raise RuntimeError("raw Paper rollout byte budget exhausted")
                     self.raw.write(encoded); self.raw.flush(); self.digest.update(encoded); self.bytes += len(encoded)
                     self.rows.append(row); self.steps += 1; self.ticks += row["elapsedTicks"]
@@ -176,11 +180,40 @@ class PaperTrainer:
     def preserve_discard(self, transition, reason):
         encoded = (json.dumps({"reason": reason, "activePolicyVersion": self.model.version, "transition": transition},
                     ensure_ascii=False, allow_nan=False, separators=(",", ":")) + "\n").encode()
-        if self.bytes + self.discarded_bytes + len(encoded) > self.max_bytes:
+        if self.bytes + self.discarded_bytes + self.episode_bytes + len(encoded) > self.max_bytes:
             raise RuntimeError("Paper evidence byte budget exhausted; excluded outcomes are not silently deleted")
         self.discarded_raw.write(encoded); self.discarded_raw.flush()
         self.discarded_bytes += len(encoded)
         self.discard_reasons[reason] = self.discard_reasons.get(reason, 0) + 1
+
+    def observe_episode(self, row):
+        session, sequence = row["session"], row["sequence"]
+        episode = self.episodes.setdefault(session, {"schema": "minecraft-rl-episode-summary/v1", "session": session,
+            "firstSequence": sequence, "lastSequence": sequence-1, "observedTransitions": 0, "missingSequenceCount": sequence,
+            "actualServerTicks": 0, "rewardSum": 0.0, "minimumHealthRatio": 1.0, "policyVersions": [],
+            "terminated": False, "truncated": False, "episodeEnded": False, "allWorldAutonomyProven": False})
+        episode["missingSequenceCount"] += max(0, sequence - episode["lastSequence"] - 1)
+        episode["lastSequence"] = sequence
+        episode["observedTransitions"] += 1
+        episode["actualServerTicks"] += row["elapsedTicks"]
+        episode["rewardSum"] += row["reward"]
+        episode["minimumHealthRatio"] = min(episode["minimumHealthRatio"], row["frame"]["state"][0], row["nextState"][0])
+        if row["modelVersion"] not in episode["policyVersions"]:
+            episode["policyVersions"].append(row["modelVersion"])
+        if row["terminated"] or row["truncated"]:
+            episode.update({"terminated": row["terminated"], "truncated": row["truncated"], "episodeEnded": True})
+            self.write_episode(episode)
+            self.completed_episodes += 1
+            self.death_episodes += row["terminated"]
+            del self.episodes[session]
+
+    def write_episode(self, episode):
+        episode["completeObservedSequence"] = episode["episodeEnded"] and episode["missingSequenceCount"] == 0
+        episode["scope"] = "observed-unique-transitions-not-only-ppo-used"
+        encoded = (json.dumps(episode, ensure_ascii=False, allow_nan=False, separators=(",", ":")) + "\n").encode()
+        if self.bytes + self.discarded_bytes + self.episode_bytes + len(encoded) > self.max_bytes:
+            raise RuntimeError("Paper episode evidence byte budget exhausted")
+        self.episode_raw.write(encoded); self.episode_raw.flush(); self.episode_bytes += len(encoded)
 
     @staticmethod
     def fit_snapshot(model, rows):
@@ -216,6 +249,8 @@ class PaperTrainer:
                      "checkpointSha256": hashlib.sha256(checkpoint.read_bytes()).hexdigest(), "discardedOffPolicy": self.discarded_off_policy,
                      "discardedDuringUpdate": self.discarded_during_update,
                      "discardedEvidenceBytes": self.discarded_bytes, "discardReasons": dict(self.discard_reasons),
+                     "observedCompletedEpisodes": self.completed_episodes, "observedDeathEpisodes": self.death_episodes,
+                     "openObservedEpisodes": len(self.episodes),
                      "teacherLabels": False, "initializationOnly": False, "evaluationComplete": False,
                      "allWorldAutonomyProven": False, "trainingMetrics": stats})
 
@@ -225,8 +260,13 @@ class PaperTrainer:
             self.poll_training(wait=True)
         finally:
             self.worker.shutdown(wait=True)
-            self.raw.close()
-            self.discarded_raw.close()
+            try:
+                for episode in self.episodes.values():
+                    self.write_episode(episode)
+            finally:
+                self.raw.close()
+                self.discarded_raw.close()
+                self.episode_raw.close()
 
 
 def serve(channel: Path, trainer: PaperTrainer, stop_file: Path | None = None):
