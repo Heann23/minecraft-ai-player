@@ -56,14 +56,50 @@ def validate_transition(row: dict):
         raise ValueError("invalid transition conditions")
 
 
+def resume_checkpoint(path: Path):
+    if not path.is_file() or path.stat().st_size > 16 * 1024 * 1024:
+        raise ValueError("missing/oversized PPO checkpoint")
+    encoded = path.read_bytes()
+    checkpoint_hash = hashlib.sha256(encoded).hexdigest()
+    report = json.loads((path.parent / "training-report.json").read_text(encoding="utf-8"))
+    checkpoint = json.loads(encoded)
+    if checkpoint_hash != report.get("checkpointSha256") or checkpoint.get("environment") != "minecraft-paper" \
+            or checkpoint.get("schema") != "minecraft-paper-checkpoint/v1" \
+            or checkpoint.get("run") != report.get("run") \
+            or checkpoint.get("environmentSteps") != report.get("environmentSteps") \
+            or type(checkpoint.get("environmentSteps")) is not int or checkpoint["environmentSteps"] <= 0:
+        raise ValueError("checkpoint provenance mismatch")
+    # Verify the exact raw prefix used by this update, including all failed outcomes in that prefix.
+    prefix_bytes = report["rolloutBytesUsed"]
+    if type(prefix_bytes) is not int or prefix_bytes <= 0:
+        raise ValueError("invalid rollout prefix")
+    remaining, digest = prefix_bytes, hashlib.sha256()
+    with (path.parent / "paper-rollouts.jsonl").open("rb") as raw:
+        while remaining:
+            block = raw.read(min(remaining, 1024 * 1024))
+            if not block:
+                raise ValueError("incomplete rollout provenance")
+            digest.update(block); remaining -= len(block)
+    if digest.hexdigest() != checkpoint.get("rolloutSha256") or digest.hexdigest() != report.get("rolloutSha256"):
+        raise ValueError("rollout provenance mismatch")
+    model = ActorCritic.from_optimizer_state(checkpoint["optimizer"])
+    if model.version != report.get("modelVersion") or model.updates != report.get("gradientUpdates"):
+        raise ValueError("optimizer/report version mismatch")
+    return model, {"checkpointSha256": checkpoint_hash, "trainingRun": checkpoint["run"],
+                   "environmentSteps": checkpoint["environmentSteps"], "lineage": checkpoint.get("parents", [])}
+
+
 class PaperTrainer:
-    def __init__(self, output: Path, *, seed: int, rollout_size: int, maximum: int, max_bytes: int):
+    def __init__(self, output: Path, *, seed: int, rollout_size: int, maximum: int, max_bytes: int, resume: Path | None = None):
         if not 32 <= rollout_size <= 4096 or maximum < rollout_size or max_bytes < MAX_PACKET:
             raise ValueError("invalid training budget")
+        model, parent = (ActorCritic(seed), None) if resume is None else resume_checkpoint(resume)
         output.mkdir(parents=True, exist_ok=False)  # A new run never overwrites another model or provenance.
         self.output = output
         self.run = str(uuid.uuid4())
-        self.model = ActorCritic(seed)
+        self.model, self.parent = model, parent
+        self.parent_steps = 0 if parent is None else parent["environmentSteps"]
+        self.parents = [] if parent is None else [*parent["lineage"], {key: parent[key] for key in ("checkpointSha256", "trainingRun", "environmentSteps")}]
         self.rollout_size, self.maximum, self.max_bytes = rollout_size, maximum, max_bytes
         self.rows = []
         self.worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix="paper-ppo-update")
@@ -77,7 +113,8 @@ class PaperTrainer:
         write_atomic(output / "run.json", {"schema": SCHEMA, "contract": CONTRACT, "algorithm": "ppo",
                      "environment": "minecraft-paper", "run": self.run, "seed": seed,
                      "maxTransitions": maximum, "rolloutSize": rollout_size, "teacherLabels": False,
-                     "initialWeights": "random", "gammaPerServerTick": 0.99997, "gaeLambda": 0.95,
+                     "initialWeights": "random" if parent is None else "verified-ppo-checkpoint", "parents": self.parents,
+                     "gammaPerServerTick": 0.99997, "gaeLambda": 0.95,
                      "ppoClip": 0.2, "epochsPerUpdate": 4, "trained": False, "evaluationComplete": False})
 
     def handle(self, packet: dict) -> dict:
@@ -140,13 +177,21 @@ class PaperTrainer:
         self.training_metadata = None
 
     def save(self, stats: dict, metadata: dict):
-        artifact = self.model.artifact(environment_steps=metadata["steps"], training_run=self.run, rollout_sha256=metadata["sha256"])
+        total_steps = self.parent_steps + metadata["steps"]
+        artifact = self.model.artifact(environment_steps=total_steps, training_run=self.run, rollout_sha256=metadata["sha256"])
+        artifact["parents"] = self.parents
         path = self.output / "minecraft-rl-actor.json"
         write_atomic(path, artifact)
+        checkpoint = self.output / "optimizer-checkpoint.json"
+        write_atomic(checkpoint, {"schema": "minecraft-paper-checkpoint/v1", "environment": "minecraft-paper",
+                     "run": self.run, "environmentSteps": total_steps, "rolloutSha256": metadata["sha256"],
+                     "parents": self.parents, "optimizer": self.model.optimizer_state()})
         write_atomic(self.output / "training-report.json", {"run": self.run, "environment": "minecraft-paper",
-                     "environmentSteps": metadata["steps"], "actualServerTicks": metadata["ticks"], "gradientUpdates": self.model.updates,
+                     "environmentSteps": total_steps, "runEnvironmentSteps": metadata["steps"], "parents": self.parents,
+                     "actualServerTicks": metadata["ticks"], "gradientUpdates": self.model.updates,
                      "modelVersion": self.model.version, "rolloutSha256": metadata["sha256"], "rolloutBytesUsed": metadata["bytes"],
-                     "actorSha256": hashlib.sha256(path.read_bytes()).hexdigest(), "discardedOffPolicy": self.discarded_off_policy,
+                     "actorSha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                     "checkpointSha256": hashlib.sha256(checkpoint.read_bytes()).hexdigest(), "discardedOffPolicy": self.discarded_off_policy,
                      "discardedDuringUpdate": self.discarded_during_update,
                      "teacherLabels": False, "initializationOnly": False, "evaluationComplete": False,
                      "allWorldAutonomyProven": False, "trainingMetrics": stats})
@@ -197,9 +242,10 @@ def main():
     parser.add_argument("--rollout-size", type=int, default=512)
     parser.add_argument("--max-megabytes", type=int, default=512)
     parser.add_argument("--seed", type=int, default=777)
+    parser.add_argument("--resume", type=Path, help="verified optimizer checkpoint; never a Teacher/BC or deployment actor")
     args = parser.parse_args()
     trainer = PaperTrainer(args.output, seed=args.seed, rollout_size=args.rollout_size,
-                           maximum=args.max_transitions, max_bytes=args.max_megabytes * 1024 * 1024)
+                           maximum=args.max_transitions, max_bytes=args.max_megabytes * 1024 * 1024, resume=args.resume)
     print("Waiting for real Paper transitions. No Teacher or synthetic game environment. Run:", trainer.run, flush=True)
     serve(args.channel, trainer)
 

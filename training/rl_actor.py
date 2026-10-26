@@ -140,6 +140,42 @@ class ActorCritic:
         self.version += 1
         return {key: float(np.mean([report[key] for report in stats])) for key in ("loss", "entropy")}
 
+    def optimizer_state(self) -> dict:
+        """Development checkpoint, including critic/Adam; the deployment actor alone cannot resume PPO."""
+        if self.updates <= 0 or self.version <= 0:
+            raise ValueError("initialization is not a trained checkpoint")
+        return {"schema": "minecraft-ppo-optimizer/v1", "contract": CONTRACT,
+                "updates": self.updates, "version": self.version,
+                "params": {key: value.tolist() for key, value in self.params.items()},
+                "first": {key: value.tolist() for key, value in self.first.items()},
+                "second": {key: value.tolist() for key, value in self.second.items()},
+                "rng": self.rng.bit_generator.state}
+
+    @classmethod
+    def from_optimizer_state(cls, state: dict):
+        if set(state) != {"schema", "contract", "updates", "version", "params", "first", "second", "rng"} \
+                or state["schema"] != "minecraft-ppo-optimizer/v1" or state["contract"] != CONTRACT:
+            raise ValueError("incompatible optimizer checkpoint")
+        for name in ("updates", "version"):
+            if type(state[name]) is not int or not 0 < state[name] <= 10**12:
+                raise ValueError("invalid trained optimizer counters")
+        hidden = len(state["params"]["actor_b"])
+        model = cls(0, hidden)
+        for group in ("params", "first", "second"):
+            if set(state[group]) != set(model.params):
+                raise ValueError("optimizer parameter names mismatch")
+            target = getattr(model, group)
+            for name, template in model.params.items():
+                value = np.asarray(state[group][name], dtype=np.float64)
+                if value.shape != template.shape or not np.isfinite(value).all() or np.abs(value).max() > 1e6:
+                    raise ValueError("invalid optimizer tensor")
+                if group == "second" and (value < 0).any():
+                    raise ValueError("negative Adam second moment")
+                target[name] = value.copy()
+        model.updates, model.version = state["updates"], state["version"]
+        model.rng.bit_generator.state = state["rng"]
+        return model
+
     def artifact(self, *, environment_steps: int, training_run: str, rollout_sha256: str) -> dict:
         if environment_steps <= 0 or self.updates == 0:
             raise ValueError("initialization is not a trained model")

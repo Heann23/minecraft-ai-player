@@ -1,5 +1,6 @@
 """Numerical/contract fixtures only. These tests are not Minecraft training or performance evidence."""
 import math
+import json
 from pathlib import Path
 import tempfile
 import unittest
@@ -10,7 +11,7 @@ from unittest import mock
 import numpy as np
 
 from rl_actor import ActorCritic, inputs, generalized_advantages, STATE_SIZE, ACTION_SIZE
-from train_paper_ppo import PaperTrainer, SCHEMA
+from train_paper_ppo import PaperTrainer, SCHEMA, resume_checkpoint
 
 
 def frame():
@@ -35,6 +36,26 @@ def row(model, session="a", sequence=0, reward=1, terminal=True):
 
 
 class ActorTests(unittest.TestCase):
+    def test_checkpoint_retains_critic_adam_counters_and_random_stream_for_exact_continuation(self):
+        model = ActorCritic(7, hidden=4)
+        model.fit([row(model)], epochs=1)
+        restored = ActorCritic.from_optimizer_state(model.optimizer_state())
+        for group in ("params", "first", "second"):
+            for key, value in getattr(model, group).items():
+                np.testing.assert_array_equal(value, getattr(restored, group)[key])
+        self.assertEqual(model.sample(frame()), restored.sample(frame()))
+        following = [row(model)]
+        model.fit(following, epochs=1)
+        restored.fit(following, epochs=1)
+        self.assertEqual(model.version, restored.version)
+        self.assertEqual(model.updates, restored.updates)
+        for key, value in model.params.items():
+            np.testing.assert_array_equal(value, restored.params[key])
+        broken = model.optimizer_state()
+        broken["second"]["actor_bias"][0] = -1
+        with self.assertRaises(ValueError):
+            ActorCritic.from_optimizer_state(broken)
+
     def test_actor_and_value_gradients_match_numerical_derivatives(self):
         model = ActorCritic(7, hidden=4)
         rows = [row(model)]
@@ -94,6 +115,45 @@ class ActorTests(unittest.TestCase):
 
 
 class BridgeProtocolTests(unittest.TestCase):
+    def test_resume_checks_raw_prefix_and_checkpoint_identity_without_reusing_previous_rows(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "first"
+            trainer = PaperTrainer(output, seed=7, rollout_size=32, maximum=32, max_bytes=16 * 1024 * 1024)
+            try:
+                for sequence in range(32):
+                    transition = row(trainer.model, session=str(uuid.UUID(int=5)), sequence=sequence)
+                    transition.pop("nextValue")
+                    trainer.handle({"schema": SCHEMA, "environment": "minecraft-paper", "id": str(uuid.uuid4()),
+                                    "frame": frame(), "transitions": [transition]})
+                trainer.poll_training(wait=True)
+            finally:
+                trainer.close()
+            checkpoint = output / "optimizer-checkpoint.json"
+            continued = PaperTrainer(Path(temporary) / "second", seed=99, rollout_size=32, maximum=32,
+                                     max_bytes=16 * 1024 * 1024, resume=checkpoint)
+            try:
+                self.assertEqual(continued.model.version, 1)
+                self.assertEqual(continued.parent_steps, 32)
+                self.assertEqual(continued.steps, 0)
+                self.assertEqual(continued.rows, [])
+                self.assertFalse((continued.output / "minecraft-rl-actor.json").exists())
+                self.assertEqual(continued.parents[-1]["trainingRun"], trainer.run)
+            finally:
+                continued.close()
+            with self.assertRaises((ValueError, KeyError)):
+                resume_checkpoint(output / "minecraft-rl-actor.json")
+            raw = output / "paper-rollouts.jsonl"
+            original = raw.read_bytes()
+            raw.write_bytes(b"!" + original[1:])
+            with self.assertRaisesRegex(ValueError, "rollout provenance mismatch"):
+                resume_checkpoint(checkpoint)
+            raw.write_bytes(original)
+            corrupted = json.loads(checkpoint.read_text())
+            corrupted["environmentSteps"] += 1
+            checkpoint.write_text(json.dumps(corrupted))
+            with self.assertRaisesRegex(ValueError, "checkpoint provenance mismatch"):
+                resume_checkpoint(checkpoint)
+
     def test_optimizer_wait_does_not_block_sampling_or_mutate_the_active_policy(self):
         with tempfile.TemporaryDirectory() as temporary:
             trainer = PaperTrainer(Path(temporary) / "run", seed=7, rollout_size=32, maximum=32, max_bytes=16 * 1024 * 1024)
