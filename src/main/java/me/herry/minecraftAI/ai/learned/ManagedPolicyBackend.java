@@ -111,7 +111,9 @@ public final class ManagedPolicyBackend implements AutoCloseable {
             String relative = payload.get("session").getAsString();
             if (!relative.matches("run-[0-9a-f-]{36}/runtime-session\\.json")) throw new IOException("unsafe session reference");
             restored = settings.runs().resolve(relative).normalize();
-            if (!restored.startsWith(settings.runs()) || Files.isSymbolicLink(restored.getParent()) || !Files.isRegularFile(restored))
+            if (!restored.startsWith(settings.runs()) || Files.isSymbolicLink(restored.getParent()) || Files.isSymbolicLink(restored)
+                    || !Files.isRegularFile(restored) && !(Files.isRegularFile(restored.resolveSibling("runtime-session.json.recovery-state.json"))
+                    && Files.isRegularFile(restored.resolveSibling("runtime-session.json.recovery-commit.json"))))
                 throw new IOException("saved session missing; original model is not replaced");
         }
         if (closed) throw new IOException("managed startup cancelled");

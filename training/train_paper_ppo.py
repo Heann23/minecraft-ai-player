@@ -127,6 +127,17 @@ def resume_checkpoint(path: Path, *, upgrade_context=False, allow_initial=False)
                    "notForAutonomousTraining": model_catalog.restricted_training_use(path)}
 
 
+def verify_runtime_session(state):
+    brain_session.validate(state)
+    model, parent = resume_checkpoint(Path(state["checkpoint"]),
+            upgrade_context=state.get("contextUpgrade", False), allow_initial=state["initializationOnly"])
+    if parent["brainId"] != state["brainId"] or parent["checkpointSha256"] != state["checkpointSha256"] \
+            or model.version != state["policyVersion"] or model.updates != state["gradientUpdates"] \
+            or parent["initializationOnly"] != state["initializationOnly"]:
+        raise ValueError("runtime recovery identity/optimizer mismatch; no replacement")
+    model.rng.bit_generator.state = state["rng"]
+
+
 class PaperTrainer:
     def __init__(self, output: Path, *, seed: int, rollout_size: int, maximum: int, max_bytes: int,
                  resume: Path | None = None, upgrade_context=False, learning_enabled=True, start_state=None,
@@ -218,9 +229,9 @@ class PaperTrainer:
                 "pendingRolloutTransitions": len(self.rows), "startState": self.training_start_state, "contract": CONTRACT,
                 "contextUpgrade": self.checkpoint_upgrade, "notForAutonomousTraining": self.restricted_training_use,
                 "modelName": self.model_name}
-        brain_session.save(self.output / "runtime-session.json", state)
+        brain_session.save(self.output / "runtime-session.json", state, recoverable=True)
         if self.session_alias is not None:
-            brain_session.save(self.session_alias, state)
+            brain_session.save(self.session_alias, state, recoverable=True)
         self.last_session_save = time.monotonic()
         if sync_catalog:
             self.refresh_named_model(state)
@@ -741,6 +752,7 @@ def main():
     if args.max_decisions is not None and args.max_decisions < 1:
         raise ValueError("max-decisions must be positive")
     restored = None
+    recovery = None
     if args.restore_model and not args.catalog:
         raise ValueError("restore-model requires a catalog")
     if args.catalog:
@@ -755,7 +767,7 @@ def main():
     if args.restore_session:
         if args.resume is not None or args.start_state not in (None, "resume"):
             raise ValueError("session restore cannot be combined with another weight selection")
-        restored = brain_session.load(args.restore_session)
+        restored, recovery = brain_session.restore(args.restore_session, verify=verify_runtime_session)
         args.resume = Path(restored["checkpoint"])
         args.start_state = "resume"
         args.upgrade_context = restored.get("contextUpgrade", False)
@@ -766,6 +778,10 @@ def main():
                            learning_enabled=False if args.inference_only else restored["learningEnabled"] if restored else True,
                            restore_state=restored, session_save_seconds=args.session_save_seconds,
                            model_catalog_path=args.model_catalog)
+    if recovery is not None:
+        write_atomic(args.output / "session-recovery.json", recovery)
+        print("Recovered exact committed runtime session; damaged original preserved:",
+              recovery["source"], "brain", recovery["brainId"], flush=True)
     print("Waiting for real Paper transitions. No Teacher or synthetic game environment. Run:", trainer.run, flush=True)
     serve(args.channel, BrainRuntime(trainer), args.stop_file, args.max_decisions)
 

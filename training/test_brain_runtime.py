@@ -8,10 +8,79 @@ import uuid
 
 import brain_session
 from model_catalog import ModelCatalog
-from train_paper_ppo import PaperTrainer, BrainRuntime, SCHEMA, resume_checkpoint
+from train_paper_ppo import PaperTrainer, BrainRuntime, SCHEMA, resume_checkpoint, verify_runtime_session
 
 
 class BrainRuntimeTests(unittest.TestCase):
+    def test_corrupt_or_missing_session_restores_exact_committed_state_without_rewriting_source(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            original = self.initial(root / "initial", 7)
+            path = root / "runtime-session.json"
+            brain_session.save(path, original, recoverable=True)
+            path.write_text("damaged original")
+            restored, recovery = brain_session.restore(path, verify=verify_runtime_session)
+            self.assertEqual(restored, original)
+            self.assertEqual(recovery["brainId"], original["brainId"])
+            self.assertEqual(path.read_text(), "damaged original")
+            path.unlink()
+            missing, recovery = brain_session.restore(path, verify=verify_runtime_session)
+            self.assertEqual(missing, original)
+            self.assertFalse(path.exists())
+
+    def test_failed_primary_publication_cannot_promote_staged_recovery_state(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            original = self.initial(root / "initial", 7)
+            path = root / "runtime-session.json"
+            brain_session.save(path, original, recoverable=True)
+            replace = brain_session.durable_replace
+            def interrupted(target, data):
+                if target == path:
+                    raise OSError("primary was not committed")
+                replace(target, data)
+            with mock.patch.object(brain_session, "durable_replace", interrupted):
+                with self.assertRaises(OSError):
+                    brain_session.save(path, dict(original, learningEnabled=True), recoverable=True)
+            self.assertEqual(brain_session.load(path), original)
+            path.write_text("corrupt")
+            with self.assertRaisesRegex(ValueError, "not committed"):
+                brain_session.restore(path, verify=verify_runtime_session)
+
+    def test_committed_primary_survives_witness_failure_without_falsely_rolling_back_mode(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            original = self.initial(root / "initial", 7)
+            path = root / "runtime-session.json"
+            brain_session.save(path, original, recoverable=True)
+            replace = brain_session.durable_replace
+            def interrupted(target, data):
+                if target.name.endswith(".recovery-commit.json"):
+                    raise OSError("witness write failed")
+                replace(target, data)
+            changed = dict(original, learningEnabled=True)
+            with mock.patch.object(brain_session, "durable_replace", interrupted):
+                brain_session.save(path, changed, recoverable=True)
+            restored, recovery = brain_session.restore(path, verify=verify_runtime_session)
+            self.assertEqual(restored, changed)
+            self.assertIsNone(recovery)
+            path.write_text("corrupt")
+            with self.assertRaises(ValueError):
+                brain_session.restore(path, verify=verify_runtime_session)
+
+    def test_recovery_rejects_corrupt_checkpoint_and_never_selects_another_brain(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            original = self.initial(root / "initial", 7)
+            other = self.initial(root / "other", 11)
+            path = root / "runtime-session.json"
+            brain_session.save(path, original, recoverable=True)
+            path.write_text("corrupt")
+            Path(original["checkpoint"]).write_text("damaged weights")
+            with self.assertRaises((ValueError, KeyError)):
+                brain_session.restore(path, verify=verify_runtime_session)
+            verify_runtime_session(other)  # A valid unrelated model exists but is never chosen.
+
     def test_low_disk_space_rejects_runtime_copy_before_creating_output(self):
         from paper_lab import require_runtime_space
         with tempfile.TemporaryDirectory() as directory:
@@ -153,10 +222,10 @@ class BrainRuntimeTests(unittest.TestCase):
             before = (root / "active/runtime-session.json").read_bytes()
             catalog_before = (old.catalog.root / "second.json").read_bytes()
             original = brain_session.save
-            def interrupted(path, state):
+            def interrupted(path, state, **options):
                 if path == root / "active/runtime-session.json" and state["brainId"] == second["brainId"]:
                     raise OSError("interrupted active-session publication")
-                original(path, state)
+                original(path, state, **options)
             try:
                 with self.assertRaises(ValueError):
                     runtime.control(self.packet(runtime, "missing"))
