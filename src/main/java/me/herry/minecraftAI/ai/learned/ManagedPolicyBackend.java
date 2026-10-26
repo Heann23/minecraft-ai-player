@@ -17,6 +17,7 @@ import java.util.concurrent.*;
 /** Owns one explicit local backend process. Contains no Bukkit, world or player state. */
 public final class ManagedPolicyBackend implements AutoCloseable {
     private static final String SCHEMA = "minecraft-managed-brain-session/v1";
+    private static final ConcurrentMap<Path, ManagedPolicyBackend> OWNERS = new ConcurrentHashMap<>();
     public record Settings(String python, Path script, Path catalog, Path runs, Path channelRoot,
                            String model, boolean allowTraining, int maxTransitions, int sessionSaveSeconds) {
         public Settings {
@@ -84,6 +85,8 @@ public final class ManagedPolicyBackend implements AutoCloseable {
         if (!Files.isRegularFile(settings.script()) || Files.isSymbolicLink(settings.runs()))
             throw new IOException("managed backend script missing or runtime directory unsafe");
         Files.createDirectories(settings.runs());
+        if (OWNERS.putIfAbsent(settings.runs(), this) != null)
+            throw new IOException("another backend in this server owns the runtime directory");
         owner = FileChannel.open(settings.runs().resolve("owner.lock"), StandardOpenOption.CREATE, StandardOpenOption.WRITE);
         lock = owner.tryLock();
         if (lock == null) throw new IOException("another backend owns the runtime directory");
@@ -176,6 +179,7 @@ public final class ManagedPolicyBackend implements AutoCloseable {
         try { if (lock != null && lock.isValid()) lock.release(); } catch (IOException ignored) {}
         try { if (owner != null) owner.close(); } catch (IOException ignored) {}
         lock = null; owner = null;
+        OWNERS.remove(settings.runs(), this);
     }
 
     @Override public void close() {
