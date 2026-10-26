@@ -11,7 +11,7 @@ from unittest import mock
 import numpy as np
 
 from rl_actor import ActorCritic, inputs, generalized_advantages, STATE_SIZE, ACTION_SIZE
-from train_paper_ppo import PaperTrainer, SCHEMA, resume_checkpoint, serve
+from train_paper_ppo import PaperTrainer, SCHEMA, resume_checkpoint, serve, exchange_request
 
 
 def frame():
@@ -145,6 +145,33 @@ class ActorTests(unittest.TestCase):
 
 
 class BridgeProtocolTests(unittest.TestCase):
+    def test_windows_cleanup_lock_retries_the_same_response_without_learning_or_sampling_twice(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            channel = Path(temporary)
+            identity = str(uuid.uuid4())
+            request = channel / (identity + ".request.json")
+            request.write_text(json.dumps({"id": identity}))
+            trainer = mock.Mock()
+            trainer.handle.return_value = {"id": identity, "candidate": "fixture"}
+            pending = {}
+            unlink = Path.unlink
+            calls = 0
+            def locked(path, *args, **kwargs):
+                nonlocal calls
+                if path == request and calls == 0:
+                    calls += 1
+                    raise PermissionError("Windows sharing violation fixture")
+                return unlink(path, *args, **kwargs)
+            with mock.patch.object(Path, "unlink", locked):
+                exchange_request(request, channel, trainer, pending)
+                self.assertTrue(request.exists())
+                response = (channel / (identity + ".response.json")).read_bytes()
+                exchange_request(request, channel, trainer, pending)
+            self.assertEqual(trainer.handle.call_count, 1)
+            self.assertEqual(response, (channel / (identity + ".response.json")).read_bytes())
+            self.assertEqual(pending, {})
+            self.assertFalse(request.exists())
+
     def test_directory_recovery_checks_prior_raw_prefix_and_preserves_an_older_complete_optimizer(self):
         with tempfile.TemporaryDirectory() as temporary:
             output = Path(temporary) / "run"

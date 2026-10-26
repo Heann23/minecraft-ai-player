@@ -285,30 +285,50 @@ class PaperTrainer:
                 self.episode_raw.close()
 
 
+def exchange_request(request: Path, channel: Path, trainer: PaperTrainer, pending: dict):
+    """Windows can temporarily deny rename/unlink. Retry the SAME result; never resample/relearn on cleanup failure."""
+    try:
+        if request not in pending:
+            if request.is_symlink() or request.stat().st_size > MAX_PACKET:
+                raise ValueError("invalid request file")
+            packet = json.loads(request.read_text(encoding="utf-8"))
+            if request.name != str(uuid.UUID(packet["id"])) + ".request.json":
+                raise ValueError("request identity mismatch")
+            if len(pending) >= 1024:
+                raise RuntimeError("Paper response retry budget exhausted")
+            pending[request] = {"response": trainer.handle(packet), "published": False}
+        saved = pending[request]
+        if not saved["published"] and request.exists():
+            write_atomic(channel / (request.stem.removesuffix(".request") + ".response.json"), saved["response"])
+            saved["published"] = True
+        request.unlink(missing_ok=True)
+        pending.pop(request, None)
+    except FileNotFoundError:
+        pending.pop(request, None)  # Expired Java request; never restart it or apply its old response.
+    except PermissionError:
+        pass  # Bounded file retry on the next iteration; any computed result stays immutable in pending.
+    except (ValueError, KeyError, TypeError) as error:
+        print("Rejected Paper packet:", type(error).__name__, str(error)[:160], flush=True)
+        pending[request] = {"response": None, "published": True}
+        try:
+            request.unlink(missing_ok=True)
+            pending.pop(request, None)
+        except PermissionError:
+            pass
+
+
 def serve(channel: Path, trainer: PaperTrainer, stop_file: Path | None = None):
     channel.mkdir(parents=True, exist_ok=True)
+    pending = {}
     try:
         while trainer.steps < trainer.maximum or trainer.training is not None:
             if stop_file is not None and stop_file.is_file():
                 break
             trainer.poll_training()
+            for disappeared in [path for path in pending if not path.exists()]:
+                pending.pop(disappeared, None)
             for request in sorted(channel.glob("*.request.json")):
-                try:
-                    if request.is_symlink() or request.stat().st_size > MAX_PACKET:
-                        raise ValueError("invalid request file")
-                    packet = json.loads(request.read_text(encoding="utf-8"))
-                    if request.name != str(uuid.UUID(packet["id"])) + ".request.json":
-                        raise ValueError("request identity mismatch")
-                    result = trainer.handle(packet)
-                    # The server thread validates the same identity, candidate set, generation and expiry again.
-                    if request.exists():
-                        write_atomic(channel / (packet["id"] + ".response.json"), result)
-                    request.unlink(missing_ok=True)
-                except FileNotFoundError:
-                    pass  # Java's bounded request expired; it must not be restarted or executed by Python.
-                except (ValueError, KeyError, TypeError) as error:
-                    print("Rejected Paper packet:", type(error).__name__, str(error)[:160], flush=True)
-                    request.unlink(missing_ok=True)
+                exchange_request(request, channel, trainer, pending)
                 if trainer.steps >= trainer.maximum:
                     break
             time.sleep(0.01)
