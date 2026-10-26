@@ -56,6 +56,11 @@ class SeedPlanTests(unittest.TestCase):
                 validate_options(args)
             args.world_seed = "1"
             self.assertIsNotNone(validate_options(args))
+            args.start_time = 24000
+            with self.assertRaisesRegex(ValueError, "initial world time"):
+                validate_options(args)
+            args.start_time = 18000
+            self.assertIsNotNone(validate_options(args))
             args.model = artifact
             with self.assertRaisesRegex(ValueError, "actors cannot resume"):
                 validate_options(args)

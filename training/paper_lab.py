@@ -63,6 +63,8 @@ def validate_options(args):
         raise ValueError("world seed is not assigned to this experiment split")
     if not 1024 <= args.port <= 65535 or not 10 <= args.seconds <= 86400:
         raise ValueError("invalid explicit port or finite wall-clock budget")
+    if not 0 <= getattr(args, "start_time", 0) < 24000:
+        raise ValueError("initial world time must be within one Minecraft day")
     if args.mode == "train" and (not 32 <= args.steps <= 10_000_000 or args.model is not None):
         raise ValueError("training requires a finite transition budget; deployment actors cannot resume PPO")
     if args.mode == "evaluate" and (args.model is None or args.resume is not None):
@@ -156,6 +158,7 @@ def run(args):
                 "paperJarSha256": sha256(server / "paper.jar"), "pluginSha256": sha256(plugin.parent / "MinecraftAI.jar"),
                 "configurationSha256": sha256(plugin / "config.yml"), "serverPropertiesSha256": sha256(server / "server.properties"),
                 "port": args.port, "maxSeconds": args.seconds, "maxTransitions": args.steps if args.mode == "train" else 0,
+                "preEpisodeWorldTime": args.start_time,
                 "tools": {name: sha256(source / "training" / name) for name in ("paper_lab.py", "rl_actor.py", "train_paper_ppo.py")},
                 "teacherLabels": False, "grantedItems": False, "teleportDuringEpisode": False,
                 "allWorldAutonomyProven": False}
@@ -216,7 +219,7 @@ def run(args):
                     line = events.get(timeout=0.5)
                     if "Done (" in line and gameplay_start is None:
                         gameplay_start = time.monotonic()
-                        for text in ("seed", "ai spawn RLLearner", "ai start RLLearner", "ai debug on"):
+                        for text in ("seed", "time set " + str(args.start_time), "ai spawn RLLearner", "ai start RLLearner", "ai debug on"):
                             send(text)
                         print("Paper ready; actual survival episode admitted", flush=True)
                 except queue.Empty:
@@ -270,6 +273,7 @@ def main():
     parser.add_argument("--seconds", type=int, required=True)
     parser.add_argument("--steps", type=int, default=512)
     parser.add_argument("--policy-seed", type=int, default=777)
+    parser.add_argument("--start-time", type=int, default=0, help="explicit world time prepared before spawning; no time changes during play")
     parser.add_argument("--model", type=Path)
     parser.add_argument("--resume", type=Path)
     parser.add_argument("--upgrade-context", action="store_true", help="explicitly expand v1 trained context when resuming PPO")
