@@ -145,6 +145,29 @@ class ActorTests(unittest.TestCase):
 
 
 class BridgeProtocolTests(unittest.TestCase):
+    def test_directory_recovery_checks_prior_raw_prefix_and_preserves_an_older_complete_optimizer(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "run"
+            trainer = PaperTrainer(output, seed=7, rollout_size=32, maximum=64, max_bytes=16*1024*1024)
+            try:
+                for batch in range(2):
+                    for number in range(32):
+                        transition = row(trainer.model, session=str(uuid.UUID(int=5)), sequence=batch*32+number)
+                        transition.pop("nextValue")
+                        trainer.handle({"schema": SCHEMA, "environment": "minecraft-paper", "id": str(uuid.uuid4()),
+                                        "frame": frame(), "transitions": [transition]})
+                    trainer.poll_training(wait=True)
+            finally:
+                trainer.close()
+            pointer = json.loads((output / "latest-checkpoint.json").read_text())
+            latest = output / pointer["bundle"]
+            (latest / "minecraft-rl-actor.json").write_text("interrupted export fixture")
+            model, parent = resume_checkpoint(output)
+            self.assertEqual(model.version, 1)
+            self.assertEqual(parent["environmentSteps"], 32)
+            self.assertIn("checkpoints/version-", parent["recoveredCheckpoint"])
+            self.assertTrue(latest.exists())
+
     def test_episode_diagnostics_include_excluded_death_and_keep_unfinished_episodes_incomplete(self):
         with tempfile.TemporaryDirectory() as temporary:
             trainer = PaperTrainer(Path(temporary) / "run", seed=7, rollout_size=32, maximum=32, max_bytes=16*1024*1024)

@@ -173,7 +173,14 @@ def run(args):
         manifest["actorSha256"] = sha256(plugin / "models/minecraft-rl-actor.json")
     if args.resume:
         # The parent lab manifest must belong to the same frozen training partition.
-        parent_directory = args.resume.resolve().parent.parent
+        selected_resume = args.resume.resolve()
+        if selected_resume.is_dir():
+            training_directory = selected_resume
+        elif selected_resume.parent.parent.name == "checkpoints":
+            training_directory = selected_resume.parent.parent.parent
+        else:
+            training_directory = selected_resume.parent
+        parent_directory = training_directory.parent
         parent = json.loads((parent_directory / "manifest.json").read_text(encoding="utf-8"))
         if parent.get("mode") != "train" or parent.get("worldSeed") not in plan["trainSeeds"]:
             raise ValueError("parent checkpoint does not belong to the same training campaign")
@@ -183,7 +190,10 @@ def run(args):
                 raise ValueError("parent campaign plan provenance is unavailable")
             validate_plan_extension(read_plan(prior_plan), plan)
             manifest["parentSeedPlanSha256"] = parent["seedPlanSha256"]
-        manifest["parentCheckpointSha256"] = sha256(args.resume)
+        if selected_resume.is_dir():
+            manifest["resumeSelection"] = "verified-directory-recovery"
+        else:
+            manifest["parentCheckpointSha256"] = sha256(selected_resume)
     write_json(output / "manifest.json", manifest)
     trainer = process = reader = None
     started, gameplay_start, reason = time.monotonic(), None, "startup-failed"
@@ -209,6 +219,11 @@ def run(args):
                     if time.monotonic() >= ready_deadline:
                         raise RuntimeError("trainer initialization deadline exceeded before server startup")
                     time.sleep(0.1)
+                initialized = json.loads((output / "training/run.json").read_text(encoding="utf-8"))
+                if initialized.get("parents"):
+                    manifest["resolvedParentCheckpointSha256"] = initialized["parents"][-1]["checkpointSha256"]
+                    manifest["resumeRecovery"] = initialized.get("resumeRecovery")
+                    write_json(output / "manifest.json", manifest)
             process = subprocess.Popen([str(args.java), "-Xms512M", "-Xmx2G", "--enable-native-access=ALL-UNNAMED",
                 "-Dfile.encoding=UTF-8", "-jar", "paper.jar", "--nogui"], cwd=server,
                 stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,

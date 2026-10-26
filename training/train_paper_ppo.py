@@ -20,6 +20,7 @@ for variable in ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS"):
     os.environ.setdefault(variable, "1")
 
 from rl_actor import ActorCritic, CONTRACT, STATE_SIZE, inputs
+import checkpoint_store
 
 SCHEMA = "minecraft-paper-ppo/v2"
 MAX_PACKET = 4 * 1024 * 1024
@@ -57,6 +58,17 @@ def validate_transition(row: dict):
 
 
 def resume_checkpoint(path: Path, *, upgrade_context=False):
+    if path.is_dir():
+        failures = []
+        for candidate in checkpoint_store.candidates(path):
+            try:
+                model, parent = resume_checkpoint(candidate, upgrade_context=upgrade_context)
+                parent["recoveredCheckpoint"] = str(candidate.relative_to(path))
+                print("Verified checkpoint recovery:", parent["recoveredCheckpoint"], flush=True)
+                return model, parent
+            except (OSError, ValueError, KeyError, TypeError) as failure:
+                failures.append(type(failure).__name__)
+        raise ValueError("no complete compatible checkpoint with valid raw provenance; originals preserved: " + ",".join(failures))
     if not path.is_file() or path.stat().st_size > 16 * 1024 * 1024:
         raise ValueError("missing/oversized PPO checkpoint")
     encoded = path.read_bytes()
@@ -74,7 +86,12 @@ def resume_checkpoint(path: Path, *, upgrade_context=False):
     if type(prefix_bytes) is not int or prefix_bytes <= 0:
         raise ValueError("invalid rollout prefix")
     remaining, digest = prefix_bytes, hashlib.sha256()
-    with (path.parent / "paper-rollouts.jsonl").open("rb") as raw:
+    raw_path = path.parent / "paper-rollouts.jsonl"
+    if "rolloutFile" in report:
+        if report["rolloutFile"] != "../../paper-rollouts.jsonl" or path.parent.parent.name != "checkpoints":
+            raise ValueError("invalid bundle rollout source")
+        raw_path = path.parent.parent.parent / "paper-rollouts.jsonl"
+    with raw_path.open("rb") as raw:
         while remaining:
             block = raw.read(min(remaining, 1024 * 1024))
             if not block:
@@ -126,6 +143,7 @@ class PaperTrainer:
                      "environment": "minecraft-paper", "run": self.run, "seed": seed,
                      "maxTransitions": maximum, "rolloutSize": rollout_size, "teacherLabels": False,
                      "initialWeights": "random" if parent is None else "verified-ppo-checkpoint", "parents": self.parents,
+                     "resumeRecovery": None if parent is None else parent.get("recoveredCheckpoint"),
                      "gammaPerServerTick": 0.99997, "gaeLambda": 0.95,
                      "ppoClip": 0.2, "epochsPerUpdate": 4, "trained": False, "evaluationComplete": False})
 
@@ -235,24 +253,22 @@ class PaperTrainer:
         total_steps = self.parent_steps + metadata["steps"]
         artifact = self.model.artifact(environment_steps=total_steps, training_run=self.run, rollout_sha256=metadata["sha256"])
         artifact["parents"] = self.parents
-        path = self.output / "minecraft-rl-actor.json"
-        write_atomic(path, artifact)
-        checkpoint = self.output / "optimizer-checkpoint.json"
-        write_atomic(checkpoint, {"schema": "minecraft-paper-checkpoint/v1", "environment": "minecraft-paper",
+        checkpoint = {"schema": "minecraft-paper-checkpoint/v1", "environment": "minecraft-paper",
                      "run": self.run, "environmentSteps": total_steps, "rolloutSha256": metadata["sha256"],
-                     "parents": self.parents, "optimizer": self.model.optimizer_state()})
-        write_atomic(self.output / "training-report.json", {"run": self.run, "environment": "minecraft-paper",
+                     "parents": self.parents, "optimizer": self.model.optimizer_state()}
+        report = {"run": self.run, "environment": "minecraft-paper",
                      "environmentSteps": total_steps, "runEnvironmentSteps": metadata["steps"], "parents": self.parents,
                      "actualServerTicks": metadata["ticks"], "gradientUpdates": self.model.updates,
                      "modelVersion": self.model.version, "rolloutSha256": metadata["sha256"], "rolloutBytesUsed": metadata["bytes"],
-                     "actorSha256": hashlib.sha256(path.read_bytes()).hexdigest(),
-                     "checkpointSha256": hashlib.sha256(checkpoint.read_bytes()).hexdigest(), "discardedOffPolicy": self.discarded_off_policy,
+                     "discardedOffPolicy": self.discarded_off_policy,
                      "discardedDuringUpdate": self.discarded_during_update,
                      "discardedEvidenceBytes": self.discarded_bytes, "discardReasons": dict(self.discard_reasons),
                      "observedCompletedEpisodes": self.completed_episodes, "observedDeathEpisodes": self.death_episodes,
                      "openObservedEpisodes": len(self.episodes),
                      "teacherLabels": False, "initializationOnly": False, "evaluationComplete": False,
-                     "allWorldAutonomyProven": False, "trainingMetrics": stats})
+                     "allWorldAutonomyProven": False, "trainingMetrics": stats}
+        self.raw.flush(); os.fsync(self.raw.fileno())
+        checkpoint_store.publish(self.output, artifact, checkpoint, report)
 
     def close(self):
         # An incomplete on-policy buffer is preserved as raw evidence, never relabeled as a trained update.
