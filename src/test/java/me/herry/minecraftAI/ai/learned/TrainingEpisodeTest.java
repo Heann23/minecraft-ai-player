@@ -16,11 +16,11 @@ class TrainingEpisodeTest {
     private static final UUID WORLD = UUID.fromString("00000000-0000-0000-0000-000000000001");
     private static final List<PolicyFrame.Option> OPTIONS = List.of(new PolicyFrame.Option("chosen", new double[PolicyFrame.ACTION_SIZE]));
     private static SurvivalObservation.Body body(double health) { return new SurvivalObservation.Body(health, 20, 0, 20, 0, 0, 300, 300); }
-    private static PolicyFrame frame(long tick) { return new PolicyFrame(WORLD, tick, new double[64], OPTIONS, false); }
+    private static PolicyFrame frame(long tick) { return new PolicyFrame(WORLD, tick, new double[PolicyFrame.STATE_SIZE], OPTIONS, false); }
     private static PolicyCandidates.Observed actual(double health, Map<String, Integer> stock) {
         var state = new PrimitiveSnapshot(1, 1, WORLD, new PrimitiveTarget.Point(0, 64, 0), health, 20, 300, health > 0,
                 false, false, List.of());
-        return new PolicyCandidates.Observed(state, body(health), stock, new double[64]);
+        return new PolicyCandidates.Observed(state, body(health), stock, new double[PolicyFrame.STATE_SIZE]);
     }
     private static PpoBridge.Response response() { return new PpoBridge.Response(PpoBridge.SCHEMA, UUID.randomUUID().toString(), 0, "chosen", 0, 0, 0, 0); }
 

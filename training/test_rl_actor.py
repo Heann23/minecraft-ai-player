@@ -15,7 +15,7 @@ from train_paper_ppo import PaperTrainer, SCHEMA, resume_checkpoint
 
 
 def frame():
-    state = [0.0] * 64
+    state = [0.0] * STATE_SIZE
     state[0] = 0.3
     actions = []
     for name, value in (("left", -0.5), ("right", 0.5)):
@@ -36,6 +36,36 @@ def row(model, session="a", sequence=0, reward=1, terminal=True):
 
 
 class ActorTests(unittest.TestCase):
+    def test_explicit_context_upgrade_preserves_legacy_actor_critic_and_adam_without_inventing_learning(self):
+        model = ActorCritic(7, hidden=4)
+        model.fit([row(model)], epochs=1)
+        legacy = model.optimizer_state()
+        legacy["contract"] = "minecraft-primitive-candidates/v1"
+        for group in ("params", "first", "second"):
+            for key in ("actor_w", "value_w"):
+                value = np.asarray(legacy[group][key])
+                legacy[group][key] = np.concatenate((value[:, :64], value[:, STATE_SIZE:]), axis=1).tolist()
+        with self.assertRaises(ValueError):
+            ActorCritic.from_optimizer_state(legacy)
+        upgraded = ActorCritic.upgrade_legacy_context(legacy)
+        observed = frame()
+        observed["state"] = np.linspace(-0.3, 0.3, STATE_SIZE).tolist()
+        old_state = np.asarray(observed["state"][:64])
+        old_x = np.concatenate((np.tile(old_state, (2, 1)), [option["features"] for option in observed["options"]]), axis=1)
+        p = {key: np.asarray(value) for key, value in legacy["params"].items()}
+        logits = np.tanh(old_x @ p["actor_w"].T + p["actor_b"]) @ p["actor_out"] + p["actor_bias"][0]
+        expected = np.exp(logits-logits.max()); expected /= expected.sum()
+        expected_value = np.tanh(p["value_w"] @ old_state + p["value_b"]) @ p["value_out"] + p["value_bias"][0]
+        probabilities, value, _ = upgraded.evaluate(observed)
+        np.testing.assert_allclose(expected, probabilities, atol=1e-14)
+        self.assertAlmostEqual(float(expected_value), value, places=12)
+        for group in ("params", "first", "second"):
+            np.testing.assert_array_equal(getattr(upgraded, group)["actor_w"][:, 64:STATE_SIZE], 0)
+            np.testing.assert_array_equal(getattr(upgraded, group)["value_w"][:, 64:STATE_SIZE], 0)
+        self.assertEqual(upgraded.version, model.version)
+        self.assertEqual(upgraded.updates, model.updates)
+        self.assertEqual(upgraded.rng.bit_generator.state, model.rng.bit_generator.state)
+
     def test_checkpoint_retains_critic_adam_counters_and_random_stream_for_exact_continuation(self):
         model = ActorCritic(7, hidden=4)
         model.fit([row(model)], epochs=1)
@@ -61,7 +91,7 @@ class ActorTests(unittest.TestCase):
         rows = [row(model)]
         advantages, returns = np.array([0.7]), np.array([0.8])
         gradient, _ = model.gradients(rows, advantages, returns)
-        for key, index in (("actor_w", (0, 64)), ("actor_b", (0,)), ("actor_out", (0,)),
+        for key, index in (("actor_w", (0, STATE_SIZE)), ("actor_b", (0,)), ("actor_out", (0,)),
                            ("value_w", (0, 0)), ("value_out", (0,))):
             original = model.params[key][index]
             epsilon = 1e-6

@@ -2,10 +2,11 @@
 from __future__ import annotations
 
 import math
+import copy
 import numpy as np
 
-CONTRACT = "minecraft-primitive-candidates/v1"
-STATE_SIZE, ACTION_SIZE, MAX_OPTIONS = 64, 256, 128
+CONTRACT = "minecraft-primitive-candidates/v2"
+STATE_SIZE, ACTION_SIZE, MAX_OPTIONS = 128, 256, 128
 INPUT_SIZE = STATE_SIZE + ACTION_SIZE
 
 
@@ -35,7 +36,7 @@ class ActorCritic:
             "actor_b": np.zeros(hidden),
             "actor_out": self.rng.normal(0, 0.01, hidden),
             "actor_bias": np.zeros(1),
-            "value_w": self.rng.normal(0, 1 / math.sqrt(64), (hidden, 64)),
+            "value_w": self.rng.normal(0, 1 / math.sqrt(STATE_SIZE), (hidden, STATE_SIZE)),
             "value_b": np.zeros(hidden),
             "value_out": self.rng.normal(0, 1 / math.sqrt(hidden), hidden),
             "value_bias": np.zeros(1),
@@ -150,6 +151,22 @@ class ActorCritic:
                 "first": {key: value.tolist() for key, value in self.first.items()},
                 "second": {key: value.tolist() for key, value in self.second.items()},
                 "rng": self.rng.bit_generator.state}
+
+    @classmethod
+    def upgrade_legacy_context(cls, state: dict):
+        """Explicit v1->v2 shape migration. New context starts at zero influence, never claimed as learned."""
+        if state.get("schema") != "minecraft-ppo-optimizer/v1" or state.get("contract") != "minecraft-primitive-candidates/v1":
+            raise ValueError("context upgrade requires a v1 optimizer checkpoint")
+        upgraded = copy.deepcopy(state)
+        for group in ("params", "first", "second"):
+            for key, old_columns in (("actor_w", 320), ("value_w", 64)):
+                value = np.asarray(state[group][key], dtype=np.float64)
+                if value.ndim != 2 or value.shape[1] != old_columns:
+                    raise ValueError("invalid legacy context tensor")
+                zeros = np.zeros((value.shape[0], 64))
+                upgraded[group][key] = np.concatenate((value[:, :64], zeros, value[:, 64:]), axis=1).tolist()
+        upgraded["contract"] = CONTRACT
+        return cls.from_optimizer_state(upgraded)
 
     @classmethod
     def from_optimizer_state(cls, state: dict):

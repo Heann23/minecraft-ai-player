@@ -9,7 +9,7 @@ import java.util.concurrent.*;
 
 /** Local development-only file transport. World access never leaves the server thread. No network or LLM commands. */
 public final class PpoBridge implements AutoCloseable {
-    public static final String SCHEMA = "minecraft-paper-ppo/v1";
+    public static final String SCHEMA = "minecraft-paper-ppo/v2";
     public record Transition(String session, long sequence, PolicyFrame frame, int index,
                              double logProbability, double value, long modelVersion, double reward,
                              int elapsedTicks, boolean terminated, boolean truncated, long appliedTick, String nextWorld, double[] nextState) {

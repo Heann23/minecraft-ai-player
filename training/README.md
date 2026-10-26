@@ -59,7 +59,7 @@ API 근거: [ONNX 공식 Python 문서](https://onnx.ai/onnx/intro/python.html),
 2026-10-26 사용자 지시로 새 경로는 Teacher Goal 모방이 아니라 실제 행동/인자의 선택을 학습하는 PPO입니다.
 위 Goal BC/ONNX 도구와 후보는 과거 개발 경로이며, 새 actor의 학습 자료나 배포 Brain으로 자동 재사용하지 않습니다.
 
-`rl_actor.py`는 관측64+파라미터 후보256의 공유 actor와 별도 value 네트워크를 학습합니다. 동일 행동 정책 버전의
+`rl_actor.py`는 관측128+파라미터 후보256의 공유 actor와 별도 value 네트워크를 학습합니다. 동일 행동 정책 버전의
 실제 전이만 PPO 갱신에 사용하고, 경과한 실제 서버 틱의 할인·에피소드/순서 누락·여러 AI의 GAE를 구분합니다.
 Goal 정답이나 Teacher 점수는 필요하지 않습니다. 초기 무작위 가중치는 학습 모델로 내보낼 수 없습니다.
 
@@ -113,6 +113,13 @@ Python 훈련기의 `--max-transitions`는 이번 run의 추가 전이 예산이
 누적 수, `runEnvironmentSteps`는 이번 run의 수입니다. `actualServerTicks`는 이번 run의 실제 틱으로 이전 틱을 추정하지 않습니다.
 체크포인트 출처 검사는 실제 Minecraft 숙련도/안전성 평가를 대신하지 않습니다. 실제 훈련·평가 seed의 분리와
 관측/행동 지원 범위·장기 기억, 모든 월드 일반화는 여전히 미완료입니다. 수치 테스트는 별도 임시 fixture입니다.
+
+현재 입력 계약은 `minecraft-primitive-candidates/v2`, 전송은 `minecraft-paper-ppo/v2`입니다. 추가64개 관측은
+보이는 인접12칸의 known/solid/water/lava와 현재 위치·동일 틱·완료 범위의 생물 관측, 피격 무적 시간/수평 속도입니다.
+보이지 않음·로드 안 됨·예산 중단·과거 엔티티 scan은 별도의 미확인 상태로 둡니다. 아직 전체 주변 공간·장기 기억이 아닙니다.
+`--resume ... --upgrade-context`로만 v1의 PPO 체크포인트를 이전합니다. 기존 actor 입력64와 action256 사이 및 critic의
+뒤에 새 입력64의 가중치/Adam 모멘트0을 삽입합니다. 기존 예측/가치·버전·누적 학습·난수 상태를 보존하고 부모 출처에
+이전을 기록하며, 새 입력을 이미 학습했다고 주장하지 않습니다. v1 actor 단독의 자동 변환/직접 적용은 지원하지 않습니다.
 
 ### 격리 실행 도구
 

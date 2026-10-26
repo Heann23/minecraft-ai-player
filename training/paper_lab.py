@@ -67,6 +67,8 @@ def validate_options(args):
         raise ValueError("training requires a finite transition budget; deployment actors cannot resume PPO")
     if args.mode == "evaluate" and (args.model is None or args.resume is not None):
         raise ValueError("evaluation requires a frozen actor and cannot resume/update an optimizer")
+    if getattr(args, "upgrade_context", False) and (args.mode != "train" or args.resume is None):
+        raise ValueError("context upgrade requires explicit training resume")
     if not re.fullmatch(r"[0-9a-f]{40}", args.source_commit):
         raise ValueError("full source commit required")
     # Only reuse clean runtime libraries. Never copy historical worlds, plugin state or experience.
@@ -179,6 +181,8 @@ def run(args):
                     "--max-transitions", str(args.steps), "--rollout-size", "32", "--seed", str(args.policy_seed)]
                 if args.resume:
                     command.extend(["--resume", str(args.resume.resolve())])
+                if args.upgrade_context:
+                    command.append("--upgrade-context")
                 env = dict(os.environ, OPENBLAS_NUM_THREADS="1", OMP_NUM_THREADS="1", MKL_NUM_THREADS="1")
                 trainer = subprocess.Popen(command, stdout=trainer_log, stderr=subprocess.STDOUT, env=env)
             process = subprocess.Popen([str(args.java), "-Xms512M", "-Xmx2G", "--enable-native-access=ALL-UNNAMED",
@@ -257,6 +261,7 @@ def main():
     parser.add_argument("--policy-seed", type=int, default=777)
     parser.add_argument("--model", type=Path)
     parser.add_argument("--resume", type=Path)
+    parser.add_argument("--upgrade-context", action="store_true", help="explicitly expand v1 trained context when resuming PPO")
     run(parser.parse_args())
 
 

@@ -19,9 +19,9 @@ import uuid
 for variable in ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS"):
     os.environ.setdefault(variable, "1")
 
-from rl_actor import ActorCritic, CONTRACT, inputs
+from rl_actor import ActorCritic, CONTRACT, STATE_SIZE, inputs
 
-SCHEMA = "minecraft-paper-ppo/v1"
+SCHEMA = "minecraft-paper-ppo/v2"
 MAX_PACKET = 4 * 1024 * 1024
 
 
@@ -40,7 +40,7 @@ def validate_transition(row: dict):
     uuid.UUID(row["nextWorld"])
     if not isinstance(row["appliedTick"], int) or not row["frame"]["serverTick"] <= row["appliedTick"] <= 0xffff_ffff:
         raise ValueError("invalid actual application tick")
-    if len(row["nextState"]) != 64 or any(not isinstance(x, (int, float)) or not math.isfinite(x) or abs(x) > 16 for x in row["nextState"]):
+    if len(row["nextState"]) != STATE_SIZE or any(not isinstance(x, (int, float)) or not math.isfinite(x) or abs(x) > 16 for x in row["nextState"]):
         raise ValueError("invalid actual next state")
     inputs(row["frame"])
     if not isinstance(row["sequence"], int) or row["sequence"] < 0 or not isinstance(row["modelVersion"], int) or row["modelVersion"] < 0:
@@ -56,7 +56,7 @@ def validate_transition(row: dict):
         raise ValueError("invalid transition conditions")
 
 
-def resume_checkpoint(path: Path):
+def resume_checkpoint(path: Path, *, upgrade_context=False):
     if not path.is_file() or path.stat().st_size > 16 * 1024 * 1024:
         raise ValueError("missing/oversized PPO checkpoint")
     encoded = path.read_bytes()
@@ -82,24 +82,30 @@ def resume_checkpoint(path: Path):
             digest.update(block); remaining -= len(block)
     if digest.hexdigest() != checkpoint.get("rolloutSha256") or digest.hexdigest() != report.get("rolloutSha256"):
         raise ValueError("rollout provenance mismatch")
-    model = ActorCritic.from_optimizer_state(checkpoint["optimizer"])
+    if upgrade_context:
+        model = ActorCritic.upgrade_legacy_context(checkpoint["optimizer"])
+    else:
+        model = ActorCritic.from_optimizer_state(checkpoint["optimizer"])
     if model.version != report.get("modelVersion") or model.updates != report.get("gradientUpdates"):
         raise ValueError("optimizer/report version mismatch")
-    return model, {"checkpointSha256": checkpoint_hash, "trainingRun": checkpoint["run"],
+    return model, {"checkpointSha256": checkpoint_hash, "trainingRun": checkpoint["run"], "contextUpgrade": upgrade_context,
                    "environmentSteps": checkpoint["environmentSteps"], "lineage": checkpoint.get("parents", [])}
 
 
 class PaperTrainer:
-    def __init__(self, output: Path, *, seed: int, rollout_size: int, maximum: int, max_bytes: int, resume: Path | None = None):
+    def __init__(self, output: Path, *, seed: int, rollout_size: int, maximum: int, max_bytes: int,
+                 resume: Path | None = None, upgrade_context=False):
         if not 32 <= rollout_size <= 4096 or maximum < rollout_size or max_bytes < MAX_PACKET:
             raise ValueError("invalid training budget")
-        model, parent = (ActorCritic(seed), None) if resume is None else resume_checkpoint(resume)
+        if upgrade_context and resume is None:
+            raise ValueError("context upgrade requires an actual trained legacy checkpoint")
+        model, parent = (ActorCritic(seed), None) if resume is None else resume_checkpoint(resume, upgrade_context=upgrade_context)
         output.mkdir(parents=True, exist_ok=False)  # A new run never overwrites another model or provenance.
         self.output = output
         self.run = str(uuid.uuid4())
         self.model, self.parent = model, parent
         self.parent_steps = 0 if parent is None else parent["environmentSteps"]
-        self.parents = [] if parent is None else [*parent["lineage"], {key: parent[key] for key in ("checkpointSha256", "trainingRun", "environmentSteps")}]
+        self.parents = [] if parent is None else [*parent["lineage"], {key: parent[key] for key in ("checkpointSha256", "trainingRun", "environmentSteps", "contextUpgrade")}]
         self.rollout_size, self.maximum, self.max_bytes = rollout_size, maximum, max_bytes
         self.rows = []
         self.worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix="paper-ppo-update")
@@ -243,9 +249,11 @@ def main():
     parser.add_argument("--max-megabytes", type=int, default=512)
     parser.add_argument("--seed", type=int, default=777)
     parser.add_argument("--resume", type=Path, help="verified optimizer checkpoint; never a Teacher/BC or deployment actor")
+    parser.add_argument("--upgrade-context", action="store_true", help="explicit v1->v2 zero-influence context expansion while resuming")
     args = parser.parse_args()
     trainer = PaperTrainer(args.output, seed=args.seed, rollout_size=args.rollout_size,
-                           maximum=args.max_transitions, max_bytes=args.max_megabytes * 1024 * 1024, resume=args.resume)
+                           maximum=args.max_transitions, max_bytes=args.max_megabytes * 1024 * 1024,
+                           resume=args.resume, upgrade_context=args.upgrade_context)
     print("Waiting for real Paper transitions. No Teacher or synthetic game environment. Run:", trainer.run, flush=True)
     serve(args.channel, trainer)
 
