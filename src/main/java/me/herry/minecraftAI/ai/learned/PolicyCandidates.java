@@ -55,6 +55,8 @@ public final class PolicyCandidates {
     private long recipeRevision = Long.MIN_VALUE;
     private int miningCursor;
     private int equipmentCursor;
+    private int movementCursor;
+    private static final List<BlockPoint> MOVE_OFFSETS = movementOffsets();
 
     public record Observed(me.herry.minecraftAI.ai.primitive.control.PrimitiveSnapshot snapshot,
                            SurvivalObservation.Body body, Map<String, Integer> stock, double[] features) {
@@ -106,13 +108,13 @@ public final class PolicyCandidates {
         // Waiting is always a legal input choice, without awarding it any hand-written priority.
         add(ai, found, "wait:5", new PrimitiveCommand.Wait(5), null, null, 0, 0, 0, "", false);
         if (active != null) found.putIfAbsent(active.id(), active);
-        for (int dx = -1; dx <= 1; dx++) for (int dz = -1; dz <= 1; dz++) {
-            if (dx == 0 && dz == 0) continue;
-            for (int dy : new int[]{0, 1, -1}) {
-                BlockPoint target = ai.getPosition().offset(dx * 2, dy, dz * 2);
-                add(ai, found, "move:" + target.encode(), new PrimitiveCommand.MoveTo(target, 0.5), null, null, dx * 2, dy, dz * 2, "", true);
-            }
+        for (var delta : movementOffsets(movementCursor)) {
+            if (ai.getWorkBudget().isExhausted()) break;
+            BlockPoint target = ai.getPosition().offset(delta.x(), delta.y(), delta.z());
+            add(ai, found, "move:" + target.encode(), new PrimitiveCommand.MoveTo(target, 0.5), null, null,
+                    delta.x(), delta.y(), delta.z(), "", true);
         }
+        movementCursor = Math.floorMod(movementCursor + 1, MOVE_OFFSETS.size());
         for (int yaw : new int[]{-90, -45, 45, 90}) {
             double angle = Math.toRadians(p.getLocation().getYaw() + yaw);
             var eye = p.getEyeLocation();
@@ -242,6 +244,23 @@ public final class PolicyCandidates {
             if (!target.isItem() || target.isAir()) continue;
             for (var option : ai.getCrafting().recipeOptions(target)) if (option.countPlannable() && !option.smelting() && recipeIds.add(option.id())) recipes.add(option);
         }
+    }
+
+    private static List<BlockPoint> movementOffsets() {
+        List<BlockPoint> offsets = new ArrayList<>();
+        for (int dx = -1; dx <= 1; dx++) for (int dz = -1; dz <= 1; dz++) {
+            if (dx == 0 && dz == 0) continue;
+            for (int stride : new int[]{1, 2}) for (int dy : new int[]{0, 1, -1})
+                offsets.add(new BlockPoint(dx * stride, dy, dz * stride));
+        }
+        return List.copyOf(offsets);
+    }
+
+    /** Rotate presentation, not action preference; even a truncated candidate budget sees every direction over time. */
+    static List<BlockPoint> movementOffsets(int cursor) {
+        List<BlockPoint> result = new ArrayList<>(MOVE_OFFSETS.size());
+        for (int i = 0; i < MOVE_OFFSETS.size(); i++) result.add(MOVE_OFFSETS.get(Math.floorMod(cursor + i, MOVE_OFFSETS.size())));
+        return List.copyOf(result);
     }
 
     static List<BlockPoint> nearbyTargets(BlockPoint feet) {
