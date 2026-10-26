@@ -87,6 +87,12 @@ public final class PolicyCandidates {
         for (int i = 0; i < body.length; i++) body[i] = Math.clamp(body[i], -16, 16);
         Map<String, Integer> counts = new HashMap<>();
         for (var item : state.inventory()) if (item.amount() > 0) counts.merge(item.material(), item.amount(), Integer::sum);
+        // Ownership rewards include worn/off-hand items; moving them back to storage is not a discovery.
+        // Crafting availability still uses its separate storage-only snapshot below.
+        for (int slot = 36; slot <= 40; slot++) {
+            var item = p.getInventory().getItem(slot);
+            if (item != null && !item.isEmpty()) counts.merge(item.getType().name(), item.getAmount(), Integer::sum);
+        }
         return new Observed(state, survival, counts, body);
     }
 
@@ -185,11 +191,9 @@ public final class PolicyCandidates {
             else for (int ticks : new int[]{5, 20, 80, 600}) expanded.add(candidate.committed(ticks));
         }
         var candidates = selectFair(expanded, active == null ? "" : active.id());
-        Map<String, Integer> stockCounts = new HashMap<>();
-        for (var item : state.inventory()) if (item.amount() > 0) stockCounts.merge(item.material(), item.amount(), Integer::sum);
         return new Capture(new PolicyFrame(ai.getWorldId(), Integer.toUnsignedLong(Bukkit.getCurrentTick()), body,
                 candidates.stream().map(Candidate::encoded).toList(), inspected.complete() && !ai.getWorkBudget().isExhausted()
-                && recipeCursor >= Material.values().length && expanded.size() <= PolicyFrame.MAX_OPTIONS), candidates, survival, stockCounts);
+                && recipeCursor >= Material.values().length && expanded.size() <= PolicyFrame.MAX_OPTIONS), candidates, survival, observed.stock());
     }
 
     private void equipment(AIPlayer ai, Map<String, Candidate> found) {
