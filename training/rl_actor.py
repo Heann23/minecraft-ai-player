@@ -5,8 +5,8 @@ import math
 import copy
 import numpy as np
 
-CONTRACT = "minecraft-primitive-candidates/v2"
-STATE_SIZE, ACTION_SIZE, MAX_OPTIONS = 128, 256, 128
+CONTRACT = "minecraft-primitive-candidates/v3"
+STATE_SIZE, ACTION_SIZE, MAX_OPTIONS = 192, 256, 128
 INPUT_SIZE = STATE_SIZE + ACTION_SIZE
 
 
@@ -154,17 +154,18 @@ class ActorCritic:
 
     @classmethod
     def upgrade_legacy_context(cls, state: dict):
-        """Explicit v1->v2 shape migration. New context starts at zero influence, never claimed as learned."""
-        if state.get("schema") != "minecraft-ppo-optimizer/v1" or state.get("contract") != "minecraft-primitive-candidates/v1":
-            raise ValueError("context upgrade requires a v1 optimizer checkpoint")
+        """Explicit v1/v2->v3 migration. New context has zero influence; no invented learning."""
+        old_size = {"minecraft-primitive-candidates/v1": 64, "minecraft-primitive-candidates/v2": 128}.get(state.get("contract"))
+        if state.get("schema") != "minecraft-ppo-optimizer/v1" or old_size is None:
+            raise ValueError("context upgrade requires a v1 or v2 optimizer checkpoint")
         upgraded = copy.deepcopy(state)
         for group in ("params", "first", "second"):
-            for key, old_columns in (("actor_w", 320), ("value_w", 64)):
+            for key, old_columns in (("actor_w", old_size + ACTION_SIZE), ("value_w", old_size)):
                 value = np.asarray(state[group][key], dtype=np.float64)
                 if value.ndim != 2 or value.shape[1] != old_columns:
                     raise ValueError("invalid legacy context tensor")
-                zeros = np.zeros((value.shape[0], 64))
-                upgraded[group][key] = np.concatenate((value[:, :64], zeros, value[:, 64:]), axis=1).tolist()
+                zeros = np.zeros((value.shape[0], STATE_SIZE - old_size))
+                upgraded[group][key] = np.concatenate((value[:, :old_size], zeros, value[:, old_size:]), axis=1).tolist()
         upgraded["contract"] = CONTRACT
         return cls.from_optimizer_state(upgraded)
 

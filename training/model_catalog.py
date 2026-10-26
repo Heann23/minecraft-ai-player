@@ -77,6 +77,23 @@ def optimizer_identity(state):
     return hashlib.sha256(encoded({key: value for key, value in optimizer.items() if key != "rng"})).hexdigest()
 
 
+def migrate_context_session(source: Path, destination: Path, *, name=None):
+    """Explicit new session, original exact checkpoint/RNG retained. Does not train or fabricate a checkpoint."""
+    from train_paper_ppo import CONTRACT
+    if destination.exists() or destination.is_symlink():
+        raise ValueError("migration requires a new output; existing session preserved")
+    state = brain_session.load(source)
+    if state.get("contract") not in {"minecraft-primitive-candidates/v1", "minecraft-primitive-candidates/v2"} \
+            or state["initializationOnly"] or state["pendingRolloutTransitions"] != 0:
+        raise ValueError("migration requires a saved trained legacy brain without pending transitions")
+    migrated = dict(state, contract=CONTRACT, contextUpgrade=True,
+                    modelName=state.get("modelName") if name is None else model_name(name))
+    verify_state(migrated)  # Raw provenance, full optimizer, counters, identity and saved RNG, before any write.
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    brain_session.save(destination, migrated, recoverable=True)
+    return migrated
+
+
 class ModelCatalog:
     def __init__(self, root: Path):
         self.root = root.absolute()
@@ -194,15 +211,15 @@ def main():
     commands = parser.add_subparsers(dest="operation", required=True)
     commands.add_parser("list")
     commands.add_parser("selected")
-    for command in ("info", "select", "save", "restore", "new", "import"):
+    for command in ("info", "select", "save", "restore", "new", "import", "migrate-context"):
         sub = commands.add_parser(command)
         sub.add_argument("name", type=model_name)
-        if command == "save":
+        if command in {"save", "migrate-context"}:
             sub.add_argument("--session", type=Path, required=True)
         if command == "import":
             sub.add_argument("--checkpoint", type=Path, required=True)
             sub.add_argument("--learning", choices=("on", "off"), required=True)
-        if command in ("restore", "new"):
+        if command in ("restore", "new", "migrate-context"):
             sub.add_argument("--output", type=Path, required=True)
         if command == "new":
             sub.add_argument("--seed", type=int, required=True)
@@ -219,6 +236,13 @@ def main():
         result = catalog.select(args.name)
     elif args.operation == "save":
         result = catalog.save(args.name, brain_session.load(args.session))
+    elif args.operation == "migrate-context":
+        # A different catalog/name can preserve the entire previous contract and its selection.
+        target = catalog.root / (args.name + ".json")
+        if target.exists() or target.is_symlink():
+            raise ValueError("migration requires an unused catalog name; existing model preserved")
+        state = migrate_context_session(args.session, args.output, name=args.name)
+        result = catalog.save(args.name, state)
     elif args.operation == "import":
         from train_paper_ppo import resume_checkpoint, CONTRACT
         with redirect_stdout(sys.stderr):  # Recovery diagnostics must not corrupt the CLI's JSON result.

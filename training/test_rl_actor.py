@@ -100,6 +100,34 @@ class ActorTests(unittest.TestCase):
         self.assertEqual(upgraded.updates, model.updates)
         self.assertEqual(upgraded.rng.bit_generator.state, model.rng.bit_generator.state)
 
+    def test_v2_upgrade_preserves_all_old_columns_and_moments_with_zero_new_gear_influence(self):
+        model = ActorCritic(11, hidden=4)
+        model.fit([row(model)], epochs=1)
+        legacy = model.optimizer_state()
+        legacy["contract"] = "minecraft-primitive-candidates/v2"
+        for group in ("params", "first", "second"):
+            for key in ("actor_w", "value_w"):
+                values = np.asarray(legacy[group][key])
+                legacy[group][key] = np.concatenate((values[:, :128], values[:, STATE_SIZE:]), axis=1).tolist()
+        with self.assertRaises(ValueError):
+            ActorCritic.from_optimizer_state(legacy)
+        upgraded = ActorCritic.upgrade_legacy_context(legacy)
+        observed = frame()
+        base_probabilities, base_value, _ = upgraded.evaluate(observed)
+        observed["state"][128:] = np.linspace(-1, 1, STATE_SIZE - 128).tolist()
+        probabilities, value, _ = upgraded.evaluate(observed)
+        np.testing.assert_array_equal(base_probabilities, probabilities)
+        self.assertEqual(base_value, value)
+        for group in ("params", "first", "second"):
+            for key, old in legacy[group].items():
+                actual = getattr(upgraded, group)[key]
+                if key in ("actor_w", "value_w"):
+                    np.testing.assert_array_equal(actual[:, 128:STATE_SIZE], 0)
+                    actual = np.concatenate((actual[:, :128], actual[:, STATE_SIZE:]), axis=1)
+                np.testing.assert_array_equal(actual, old)
+        self.assertEqual(upgraded.rng.bit_generator.state, legacy["rng"])
+        self.assertEqual((upgraded.version, upgraded.updates), (legacy["version"], legacy["updates"]))
+
     def test_checkpoint_retains_critic_adam_counters_and_random_stream_for_exact_continuation(self):
         model = ActorCritic(7, hidden=4)
         model.fit([row(model)], epochs=1)
