@@ -230,7 +230,7 @@ public final class PolicyCandidates {
     static List<Candidate> selectFair(List<Candidate> all, String activeId) {
         List<Candidate> selected = new ArrayList<>();
         Set<String> ids = new HashSet<>();
-        for (Candidate candidate : all) if (candidate.id().equals(activeId)) { selected.add(candidate); ids.add(candidate.id()); }
+        for (Candidate candidate : all) if (candidate.id().equals(activeId) && ids.add(candidate.id())) selected.add(candidate);
         Map<PrimitiveType, ArrayDeque<Candidate>> groups = new EnumMap<>(PrimitiveType.class);
         for (Candidate candidate : all) {
             PrimitiveType type = candidate.recipe() != null ? PrimitiveType.CRAFT_ITEM

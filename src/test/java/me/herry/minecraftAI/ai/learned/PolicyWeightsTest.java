@@ -64,6 +64,22 @@ class PolicyWeightsTest {
                 new double[1], List.of(option), true));
     }
 
+    @Test void retainingAnInputAlreadyEnumeratedDoesNotDuplicateTheCandidateOrInvalidateTheFrame() {
+        var raw = new PolicyCandidates.Candidate("wait:5",
+                new me.herry.minecraftAI.ai.primitive.control.PrimitiveCommand.Wait(5), null, null,
+                new PolicyFrame.Option("wait:5", new double[PolicyFrame.ACTION_SIZE]));
+        var generated = raw.committed(20);
+        double[] retainedFeatures = generated.encoded().features(); retainedFeatures[55] = 1;
+        var retained = new PolicyCandidates.Candidate(generated.id(), generated.command(), null, null,
+                new PolicyFrame.Option(generated.id(), retainedFeatures), 20, generated.inputId());
+        var choices = PolicyCandidates.selectFair(List.of(retained, raw.committed(5), generated, raw.committed(80)), retained.id());
+        assertEquals(3, choices.size());
+        assertSame(retained, choices.getFirst());
+        assertEquals(1, choices.stream().filter(c -> c.id().equals(retained.id())).count());
+        assertDoesNotThrow(() -> new PolicyFrame(UUID.randomUUID(), 10, new double[PolicyFrame.STATE_SIZE],
+                choices.stream().map(PolicyCandidates.Candidate::encoded).toList(), false));
+    }
+
     @Test void largeInventoriesCannotHideAllCraftingChoicesAtTheCandidateLimit() {
         var all = new java.util.ArrayList<PolicyCandidates.Candidate>();
         for (int i = 0; i < 150; i++) all.add(new PolicyCandidates.Candidate("move:" + i,
