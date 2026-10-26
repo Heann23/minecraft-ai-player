@@ -221,7 +221,9 @@ def run(args):
     # Disable persistence and chat in the new experiment only. No old AI state or credentials are loaded.
     config = config.replace("enabled: true", "enabled: false")
     if args.player_persistence:
-        config = config.replace("persistence:\n  enabled: false", "persistence:\n  enabled: true")
+        config, replaced = re.subn(r"(?m)^(persistence:\n(?:  #[^\n]*\n)*  enabled:) false$", r"\1 true", config)
+        if replaced != 1:
+            raise ValueError("player persistence setting was not enabled; acceptance cannot continue")
     if args.managed_backend:
         from model_catalog import ModelCatalog
         private_catalog = ModelCatalog(plugin / "brain-catalog")
