@@ -113,3 +113,22 @@ Python 훈련기의 `--max-transitions`는 이번 run의 추가 전이 예산이
 누적 수, `runEnvironmentSteps`는 이번 run의 수입니다. `actualServerTicks`는 이번 run의 실제 틱으로 이전 틱을 추정하지 않습니다.
 체크포인트 출처 검사는 실제 Minecraft 숙련도/안전성 평가를 대신하지 않습니다. 실제 훈련·평가 seed의 분리와
 관측/행동 지원 범위·장기 기억, 모든 월드 일반화는 여전히 미완료입니다. 수치 테스트는 별도 임시 fixture입니다.
+
+### 격리 실행 도구
+
+`paper_lab.py`는 명시적으로 실행할 때만 전용 localhost Paper 서버와 선택한 훈련기를 시작합니다. 모델·훈련 전이는
+Git에 넣지 않습니다. 계획 JSON의 형식은 `minecraft-paper-seed-plan/v1`이며, `trainSeeds`와 `evaluationSeeds`에
+서로 겹치지 않는 signed64 정수의 정규 십진 문자열 목록을 지정합니다. 선택한 seed가 다른 분할이면 실행을 거절합니다.
+정수 문자열을 사용해 JSON의 큰 정수 손실·서버의 문자열 해시 seed와 혼동하지 않습니다.
+
+필수 인자는 `--plan`, 새 `--output`, `--paper`, 실행용 `--plugin`, `--java`, 이미 동의된 `--eula`,
+캐시 라이브러리 폴더 `--runtime-cache`, `--mode train|evaluate`, `--world-seed`, 전체 `--source-commit`,
+전용 `--port`, 유한 `--seconds`입니다. 훈련은 추가 전이 한도 `--steps`와 선택적인 `--resume`, 평가는
+고정된 `--model`을 받습니다. 평가는 훈련기를 실행하지 않습니다. 이 도구가 사용자를 대신해 EULA에 동의하지 않습니다.
+
+매번 새 survival/normal 월드를 생성하며 과거 월드/플러그인 상태를 복사하지 않습니다. 시작 시에만 AI를 생성하고
+정상 입력으로 플레이합니다. 생존 중 아이템 지급·순간이동·블록 직접 변경·Teacher 목표 강제는 하지 않습니다.
+source/JAR/설정/도구/계획/모델 해시·프로세스 ID·로그·종료 상태를 보존합니다. 부모 체크포인트를 사용하는 실행도
+같은 계획의 훈련 분할인지 확인합니다. 예산 종료 시 소유한 자식 프로세스만 종료하고 월드/실패는 삭제하지 않습니다.
+`observed-gameplay.json`은 주기적 위치/체력/허기, 행동 선택/입력 종료·사망·거절과 최종 소지품의 관측 요약입니다.
+누락은 미확인으로 남기며, 입력 SUCCESS를 생존/자원/제작 목표의 달성으로 바꾸지 않습니다.
