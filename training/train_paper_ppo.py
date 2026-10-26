@@ -21,6 +21,7 @@ for variable in ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS"):
 
 from rl_actor import ActorCritic, CONTRACT, STATE_SIZE, inputs
 import checkpoint_store
+import brain_session
 
 SCHEMA = "minecraft-paper-ppo/v2"
 MAX_PACKET = 4 * 1024 * 1024
@@ -117,12 +118,14 @@ def resume_checkpoint(path: Path, *, upgrade_context=False, allow_initial=False)
     return model, {"checkpointSha256": checkpoint_hash, "trainingRun": checkpoint["run"], "contextUpgrade": upgrade_context,
                    "brainId": origin,
                    "initializationOnly": initial,
+                   "checkpointPath": str(path.resolve()),
                    "environmentSteps": checkpoint["environmentSteps"], "lineage": checkpoint.get("parents", [])}
 
 
 class PaperTrainer:
     def __init__(self, output: Path, *, seed: int, rollout_size: int, maximum: int, max_bytes: int,
-                 resume: Path | None = None, upgrade_context=False, learning_enabled=True, start_state=None):
+                 resume: Path | None = None, upgrade_context=False, learning_enabled=True, start_state=None,
+                 restore_state: dict | None = None, session_save_seconds: int = 30):
         if not 32 <= rollout_size <= 4096 or maximum < rollout_size or max_bytes < MAX_PACKET:
             raise ValueError("invalid training budget")
         if upgrade_context and resume is None:
@@ -132,8 +135,18 @@ class PaperTrainer:
             raise ValueError("starting weights must match the explicitly selected fresh/pretrained/resume source")
         if type(learning_enabled) is not bool:
             raise ValueError("learning state must be an explicit boolean")
+        if not 1 <= session_save_seconds <= 3600:
+            raise ValueError("session save interval must be 1..3600 seconds")
         model, parent = (ActorCritic(seed), None) if resume is None else resume_checkpoint(
                 resume, upgrade_context=upgrade_context, allow_initial=start_state != "pretrained")
+        if restore_state is not None:
+            brain_session.validate(restore_state)
+            if parent is None or parent["brainId"] != restore_state["brainId"] \
+                    or parent["checkpointSha256"] != restore_state["checkpointSha256"] \
+                    or model.version != restore_state["policyVersion"] or model.updates != restore_state["gradientUpdates"] \
+                    or restore_state.get("contextUpgrade", False) != upgrade_context:
+                raise ValueError("session/model identity mismatch; no reset or hidden model replacement")
+            model.rng.bit_generator.state = restore_state["rng"]
         output.mkdir(parents=True, exist_ok=False)  # A new run never overwrites another model or provenance.
         self.output = output
         self.run = str(uuid.uuid4())
@@ -143,6 +156,10 @@ class PaperTrainer:
         self.decisions = 0
         self.saved_model_version = -1 if parent is None else model.version
         self.saved_checkpoint_sha = None if parent is None else parent["checkpointSha256"]
+        self.checkpoint_reference = None if parent is None else parent["checkpointPath"]
+        self.checkpoint_upgrade = False if parent is None else parent["contextUpgrade"]
+        self.session_save_seconds = session_save_seconds
+        self.last_session_save = 0.0
         self.model, self.parent = model, parent
         self.parent_steps = 0 if parent is None else parent["environmentSteps"]
         self.parents = [] if parent is None else [*parent["lineage"], {key: parent[key] for key in ("checkpointSha256", "trainingRun", "environmentSteps", "contextUpgrade")}]
@@ -173,6 +190,18 @@ class PaperTrainer:
                      "resumeRecovery": None if parent is None else parent.get("recoveredCheckpoint"),
                      "gammaPerServerTick": 0.99997, "gaeLambda": 0.95,
                      "ppoClip": 0.2, "epochsPerUpdate": 4, "trained": False, "evaluationComplete": False})
+        self.persist_session()
+
+    def persist_session(self):
+        if self.checkpoint_reference is None or self.saved_model_version != self.model.version:
+            raise RuntimeError("active brain has no matching durable checkpoint; session not replaced")
+        brain_session.save(self.output / "runtime-session.json", {"schema": brain_session.SCHEMA,
+                "brainId": self.brain_id, "checkpoint": self.checkpoint_reference, "checkpointSha256": self.saved_checkpoint_sha,
+                "policyVersion": self.model.version, "gradientUpdates": self.model.updates, "learningEnabled": self.learning_enabled,
+                "rng": self.model.rng.bit_generator.state, "initializationOnly": self.model.updates == 0,
+                "pendingRolloutTransitions": len(self.rows), "startState": self.training_start_state, "contract": CONTRACT,
+                "contextUpgrade": self.checkpoint_upgrade})
+        self.last_session_save = time.monotonic()
 
     def save_initial_state(self):
         empty_hash = hashlib.sha256(b"").hexdigest()
@@ -184,7 +213,9 @@ class PaperTrainer:
                   "rolloutBytesUsed": 0, "rolloutSha256": empty_hash, "learningEnabled": self.learning_enabled,
                   "trainingStartState": self.training_start_state, "evaluationComplete": False, "allWorldAutonomyProven": False}
         self.raw.flush(); os.fsync(self.raw.fileno())
-        checkpoint_store.publish(self.output, self.model.initial_artifact(brain_id=self.brain_id, training_run=self.run), initial, report)
+        bundle = checkpoint_store.publish(self.output, self.model.initial_artifact(brain_id=self.brain_id, training_run=self.run), initial, report)
+        self.checkpoint_reference = str((bundle / "optimizer-checkpoint.json").resolve())
+        self.checkpoint_upgrade = False
         self.saved_model_version = 0
         self.saved_checkpoint_sha = hashlib.sha256(checkpoint_store.encoded(initial)).hexdigest()
 
@@ -237,6 +268,8 @@ class PaperTrainer:
                     self.preserve_discard(previous, "transition-budget-complete")
         result = self.model.sample(frame)
         self.decisions += 1
+        if time.monotonic() - self.last_session_save >= self.session_save_seconds:
+            self.persist_session()
         return {"schema": SCHEMA, "id": packet["id"], **result, "environmentSteps": self.parent_steps + self.steps,
                 "metadata": {"brainId": self.brain_id, "trainingStartState": self.training_start_state,
                              "initializationOnly": self.model.updates == 0,
@@ -320,9 +353,12 @@ class PaperTrainer:
                      "teacherLabels": False, "initializationOnly": False, "evaluationComplete": False,
                      "allWorldAutonomyProven": False, "trainingMetrics": stats}
         self.raw.flush(); os.fsync(self.raw.fileno())
-        checkpoint_store.publish(self.output, artifact, checkpoint, report)
+        bundle = checkpoint_store.publish(self.output, artifact, checkpoint, report)
+        self.checkpoint_reference = str((bundle / "optimizer-checkpoint.json").resolve())
+        self.checkpoint_upgrade = False
         self.saved_model_version = self.model.version
         self.saved_checkpoint_sha = hashlib.sha256(checkpoint_store.encoded(checkpoint)).hexdigest()
+        self.persist_session()
 
     def close(self):
         # An incomplete on-policy buffer is preserved as raw evidence, never relabeled as a trained update.
@@ -330,6 +366,7 @@ class PaperTrainer:
             self.poll_training(wait=True)
             if self.model.updates == 0:
                 self.save_initial_state()  # Preserve the current RNG stream as well as the unchanged initial parameters.
+            self.persist_session()
         finally:
             self.worker.shutdown(wait=True)
             try:
@@ -417,13 +454,25 @@ def main():
     parser.add_argument("--start-state", choices=("fresh", "pretrained", "resume"), help="weight source, independent of learning")
     parser.add_argument("--inference-only", action="store_true", help="same actor/critic, fixed weights; never retroactively trains these transitions")
     parser.add_argument("--max-decisions", type=int, help="finite sampling budget, including inference without updates")
+    parser.add_argument("--restore-session", type=Path, help="restore exact saved brain/learning flag/RNG; invalid state never initializes a new model")
+    parser.add_argument("--session-save-seconds", type=int, default=30)
     args = parser.parse_args()
     if args.max_decisions is not None and args.max_decisions < 1:
         raise ValueError("max-decisions must be positive")
+    restored = None
+    if args.restore_session:
+        if args.resume is not None or args.start_state not in (None, "resume"):
+            raise ValueError("session restore cannot be combined with another weight selection")
+        restored = brain_session.load(args.restore_session)
+        args.resume = Path(restored["checkpoint"])
+        args.start_state = "resume"
+        args.upgrade_context = restored.get("contextUpgrade", False)
     trainer = PaperTrainer(args.output, seed=args.seed, rollout_size=args.rollout_size,
                            maximum=args.max_transitions, max_bytes=args.max_megabytes * 1024 * 1024,
                            resume=args.resume, upgrade_context=args.upgrade_context,
-                           start_state=args.start_state, learning_enabled=not args.inference_only)
+                           start_state=args.start_state,
+                           learning_enabled=False if args.inference_only else restored["learningEnabled"] if restored else True,
+                           restore_state=restored, session_save_seconds=args.session_save_seconds)
     print("Waiting for real Paper transitions. No Teacher or synthetic game environment. Run:", trainer.run, flush=True)
     serve(args.channel, trainer, args.stop_file, args.max_decisions)
 

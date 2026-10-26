@@ -9,6 +9,7 @@ import threading
 from unittest import mock
 
 import numpy as np
+import brain_session
 
 from rl_actor import ActorCritic, inputs, generalized_advantages, STATE_SIZE, ACTION_SIZE
 from train_paper_ppo import PaperTrainer, SCHEMA, resume_checkpoint, serve, exchange_request
@@ -145,6 +146,31 @@ class ActorTests(unittest.TestCase):
 
 
 class BridgeProtocolTests(unittest.TestCase):
+    def test_session_restores_the_same_fresh_brain_rng_and_disabled_learning_without_world_data(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            trainer = PaperTrainer(root / "first", seed=7, rollout_size=32, maximum=32, max_bytes=16*1024*1024,
+                                   learning_enabled=False)
+            trainer.model.sample(frame())
+            trainer.close()
+            session_file = trainer.output / "runtime-session.json"
+            session = brain_session.load(session_file)
+            restored = PaperTrainer(root / "second", seed=99, rollout_size=32, maximum=32, max_bytes=16*1024*1024,
+                                    resume=Path(session["checkpoint"]), learning_enabled=session["learningEnabled"], restore_state=session)
+            try:
+                self.assertEqual(restored.brain_id, trainer.brain_id)
+                self.assertFalse(restored.learning_enabled)
+                self.assertEqual(trainer.model.sample(frame()), restored.model.sample(frame()))
+                self.assertNotIn("inventory", session)
+                self.assertNotIn("position", session)
+            finally:
+                restored.close()
+            corrupted = json.loads(session_file.read_text())
+            corrupted["payload"]["learningEnabled"] = True
+            session_file.write_text(json.dumps(corrupted))
+            with self.assertRaisesRegex(ValueError, "integrity mismatch"):
+                brain_session.load(session_file)
+
     def test_fresh_initial_state_can_resume_without_becoming_a_pretrained_model(self):
         with tempfile.TemporaryDirectory() as temporary:
             base = Path(temporary)

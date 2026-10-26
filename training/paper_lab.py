@@ -172,7 +172,7 @@ def run(args):
                 "backendLearningEnabled": args.mode == "train" and not args.inference_only,
                 "requestedStartState": args.start_state, "maxDecisions": args.max_decisions,
                 "preEpisodeWorldTime": args.start_time,
-                "tools": {name: sha256(source / "training" / name) for name in ("paper_lab.py", "rl_actor.py", "train_paper_ppo.py", "checkpoint_store.py")},
+                "tools": {name: sha256(source / "training" / name) for name in ("paper_lab.py", "rl_actor.py", "train_paper_ppo.py", "checkpoint_store.py", "brain_session.py")},
                 "teacherLabels": False, "grantedItems": False, "teleportDuringEpisode": False,
                 "allWorldAutonomyProven": False}
     if args.model:

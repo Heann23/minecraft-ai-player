@@ -35,6 +35,7 @@
 !/training/test_paper_lab.py
 !/training/checkpoint_store.py
 !/training/test_checkpoint_store.py
+!/training/brain_session.py
 
 # AI 개발 지침은 하위 폴더에서도 GitHub에 올리지 않는다.
 AGENTS.md
