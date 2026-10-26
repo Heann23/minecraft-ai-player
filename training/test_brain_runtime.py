@@ -8,7 +8,7 @@ import uuid
 
 import brain_session
 from model_catalog import ModelCatalog
-from train_paper_ppo import PaperTrainer, BrainRuntime, SCHEMA
+from train_paper_ppo import PaperTrainer, BrainRuntime, SCHEMA, resume_checkpoint
 
 
 class BrainRuntimeTests(unittest.TestCase):
@@ -52,6 +52,8 @@ class BrainRuntimeTests(unittest.TestCase):
                 self.assertEqual(response["previousBrainId"], first["brainId"])
                 self.assertEqual(runtime.active.brain_id, second["brainId"])
                 self.assertFalse(runtime.active.learning_enabled)
+                reference, _ = resume_checkpoint(Path(second["checkpoint"]), allow_initial=True)
+                self.assertEqual(runtime.active.model.optimizer_state(allow_initial=True), reference.optimizer_state(allow_initial=True))
                 restored = brain_session.load(root / "active/runtime-session.json")
                 self.assertEqual(restored["brainId"], second["brainId"])
                 self.assertEqual(restored["rng"], second["rng"])
