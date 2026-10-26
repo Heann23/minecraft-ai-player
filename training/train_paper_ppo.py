@@ -287,16 +287,20 @@ class PaperTrainer:
 
 def exchange_request(request: Path, channel: Path, trainer: PaperTrainer, pending: dict):
     """Windows can temporarily deny rename/unlink. Retry the SAME result; never resample/relearn on cleanup failure."""
+    handling = False
     try:
         if request not in pending:
+            if len(pending) >= 1024:
+                raise RuntimeError("Paper response retry budget exhausted")
             if request.is_symlink() or request.stat().st_size > MAX_PACKET:
                 raise ValueError("invalid request file")
             packet = json.loads(request.read_text(encoding="utf-8"))
             if request.name != str(uuid.UUID(packet["id"])) + ".request.json":
                 raise ValueError("request identity mismatch")
-            if len(pending) >= 1024:
-                raise RuntimeError("Paper response retry budget exhausted")
-            pending[request] = {"response": trainer.handle(packet), "published": False}
+            handling = True
+            result = trainer.handle(packet)
+            handling = False
+            pending[request] = {"response": result, "published": False}
         saved = pending[request]
         if not saved["published"] and request.exists():
             write_atomic(channel / (request.stem.removesuffix(".request") + ".response.json"), saved["response"])
@@ -306,7 +310,9 @@ def exchange_request(request: Path, channel: Path, trainer: PaperTrainer, pendin
     except FileNotFoundError:
         pending.pop(request, None)  # Expired Java request; never restart it or apply its old response.
     except PermissionError:
-        pass  # Bounded file retry on the next iteration; any computed result stays immutable in pending.
+        if handling:
+            raise  # A trainer/checkpoint storage failure is not a transient transport cleanup failure.
+        # Bounded file retry on the next iteration; any computed result stays immutable in pending.
     except (ValueError, KeyError, TypeError) as error:
         print("Rejected Paper packet:", type(error).__name__, str(error)[:160], flush=True)
         pending[request] = {"response": None, "published": True}

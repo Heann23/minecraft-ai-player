@@ -145,6 +145,16 @@ class ActorTests(unittest.TestCase):
 
 
 class BridgeProtocolTests(unittest.TestCase):
+    def test_checkpoint_permission_failure_is_not_hidden_as_a_transport_retry(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            channel = Path(temporary)
+            request = channel / (str(uuid.uuid4()) + ".request.json")
+            request.write_text(json.dumps({"id": request.stem.removesuffix(".request")}))
+            trainer = mock.Mock()
+            trainer.handle.side_effect = PermissionError("checkpoint storage fixture")
+            with self.assertRaises(PermissionError):
+                exchange_request(request, channel, trainer, {})
+
     def test_windows_cleanup_lock_retries_the_same_response_without_learning_or_sampling_twice(self):
         with tempfile.TemporaryDirectory() as temporary:
             channel = Path(temporary)
