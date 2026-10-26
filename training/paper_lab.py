@@ -169,7 +169,7 @@ def run(args):
             raise ValueError("parent checkpoint does not belong to the same training campaign")
         manifest["parentCheckpointSha256"] = sha256(args.resume)
     write_json(output / "manifest.json", manifest)
-    trainer = process = None
+    trainer = process = reader = None
     started, gameplay_start, reason = time.monotonic(), None, "startup-failed"
     events = queue.Queue()
     with (output / "trainer.log").open("w", encoding="utf-8") as trainer_log, \
@@ -185,6 +185,13 @@ def run(args):
                     command.append("--upgrade-context")
                 env = dict(os.environ, OPENBLAS_NUM_THREADS="1", OMP_NUM_THREADS="1", MKL_NUM_THREADS="1")
                 trainer = subprocess.Popen(command, stdout=trainer_log, stderr=subprocess.STDOUT, env=env)
+                ready_deadline = time.monotonic() + 30
+                while not (output / "training/run.json").is_file():
+                    if trainer.poll() is not None:
+                        raise RuntimeError("trainer initialization failed before server startup; see trainer.log")
+                    if time.monotonic() >= ready_deadline:
+                        raise RuntimeError("trainer initialization deadline exceeded before server startup")
+                    time.sleep(0.1)
             process = subprocess.Popen([str(args.java), "-Xms512M", "-Xmx2G", "--enable-native-access=ALL-UNNAMED",
                 "-Dfile.encoding=UTF-8", "-jar", "paper.jar", "--nogui"], cwd=server,
                 stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
@@ -226,19 +233,23 @@ def run(args):
                     reason = "trainer-budget-complete" if trainer.returncode == 0 else "trainer-failed"; break
         finally:
             if process and process.poll() is None:
-                for text in ("ai status RLLearner", "data get entity RLLearner Health", "data get entity RLLearner Inventory", "ai stop RLLearner"):
-                    send(text)
-                time.sleep(2)
-                send("stop")
-                try:
-                    process.wait(timeout=60)
-                except subprocess.TimeoutExpired:
+                if gameplay_start is None:
                     process.terminate(); process.wait(timeout=20)
-                    reason += ":forced-server-termination"
+                    reason += ":startup-child-terminated"
+                else:
+                    for text in ("ai status RLLearner", "data get entity RLLearner Health", "data get entity RLLearner Inventory", "ai stop RLLearner"):
+                        send(text)
+                    time.sleep(2)
+                    send("stop")
+                    try:
+                        process.wait(timeout=60)
+                    except subprocess.TimeoutExpired:
+                        process.terminate(); process.wait(timeout=20)
+                        reason += ":forced-server-termination"
             if trainer and trainer.poll() is None:
                 trainer.terminate(); trainer.wait(timeout=20)
                 reason += ":trainer-terminated"
-            if process:
+            if reader:
                 reader.join(timeout=5)
             manifest.update({"stopReason": reason, "serverExitCode": process.returncode if process else None,
                              "trainerExitCode": trainer.returncode if trainer else None,

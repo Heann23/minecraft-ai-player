@@ -145,6 +145,25 @@ class ActorTests(unittest.TestCase):
 
 
 class BridgeProtocolTests(unittest.TestCase):
+    def test_off_policy_death_is_excluded_from_ppo_but_preserved_with_its_actual_outcome(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            trainer = PaperTrainer(Path(temporary) / "run", seed=7, rollout_size=32, maximum=32, max_bytes=16*1024*1024)
+            try:
+                death = row(trainer.model, session=str(uuid.uuid4()), reward=-10, terminal=True)
+                death.pop("nextValue")
+                death["modelVersion"] = 1
+                trainer.handle({"schema": SCHEMA, "environment": "minecraft-paper", "id": str(uuid.uuid4()),
+                                "frame": frame(), "transitions": [death]})
+                self.assertEqual(trainer.steps, 0)
+                self.assertEqual(trainer.rows, [])
+                self.assertEqual(trainer.discarded_off_policy, 1)
+                preserved = json.loads((trainer.output / "discarded-transitions.jsonl").read_text())
+                self.assertEqual(preserved["transition"], death)
+                self.assertEqual(preserved["reason"], "off-policy-version")
+                self.assertEqual((trainer.output / "paper-rollouts.jsonl").stat().st_size, 0)
+                self.assertFalse((trainer.output / "minecraft-rl-actor.json").exists())
+            finally:
+                trainer.close()
     def test_resume_checks_raw_prefix_and_checkpoint_identity_without_reusing_previous_rows(self):
         with tempfile.TemporaryDirectory() as temporary:
             output = Path(temporary) / "first"

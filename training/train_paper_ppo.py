@@ -116,6 +116,9 @@ class PaperTrainer:
         self.steps = self.ticks = self.bytes = self.discarded_off_policy = 0
         self.digest = hashlib.sha256()
         self.raw = (output / "paper-rollouts.jsonl").open("ab")
+        self.discarded_raw = (output / "discarded-transitions.jsonl").open("ab")
+        self.discarded_bytes = 0
+        self.discard_reasons = {}
         write_atomic(output / "run.json", {"schema": SCHEMA, "contract": CONTRACT, "algorithm": "ppo",
                      "environment": "minecraft-paper", "run": self.run, "seed": seed,
                      "maxTransitions": maximum, "rolloutSize": rollout_size, "teacherLabels": False,
@@ -145,15 +148,17 @@ class PaperTrainer:
                 self.last_sequence[session] = sequence
                 if previous["modelVersion"] != self.model.version:
                     self.discarded_off_policy += 1
+                    self.preserve_discard(previous, "off-policy-version")
                 elif self.training is not None:
                     self.discarded_during_update += 1
+                    self.preserve_discard(previous, "optimizer-in-progress")
                 elif self.steps < self.maximum:
                     next_value, _ = self.model.value(previous["nextState"])
                     row = dict(previous)
                     # A cross-world boundary is not bootstrapped from an unrelated world's body state.
                     row["nextValue"] = 0 if row["terminated"] or row["nextWorld"] != row["frame"]["world"] else next_value
                     encoded = (json.dumps(row, ensure_ascii=False, allow_nan=False, separators=(",", ":")) + "\n").encode()
-                    if self.bytes + len(encoded) > self.max_bytes:
+                    if self.bytes + self.discarded_bytes + len(encoded) > self.max_bytes:
                         raise RuntimeError("raw Paper rollout byte budget exhausted")
                     self.raw.write(encoded); self.raw.flush(); self.digest.update(encoded); self.bytes += len(encoded)
                     self.rows.append(row); self.steps += 1; self.ticks += row["elapsedTicks"]
@@ -163,8 +168,19 @@ class PaperTrainer:
                         self.training_metadata = {"steps": self.steps, "ticks": self.ticks, "bytes": self.bytes,
                                                   "sha256": self.digest.hexdigest()}
                         self.training = self.worker.submit(self.fit_snapshot, copy.deepcopy(self.model), rows)
+                else:
+                    self.preserve_discard(previous, "transition-budget-complete")
         result = self.model.sample(frame)
         return {"schema": SCHEMA, "id": packet["id"], **result, "environmentSteps": self.steps}
+
+    def preserve_discard(self, transition, reason):
+        encoded = (json.dumps({"reason": reason, "activePolicyVersion": self.model.version, "transition": transition},
+                    ensure_ascii=False, allow_nan=False, separators=(",", ":")) + "\n").encode()
+        if self.bytes + self.discarded_bytes + len(encoded) > self.max_bytes:
+            raise RuntimeError("Paper evidence byte budget exhausted; excluded outcomes are not silently deleted")
+        self.discarded_raw.write(encoded); self.discarded_raw.flush()
+        self.discarded_bytes += len(encoded)
+        self.discard_reasons[reason] = self.discard_reasons.get(reason, 0) + 1
 
     @staticmethod
     def fit_snapshot(model, rows):
@@ -199,6 +215,7 @@ class PaperTrainer:
                      "actorSha256": hashlib.sha256(path.read_bytes()).hexdigest(),
                      "checkpointSha256": hashlib.sha256(checkpoint.read_bytes()).hexdigest(), "discardedOffPolicy": self.discarded_off_policy,
                      "discardedDuringUpdate": self.discarded_during_update,
+                     "discardedEvidenceBytes": self.discarded_bytes, "discardReasons": dict(self.discard_reasons),
                      "teacherLabels": False, "initializationOnly": False, "evaluationComplete": False,
                      "allWorldAutonomyProven": False, "trainingMetrics": stats})
 
@@ -209,6 +226,7 @@ class PaperTrainer:
         finally:
             self.worker.shutdown(wait=True)
             self.raw.close()
+            self.discarded_raw.close()
 
 
 def serve(channel: Path, trainer: PaperTrainer):
