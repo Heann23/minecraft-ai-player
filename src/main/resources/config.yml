@@ -86,3 +86,15 @@ policy:
   # Development only: training mode additionally requires explicit opt-in. User products use learned inference.
   allow-training: false
   training-channel: training-session/channel
+  # Optional local development backend. Disabled users keep Java-only pretrained inference.
+  # Enabling requires an existing named catalog and Python/NumPy plus these same training sources.
+  # Missing/corrupt saved state never creates a new random model. allow-training remains an independent opt-in.
+  runtime:
+    enabled: false
+    python: python
+    script: training/train_paper_ppo.py
+    catalog: brain-catalog
+    runs: brain-runtime
+    model: ''
+    max-transitions: 1000000
+    session-save-seconds: 30

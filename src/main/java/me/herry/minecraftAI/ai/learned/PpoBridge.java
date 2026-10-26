@@ -20,6 +20,9 @@ public final class PpoBridge implements AutoCloseable {
     public record ModelResult(String schema, String id, boolean ok, String error, String operation, String name,
                               String weightsSha256, Status status, java.util.List<ModelSummary> models, boolean hasMore) {}
     private final java.util.concurrent.atomic.AtomicBoolean transitioning = new java.util.concurrent.atomic.AtomicBoolean();
+    private volatile boolean available = true;
+    public boolean isAvailable() { return available; }
+    public void setAvailable(boolean value) { available = value; }
     public boolean beginTransition() { return transitioning.compareAndSet(false, true); }
     public boolean isTransitioning() { return transitioning.get(); }
     public void endTransition() { transitioning.set(false); }

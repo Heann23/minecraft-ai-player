@@ -142,6 +142,7 @@ public final class AIPlayer {
 
     public boolean start() {
         if (state != AIState.STOPPED) return false;
+        if (services.trainingBridge() != null && !services.trainingBridge().isAvailable()) return false;
         if (services.config().learnedControl && services.learnedPolicy() == null && services.trainingBridge() == null) return false;
         state = AIState.RUNNING;
         debug("Autonomous behavior started");

@@ -89,6 +89,11 @@ public final class AIController {
      * @param store AI 상태를 저장할 곳. null 이면 저장하지 않는다.
      */
     public AIController(JavaPlugin plugin, AIConfig config, AIDebugger debugger, CommunicationHub hub, @Nullable AIStateStore store) {
+        this(plugin, config, debugger, hub, store, null);
+    }
+
+    public AIController(JavaPlugin plugin, AIConfig config, AIDebugger debugger, CommunicationHub hub, @Nullable AIStateStore store,
+                        @Nullable java.nio.file.Path managedChannel) {
         this.plugin = plugin;
         this.config = config;
         this.hub = hub;
@@ -97,7 +102,7 @@ public final class AIController {
         this.budget = new WorkBudget(config.tickBudgetNanos);
         this.experience = !config.recordExperience ? null : new JsonlExperienceWriter(
                 plugin.getDataFolder().toPath().resolve("training-data"), config.experienceMaxBytes, plugin.getLogger()::warning);
-        this.trainingBridge = loadTrainingBridge();
+        this.trainingBridge = loadTrainingBridge(managedChannel);
         this.services = new AIServices(config, debugger, crafting,
                 new CombatSystem(config.engageRange, config.criticalHealth),
                 new SurvivalSystem(config.lowHealth, config.criticalHealth, config.eatBelow),
@@ -107,9 +112,14 @@ public final class AIController {
         crafting.warmUp();
     }
 
-    private me.herry.minecraftAI.ai.learned.PpoBridge loadTrainingBridge() {
+    private me.herry.minecraftAI.ai.learned.PpoBridge loadTrainingBridge(@Nullable java.nio.file.Path managedChannel) {
         if (!config.trainingControl) return null;
-        try { return new me.herry.minecraftAI.ai.learned.PpoBridge(plugin.getDataFolder().toPath().resolve(config.trainingChannel)); }
+        try {
+            var bridge = new me.herry.minecraftAI.ai.learned.PpoBridge(managedChannel == null
+                    ? plugin.getDataFolder().toPath().resolve(config.trainingChannel) : managedChannel);
+            bridge.setAvailable(!config.managedBackend);
+            return bridge;
+        }
         catch (java.io.IOException failure) {
             plugin.getLogger().warning("Training bridge unavailable; no Teacher fallback: " + failure.getMessage()); return null;
         }
@@ -341,8 +351,9 @@ public final class AIController {
             // 저장 내용 일부를 읽지 못해도 AI 자체는 살려 둔다.
             plugin.getLogger().log(Level.WARNING, "Could not fully restore the state of AI player " + snapshot.name, e);
         }
-        if (snapshot.running) ai.start();
-        plugin.getLogger().info("Restored AI player " + snapshot.name + (snapshot.running ? " (running)" : " (stopped)"));
+        boolean restarted = snapshot.running && ai.start();
+        plugin.getLogger().info("Restored AI player " + snapshot.name + (restarted ? " (running)" : " (stopped)"));
+        if (snapshot.running && !restarted) plugin.getLogger().warning("Saved AI could not resume; no policy was substituted: " + snapshot.name);
         return true;
     }
 
@@ -388,6 +399,9 @@ public final class AIController {
      */
     public void changeLearning(boolean enabled, BiConsumer<Boolean, String> completed) {
         if (!Bukkit.isPrimaryThread()) throw new IllegalStateException("brain control must start on server thread");
+        if (enabled && !config.allowPolicyTraining) {
+            completed.accept(false, "현재 설정은 고정 추론만 허용합니다. 두뇌나 가중치를 바꾸지 않았습니다."); return;
+        }
         if (trainingBridge == null) {
             boolean alreadyOff = !enabled && services.learnedPolicy() != null;
             completed.accept(alreadyOff, alreadyOff ? "현재 두뇌는 이미 고정 가중치 추론 상태입니다."
@@ -491,6 +505,12 @@ public final class AIController {
                         plugin.getLogger().warning("Server stopped before model acknowledgement could be delivered");
                     }
                 });
+    }
+
+    public void setBackendAvailable(boolean available) {
+        if (!Bukkit.isPrimaryThread()) throw new IllegalStateException("backend lifecycle must return to server thread");
+        if (trainingBridge != null) trainingBridge.setAvailable(available);
+        if (!available) for (Entry entry : entries.values()) entry.ai.stop();
     }
 
     public void shutdown() {
