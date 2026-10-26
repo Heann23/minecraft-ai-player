@@ -246,6 +246,7 @@ public class AICommand implements TabExecutor {
         GoalType forced = ai.getForcedGoal();
         line(sender, "AI 이름", ai.getName());
         line(sender, "AI 상태", ai.getState().name());
+        line(sender, "재시작 의사 저장", ai.executionIntentStatus());
         line(sender, "판단 방식", ai.policyStatus());
         line(sender, "현재 목표", ai.getCurrentGoal().name() + (forced != null ? " (강제 지정)" : ""));
         line(sender, "현재 행동", ai.getCurrentActionName());

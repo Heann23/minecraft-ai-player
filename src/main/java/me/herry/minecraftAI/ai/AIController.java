@@ -74,6 +74,7 @@ public final class AIController {
     private final SkinFetcher skins;
     private final InventoryViews views = new InventoryViews();
     private final @Nullable AIStateStore store;
+    private final @Nullable me.herry.minecraftAI.persist.ExecutionIntentStore executionIntents;
     // 학습용 기록을 파일로 쓰는 곳. 기록을 꺼 두었으면 null.
     private final @Nullable JsonlExperienceWriter experience;
 
@@ -98,6 +99,8 @@ public final class AIController {
         this.config = config;
         this.hub = hub;
         this.store = store;
+        this.executionIntents = store == null ? null : new me.herry.minecraftAI.persist.ExecutionIntentStore(
+                plugin.getDataFolder().toPath().resolve("execution-intents"), plugin.getLogger()::info);
         this.team = new TeamChat(this::getAll, hub);
         this.budget = new WorkBudget(config.tickBudgetNanos);
         this.experience = !config.recordExperience ? null : new JsonlExperienceWriter(
@@ -163,6 +166,7 @@ public final class AIController {
         }
 
         AIPlayer ai = new AIPlayer(name, body, services, skin);
+        if (executionIntents != null) ai.setExecutionIntentListener(running -> executionIntents.save(ai.getName(), ai.executionId(), running));
         entries.put(key(name), new Entry(ai, body));
         hub.join(new Conversation(ai));
         refreshTickList();
@@ -209,6 +213,7 @@ public final class AIController {
     public boolean remove(String name) {
         Entry entry = entries.remove(key(name));
         if (entry == null) return false;
+        if (executionIntents != null) executionIntents.save(entry.ai.getName(), entry.ai.executionId(), false);
         discard(entry);
         if (store != null) store.delete(entry.ai.getName());
         refreshTickList();
@@ -280,6 +285,7 @@ public final class AIController {
         views.closeAll(entry.ai);
         team.forget(entry.ai.getName());
         hub.leave(entry.ai.getName());
+        if (executionIntents != null) executionIntents.save(entry.ai.getName(), entry.ai.executionId(), false);
         entry.ai.dispose();
         if (store != null) store.delete(entry.ai.getName());
         refreshTickList();
@@ -351,9 +357,12 @@ public final class AIController {
             // 저장 내용 일부를 읽지 못해도 AI 자체는 살려 둔다.
             plugin.getLogger().log(Level.WARNING, "Could not fully restore the state of AI player " + snapshot.name, e);
         }
-        boolean restarted = snapshot.running && ai.start();
+        var desired = executionIntents == null ? java.util.Optional.<Boolean>empty() : executionIntents.read(ai.getName(), ai.executionId());
+        boolean shouldRun = desired.orElse(snapshot.running);
+        if (executionIntents != null && desired.isEmpty()) executionIntents.save(ai.getName(), ai.executionId(), shouldRun);
+        boolean restarted = shouldRun && ai.resumeFromSavedState();
         plugin.getLogger().info("Restored AI player " + snapshot.name + (restarted ? " (running)" : " (stopped)"));
-        if (snapshot.running && !restarted) plugin.getLogger().warning("Saved AI could not resume; no policy was substituted: " + snapshot.name);
+        if (shouldRun && !restarted) plugin.getLogger().warning("Saved AI could not resume; no policy was substituted: " + snapshot.name);
         return true;
     }
 
@@ -510,7 +519,7 @@ public final class AIController {
     public void setBackendAvailable(boolean available) {
         if (!Bukkit.isPrimaryThread()) throw new IllegalStateException("backend lifecycle must return to server thread");
         if (trainingBridge != null) trainingBridge.setAvailable(available);
-        if (!available) for (Entry entry : entries.values()) entry.ai.stop();
+        if (!available) for (Entry entry : entries.values()) entry.ai.stopForBackendFailure();
     }
 
     public void shutdown() {
@@ -528,6 +537,7 @@ public final class AIController {
         // 남은 기록을 다 쓰고 파일을 닫는다. 오래 걸리면 기다리지 않는다 (서버 종료를 붙잡지 않는다).
         if (experience != null) experience.close();
         if (trainingBridge != null) trainingBridge.close();
+        if (executionIntents != null) executionIntents.close();
     }
 
     private void respawn(Entry entry) {

@@ -82,6 +82,10 @@ public final class AIPlayer {
     private final Map<Milestone, Long> deferredUntil = new EnumMap<>(Milestone.class);
 
     private AIState state = AIState.STOPPED;
+    private UUID executionId = UUID.randomUUID();
+    private java.util.function.Function<Boolean, java.util.concurrent.CompletableFuture<Void>> executionIntentListener;
+    private volatile long executionIntentRevision;
+    private volatile String executionIntentStatus = "플레이어 상태 저장 꺼짐";
     private boolean resumeAfterRespawn;
     private long ticks;
     private BlockFace digDirection;
@@ -141,10 +145,35 @@ public final class AIPlayer {
     }
 
     public boolean start() {
+        return start(true);
+    }
+
+    boolean resumeFromSavedState() { return start(false); }
+    boolean stopForBackendFailure() { return stop(false); }
+    public UUID executionId() { return executionId; }
+    void restoreExecutionId(UUID value) { executionId = java.util.Objects.requireNonNull(value); }
+    void setExecutionIntentListener(java.util.function.Function<Boolean, java.util.concurrent.CompletableFuture<Void>> listener) {
+        executionIntentListener = listener; executionIntentStatus = "저장된 의사 적용 또는 명시 요청 대기";
+    }
+    public String executionIntentStatus() { return executionIntentStatus; }
+
+    private void recordExecutionIntent(boolean running) {
+        if (executionIntentListener == null) return;
+        long revision = ++executionIntentRevision;
+        executionIntentStatus = "저장 중";
+        try {
+            executionIntentListener.apply(running).whenComplete((ignored, failure) -> {
+                if (revision == executionIntentRevision) executionIntentStatus = failure == null ? "저장 완료" : "저장 실패 — 로그 확인";
+            });
+        } catch (RuntimeException failure) { executionIntentStatus = "저장 실패 — 로그 확인"; }
+    }
+
+    private boolean start(boolean explicit) {
         if (state != AIState.STOPPED) return false;
         if (services.trainingBridge() != null && !services.trainingBridge().isAvailable()) return false;
         if (services.config().learnedControl && services.learnedPolicy() == null && services.trainingBridge() == null) return false;
         state = AIState.RUNNING;
+        if (explicit) recordExecutionIntent(true);
         debug("Autonomous behavior started");
         if (!services.config().learnedControl) brain.getJournal().beginEpisode(Experience.StartReason.START);
         getTeam().say(this, Phrases.hello(getTeam().teamSize()), true);
@@ -232,17 +261,23 @@ public final class AIPlayer {
     }
 
     public boolean stop() {
+        return stop(true);
+    }
+
+    private boolean stop(boolean explicit) {
         if (state == AIState.DEAD) {
             // 리스폰 후에 다시 움직이지 않도록 예약만 취소한다.
             resumeAfterRespawn = false;
+            if (explicit) recordExecutionIntent(false);
             return true;
         }
-        if (state != AIState.RUNNING) return false;
+        if (state != AIState.RUNNING) { if (explicit) recordExecutionIntent(false); return false; }
         brain.getJournal().endEpisode(Experience.EndReason.STOPPED);
         brain.reset();
         // 멈춰 있는 동안 주변 엔티티나 월드에 대한 참조를 들고 있지 않는다.
         perception.reset();
         state = AIState.STOPPED;
+        if (explicit) recordExecutionIntent(false);
         debug("Autonomous behavior stopped");
         return true;
     }
@@ -534,7 +569,11 @@ public final class AIPlayer {
 
     public boolean acceptsLegacyGoals() { return !services.config().learnedControl; }
 
-    public java.util.List<String> policyDetails() { return brain.policyDetails(); }
+    public java.util.List<String> policyDetails() {
+        var details = new java.util.ArrayList<>(brain.policyDetails());
+        details.add("재시작 의사 저장: " + executionIntentStatus);
+        return java.util.List.copyOf(details);
+    }
     public String connectedBrainId() { return brain.connectedBrainId(); }
     public java.util.concurrent.CompletableFuture<Void> prepareLearningChange() { requireMainThread(); return brain.prepareLearningChange(); }
     public void acceptLearningChange(me.herry.minecraftAI.ai.learned.PpoBridge.Status status) { requireMainThread(); brain.acceptLearningChange(status); }

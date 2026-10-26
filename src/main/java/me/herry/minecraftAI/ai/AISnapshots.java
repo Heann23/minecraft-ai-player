@@ -31,6 +31,7 @@ final class AISnapshots {
     static AISnapshot capture(AIPlayer ai) {
         AISnapshot snapshot = new AISnapshot();
         snapshot.name = ai.getName();
+        snapshot.executionId = ai.executionId();
         AISkin skin = ai.getSkin();
         if (skin != null) {
             snapshot.skinValue = skin.value();
@@ -73,6 +74,8 @@ final class AISnapshots {
     }
 
     static void restore(AIPlayer ai, AISnapshot snapshot, Logger logger) {
+        ai.restoreExecutionId(snapshot.executionId != null ? snapshot.executionId : java.util.UUID.nameUUIDFromBytes(
+                ("minecraft-ai-legacy-execution:" + snapshot.name.toLowerCase(java.util.Locale.ROOT)).getBytes(java.nio.charset.StandardCharsets.UTF_8)));
         ai.restoreTicks(snapshot.ticks);
         ai.getMemory().importState(snapshot.section(MEMORY));
         ai.getWorldModel().importState(snapshot.section(WORLD_MODEL));
