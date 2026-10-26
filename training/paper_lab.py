@@ -56,6 +56,13 @@ def read_plan(path: Path):
     return plan
 
 
+def validate_plan_extension(parent: dict, current: dict):
+    # Each complete plan has already passed read_plan's overlap/canonical seed checks.
+    for key in ("trainSeeds", "evaluationSeeds"):
+        if not set(parent[key]).issubset(current[key]):
+            raise ValueError("campaign extension cannot remove or reassign existing world seeds")
+
+
 def validate_options(args):
     plan = read_plan(args.plan)
     split = "trainSeeds" if args.mode == "train" else "evaluationSeeds"
@@ -166,10 +173,16 @@ def run(args):
         manifest["actorSha256"] = sha256(plugin / "models/minecraft-rl-actor.json")
     if args.resume:
         # The parent lab manifest must belong to the same frozen training partition.
-        parent = json.loads((args.resume.resolve().parent.parent / "manifest.json").read_text(encoding="utf-8"))
-        if parent.get("mode") != "train" or parent.get("seedPlanSha256") != manifest["seedPlanSha256"] \
-                or parent.get("worldSeed") not in plan["trainSeeds"]:
+        parent_directory = args.resume.resolve().parent.parent
+        parent = json.loads((parent_directory / "manifest.json").read_text(encoding="utf-8"))
+        if parent.get("mode") != "train" or parent.get("worldSeed") not in plan["trainSeeds"]:
             raise ValueError("parent checkpoint does not belong to the same training campaign")
+        if parent.get("seedPlanSha256") != manifest["seedPlanSha256"]:
+            prior_plan = parent_directory / "seed-plan.json"
+            if not prior_plan.is_file() or sha256(prior_plan) != parent.get("seedPlanSha256"):
+                raise ValueError("parent campaign plan provenance is unavailable")
+            validate_plan_extension(read_plan(prior_plan), plan)
+            manifest["parentSeedPlanSha256"] = parent["seedPlanSha256"]
         manifest["parentCheckpointSha256"] = sha256(args.resume)
     write_json(output / "manifest.json", manifest)
     trainer = process = reader = None

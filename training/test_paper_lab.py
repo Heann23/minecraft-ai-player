@@ -5,10 +5,18 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from paper_lab import read_plan, validate_options, summarize_game_log
+from paper_lab import read_plan, validate_options, summarize_game_log, validate_plan_extension
 
 
 class SeedPlanTests(unittest.TestCase):
+    def test_campaign_can_add_worlds_without_reassigning_or_removing_prior_partitions(self):
+        parent = {"trainSeeds": ["1"], "evaluationSeeds": ["2"]}
+        validate_plan_extension(parent, {"trainSeeds": ["1", "3"], "evaluationSeeds": ["2", "4"]})
+        for changed in ({"trainSeeds": ["1", "2"], "evaluationSeeds": ["4"]},
+                        {"trainSeeds": ["3"], "evaluationSeeds": ["2"]}):
+            with self.assertRaisesRegex(ValueError, "remove or reassign"):
+                validate_plan_extension(parent, changed)
+
     def test_partial_diagnostics_preserve_failures_without_inventing_task_completion(self):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "fixture.log"
