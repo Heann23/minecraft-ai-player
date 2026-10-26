@@ -259,6 +259,7 @@ def run(args):
                     next_report = now + 30
                     if gameplay_start is not None:
                         send("ai status RLLearner")
+                        send("ai stats RLLearner")
                     report = output / "training/training-report.json"
                     status = json.loads(report.read_text()) if report.exists() else {}
                     print(json.dumps({"elapsedSeconds": round(now-started), "ready": gameplay_start is not None,
@@ -271,7 +272,7 @@ def run(args):
                     process.terminate(); process.wait(timeout=20)
                     reason += ":startup-child-terminated"
                 else:
-                    for text in ("ai status RLLearner", "data get entity RLLearner Health", "data get entity RLLearner Inventory", "ai stop RLLearner"):
+                    for text in ("ai status RLLearner", "ai stats RLLearner", "data get entity RLLearner Health", "data get entity RLLearner Inventory", "ai stop RLLearner"):
                         send(text)
                     time.sleep(2)
                     send("stop")
