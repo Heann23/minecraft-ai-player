@@ -56,6 +56,25 @@ def read_plan(path: Path):
     return plan
 
 
+def read_scenario(path: Path):
+    if path.stat().st_size > 65536:
+        raise ValueError("oversized control scenario")
+    scenario = json.loads(path.read_text(encoding="utf-8"))
+    if set(scenario) != {"schema", "events"} or scenario["schema"] != "minecraft-brain-control-scenario/v1" \
+            or not isinstance(scenario["events"], list) or not 1 <= len(scenario["events"]) <= 32:
+        raise ValueError("invalid control scenario")
+    previous = -1
+    for event in scenario["events"]:
+        keys = {"atSeconds", "command", "enabled"} if event.get("command") == "learning" else {"atSeconds", "command"}
+        if set(event) != keys or type(event["atSeconds"]) is not int or not previous <= event["atSeconds"] <= 86400 \
+                or event["atSeconds"] < 0 or event["command"] not in {"learning", "stop", "start", "stats"}:
+            raise ValueError("unsupported scenario command or ordering")
+        if event["command"] == "learning" and type(event["enabled"]) is not bool:
+            raise ValueError("invalid scenario learning flag")
+        previous = event["atSeconds"]
+    return scenario["events"]
+
+
 def validate_plan_extension(parent: dict, current: dict):
     # Each complete plan has already passed read_plan's overlap/canonical seed checks.
     for key in ("trainSeeds", "evaluationSeeds"):
@@ -130,6 +149,7 @@ def summarize_game_log(path: Path):
 
 def run(args):
     plan = validate_options(args)
+    scenario = read_scenario(args.scenario) if args.scenario else []
     source = Path(__file__).resolve().parents[1]
     actual_commit = subprocess.check_output(["git", "-c", "safe.directory=" + source.as_posix(),
                                               "rev-parse", "HEAD"], cwd=source, text=True).strip()
@@ -138,6 +158,8 @@ def run(args):
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=False)
     shutil.copy2(args.plan, output / "seed-plan.json")
+    if args.scenario:
+        shutil.copy2(args.scenario, output / "control-scenario.json")
     server = output / "server"
     server.mkdir()
     for directory in ("cache", "libraries", "versions"):
@@ -175,6 +197,9 @@ def run(args):
                 "tools": {name: sha256(source / "training" / name) for name in ("paper_lab.py", "rl_actor.py", "train_paper_ppo.py", "checkpoint_store.py", "brain_session.py")},
                 "teacherLabels": False, "grantedItems": False, "teleportDuringEpisode": False,
                 "allWorldAutonomyProven": False}
+    if args.scenario:
+        manifest.update({"preparedScenario": True, "notForAutonomousTraining": True,
+                         "scenarioSha256": sha256(output / "control-scenario.json")})
     if args.model:
         manifest["actorSha256"] = sha256(plugin / "models/minecraft-rl-actor.json")
     if args.resume:
@@ -253,8 +278,21 @@ def run(args):
                 if process.poll() is None:
                     process.stdin.write(text + "\n"); process.stdin.flush()
             reason, next_report = "server-exited", started
+            scenario_index = 0
             while process.poll() is None:
                 now = time.monotonic()
+                while gameplay_start is not None and scenario_index < len(scenario) \
+                        and now - gameplay_start >= scenario[scenario_index]["atSeconds"]:
+                    event = scenario[scenario_index]
+                    if event["command"] == "learning":
+                        send("ai training " + ("on" if event["enabled"] else "off"))
+                    elif event["command"] == "stats":
+                        send("ai status RLLearner"); send("ai stats RLLearner")
+                    else:
+                        send("ai " + event["command"] + " RLLearner")
+                    with (output / "scenario-dispatch.jsonl").open("a", encoding="utf-8") as dispatched:
+                        dispatched.write(json.dumps({"event": event, "dispatchSeconds": round(now-gameplay_start, 3)}) + "\n")
+                    scenario_index += 1
                 if (output / "stop.request").is_file():
                     reason = "operator-stop-request"; break
                 if gameplay_start is None and now - started >= 180:
@@ -331,6 +369,7 @@ def main():
     parser.add_argument("--start-state", choices=("fresh", "pretrained", "resume"))
     parser.add_argument("--inference-only", action="store_true", help="shared backend with learning disabled, for startup/mode scenarios")
     parser.add_argument("--max-decisions", type=int)
+    parser.add_argument("--scenario", type=Path, help="prepared control scenario; outputs must never enter autonomous training")
     run(parser.parse_args())
 
 

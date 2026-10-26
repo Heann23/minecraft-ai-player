@@ -5,10 +5,20 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from paper_lab import read_plan, validate_options, summarize_game_log, validate_plan_extension
+from paper_lab import read_plan, validate_options, summarize_game_log, validate_plan_extension, read_scenario
 
 
 class SeedPlanTests(unittest.TestCase):
+    def test_control_scenario_cannot_inject_world_commands_or_change_their_order(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "scenario.json"
+            valid = [{"atSeconds": 5, "command": "learning", "enabled": False}, {"atSeconds": 5, "command": "stop"}]
+            path.write_text(json.dumps({"schema": "minecraft-brain-control-scenario/v1", "events": valid}))
+            self.assertEqual(read_scenario(path), valid)
+            for invalid in ([{"atSeconds": 5, "command": "give"}], list(reversed([{**valid[0], "atSeconds": 4}, valid[1]]))):
+                path.write_text(json.dumps({"schema": "minecraft-brain-control-scenario/v1", "events": invalid}))
+                with self.assertRaises(ValueError):
+                    read_scenario(path)
     def test_campaign_can_add_worlds_without_reassigning_or_removing_prior_partitions(self):
         parent = {"trainSeeds": ["1"], "evaluationSeeds": ["2"]}
         validate_plan_extension(parent, {"trainSeeds": ["1", "3"], "evaluationSeeds": ["2", "4"]})
