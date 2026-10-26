@@ -94,7 +94,7 @@ public final class PpoBridge implements AutoCloseable {
 
     public CompletableFuture<ModelResult> modelCommand(String brainId, String operation, String name) {
         UUID.fromString(brainId);
-        if (!java.util.Set.of("list", "info", "save").contains(operation)
+        if (!java.util.Set.of("list", "info", "save", "new").contains(operation)
                 || (operation.equals("list") ? !name.isEmpty() : !validModelName(name)))
             throw new IllegalArgumentException("invalid model command");
         String id = UUID.randomUUID().toString();
@@ -138,6 +138,14 @@ public final class PpoBridge implements AutoCloseable {
                             if (model.policyVersion() < 0 || model.gradientUpdates() < 0)
                                 throw new IOException("invalid model counters");
                         }
+                    }
+                    if (!command.operation().equals("model-list") && !command.name().equals(result.models().getFirst().name()))
+                        throw new IOException("model name acknowledgement mismatch");
+                    if (command.operation().equals("model-new")) {
+                        var created = result.models().getFirst();
+                        if (!created.valid() || !created.initializationOnly() || created.policyVersion() != 0 || created.gradientUpdates() != 0
+                                || created.learningEnabled() || command.brainId().equals(created.brainId()))
+                            throw new IOException("new model must be a distinct untrained, inactive brain");
                     }
                     if (command.operation().equals("model-save")) {
                         var saved = result.models().getFirst();

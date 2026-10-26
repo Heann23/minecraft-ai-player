@@ -459,7 +459,7 @@ public final class AIController {
         if (trainingBridge == null) {
             completed.accept(false, List.of("모델 관리 백엔드가 연결되지 않았습니다. 현재 모델은 유지됩니다.")); return;
         }
-        if (!java.util.Set.of("list", "info", "save").contains(operation)
+        if (!java.util.Set.of("list", "info", "save", "new").contains(operation)
                 || (operation.equals("list") ? !name.isEmpty() : !me.herry.minecraftAI.ai.learned.PpoBridge.validModelName(name))) {
             completed.accept(false, List.of("올바른 모델 이름과 관리 명령을 입력하세요.")); return;
         }
@@ -499,7 +499,9 @@ public final class AIController {
                                 return;
                             }
                             var lines = new ArrayList<String>();
-                            lines.add(operation.equals("save") ? "현재 두뇌를 '" + name + "' 이름으로 저장했습니다." : "저장된 모델 " + result.models().size() + "개");
+                            lines.add(operation.equals("save") ? "현재 두뇌를 '" + name + "' 이름으로 저장했습니다."
+                                    : operation.equals("new") ? "새 초기 두뇌를 '" + name + "' 이름으로 등록했습니다. 현재 두뇌는 유지됩니다."
+                                    : "저장된 모델 " + result.models().size() + "개");
                             for (var model : result.models()) {
                                 if (!model.valid()) { lines.add(model.name() + ": 원본 누락 또는 손상 — 사용 불가"); continue; }
                                 lines.add(model.name() + " | ID " + model.brainId() + " | 버전 " + model.policyVersion()

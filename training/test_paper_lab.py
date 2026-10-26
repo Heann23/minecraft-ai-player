@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from unittest import mock
 
-from paper_lab import read_plan, validate_options, summarize_game_log, validate_plan_extension, read_scenario, confirm_model_save
+from paper_lab import read_plan, validate_options, summarize_game_log, validate_plan_extension, read_scenario, confirm_model_save, confirm_model_command
 
 
 class SeedPlanTests(unittest.TestCase):
@@ -23,6 +23,10 @@ class SeedPlanTests(unittest.TestCase):
         self.assertFalse(confirm_model_save(process, queue.Queue(), send, "normal", timeout=0))
         replies.put("모델 명령을 확인하지 못했습니다.")
         self.assertFalse(confirm_model_save(process, replies, send, "normal"))
+        replies.put("새 초기 두뇌를 \x1b[97m'fresh' 이름으로 등록했습니다. 현재 두뇌는 유지됩니다.")
+        self.assertTrue(confirm_model_command(process, replies, send, "new", "fresh"))
+        with self.assertRaises(ValueError):
+            confirm_model_command(process, replies, send, "give", "fresh")
 
     def test_control_scenario_cannot_inject_world_commands_or_change_their_order(self):
         with tempfile.TemporaryDirectory() as temporary:

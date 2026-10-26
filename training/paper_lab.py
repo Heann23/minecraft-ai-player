@@ -92,11 +92,15 @@ def validate_options(args):
     if getattr(args, "player_persistence", False) and not getattr(args, "managed_backend", False):
         raise ValueError("player persistence acceptance requires the plugin-owned backend")
     if getattr(args, "managed_backend", False) and (args.mode != "train" or not getattr(args, "catalog", None)
-            or not getattr(args, "inference_only", False) or args.resume is not None or getattr(args, "save_model_at_end", None)):
+            or not getattr(args, "inference_only", False) or args.resume is not None or getattr(args, "save_model_at_end", None)
+            or getattr(args, "create_model_at_end", None)):
         raise ValueError("managed backend acceptance requires a named inference-only model and no external resume/final snapshot")
-    if getattr(args, "save_model_at_end", None):
+    if getattr(args, "save_model_at_end", None) and getattr(args, "create_model_at_end", None):
+        raise ValueError("only one final model operation is allowed")
+    final_name = getattr(args, "save_model_at_end", None) or getattr(args, "create_model_at_end", None)
+    if final_name:
         from model_catalog import model_name
-        model_name(args.save_model_at_end)
+        model_name(final_name)
         if args.mode != "train" or not getattr(args, "model_catalog", None) or getattr(args, "scenario", None):
             raise ValueError("final snapshot requires a normal backend run and an explicit catalog; prepared scenarios are excluded")
     if getattr(args, "restore_model", None) and not getattr(args, "catalog", None):
@@ -133,13 +137,22 @@ def validate_options(args):
 
 
 def confirm_model_save(process, events, send, name, *, timeout=8):
+    return confirm_model_command(process, events, send, "save", name, timeout=timeout)
+
+
+def confirm_model_command(process, events, send, operation, name, *, timeout=8):
     """A dispatch is not a successful save. Wait for the server's asynchronous success/failure reply."""
-    send("ai model save " + name)
+    from model_catalog import model_name
+    model_name(name)
+    if operation not in {"save", "new"}:
+        raise ValueError("unsupported final model operation")
+    send("ai model " + operation + " " + name)
     deadline = time.monotonic() + timeout
-    expected = "현재 두뇌를 '" + name + "' 이름으로 저장했습니다."
+    expected = "현재 두뇌를 '" + name + "' 이름으로 저장했습니다." if operation == "save" else \
+               "새 초기 두뇌를 '" + name + "' 이름으로 등록했습니다. 현재 두뇌는 유지됩니다."
     while process.poll() is None and time.monotonic() < deadline:
         try:
-            line = events.get(timeout=min(0.25, max(0.001, deadline-time.monotonic())))
+            line = re.sub(r"\x1b\[[0-9;]*m", "", events.get(timeout=min(0.25, max(0.001, deadline-time.monotonic()))))
         except queue.Empty:
             continue
         if expected in line:
@@ -260,6 +273,11 @@ def run(args):
     if args.save_model_at_end:
         manifest.update({"requestedFinalModelSave": args.save_model_at_end, "finalModelSaveAcknowledged": False,
                          "finalModelSaveVerified": False})
+    if args.create_model_at_end:
+        selection = args.model_catalog / "selected-model.json"
+        manifest.update({"requestedFinalModelCreation": args.create_model_at_end,
+                         "finalModelCreationAcknowledged": False, "finalModelCreationVerified": False,
+                         "selectionSha256BeforeCreation": sha256(selection) if selection.is_file() else None})
     if catalog_state:
         manifest.update({"catalogName": catalog_state["name"], "catalogBrainId": catalog_state["session"]["brainId"],
                          "catalogSessionSha256": sha256(output / "catalog-source-session.json")})
@@ -408,6 +426,26 @@ def run(args):
                     process.terminate(); process.wait(timeout=20)
                     reason += ":startup-child-terminated"
                 else:
+                    if args.create_model_at_end and trainer and trainer.poll() is None:
+                        acknowledged = confirm_model_command(process, events, send, "new", args.create_model_at_end)
+                        manifest["finalModelCreationAcknowledged"] = acknowledged
+                        if acknowledged:
+                            try:
+                                from model_catalog import ModelCatalog
+                                created = ModelCatalog(args.model_catalog).load(args.create_model_at_end)["session"]
+                                selection = args.model_catalog / "selected-model.json"
+                                after_selection = sha256(selection) if selection.is_file() else None
+                                if created["brainId"] == initialized["brainId"] or not created["initializationOnly"] \
+                                        or created["policyVersion"] != 0 or created["gradientUpdates"] != 0 or created["learningEnabled"] \
+                                        or after_selection != manifest["selectionSha256BeforeCreation"]:
+                                    raise ValueError("new model/active selection identity mismatch")
+                                manifest["finalModelCreationVerified"] = True
+                                manifest["createdModel"] = {key: created[key] for key in ("brainId", "initializationOnly",
+                                                                                       "policyVersion", "gradientUpdates", "learningEnabled")}
+                            except (OSError, ValueError, KeyError, TypeError) as failure:
+                                manifest["finalModelCreationError"] = type(failure).__name__
+                        if not manifest["finalModelCreationVerified"]:
+                            reason += ":model-creation-unconfirmed"
                     if args.save_model_at_end and trainer and trainer.poll() is None:
                         acknowledged = confirm_model_save(process, events, send, args.save_model_at_end)
                         manifest["finalModelSaveAcknowledged"] = acknowledged
@@ -477,6 +515,7 @@ def main():
     parser.add_argument("--restore-model", help="catalog model name; omitted uses the saved selection")
     parser.add_argument("--model-catalog", type=Path, help="explicit private catalog for in-game list/info/save")
     parser.add_argument("--save-model-at-end", help="save the normal live brain after gameplay, await acknowledgement and verify its reference")
+    parser.add_argument("--create-model-at-end", help="register a distinct INITIAL model after a normal run, without changing active/selected brain")
     parser.add_argument("--managed-backend", action="store_true", help="acceptance of plugin-owned inference backend; never starts a second external trainer")
     parser.add_argument("--player-persistence", action="store_true", help="enable player persistence in the new isolated managed-backend acceptance server")
     parser.add_argument("--upgrade-context", action="store_true", help="explicitly expand v1 trained context when resuming PPO")

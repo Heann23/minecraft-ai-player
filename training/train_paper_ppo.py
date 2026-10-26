@@ -11,6 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
 import math
+import secrets
 from pathlib import Path
 import time
 import uuid
@@ -212,7 +213,7 @@ class PaperTrainer:
         self.last_session_save = time.monotonic()
 
     def control(self, packet):
-        if packet.get("operation") in {"model-list", "model-info", "model-save"}:
+        if packet.get("operation") in {"model-list", "model-info", "model-save", "model-new"}:
             return self.model_control(packet)
         if set(packet) != {"schema", "id", "operation", "brainId", "enabled"} \
                 or packet["schema"] != CONTROL_SCHEMA or packet["operation"] != "learning":
@@ -248,9 +249,17 @@ class PaperTrainer:
                 raise ValueError("list must not select a model")
             entries = self.catalog.list(limit=33)
             summaries, has_more = entries[:32], len(entries) > 32
-        elif operation in {"model-info", "model-save"}:
+        elif operation in {"model-info", "model-save", "model-new"}:
             model_catalog.model_name(name)
-            if operation == "model-save":
+            if operation == "model-new":
+                if self.restricted_training_use or model_catalog.restricted_training_use(self.output / "optimizer-checkpoint.json"):
+                    raise ValueError("prepared scenario initialization cannot enter the autonomous model catalog")
+                initial_output = self.output / "initial-models" / (name + "-" + uuid.uuid4().hex)
+                try:
+                    revision = self.catalog.create_initial(name, initial_output, seed=secrets.randbits(63), learning_enabled=False)
+                except FileExistsError as failure:
+                    raise ValueError("another catalog writer is active; current brain is unchanged") from failure
+            elif operation == "model-save":
                 if self.restricted_training_use or model_catalog.restricted_training_use(self.output / "optimizer-checkpoint.json"):
                     raise ValueError("prepared scenario snapshots cannot enter the autonomous model catalog")
                 self.poll_training(wait=True)

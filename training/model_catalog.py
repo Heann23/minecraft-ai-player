@@ -136,6 +136,17 @@ class ModelCatalog:
                          "brainId": revision["session"]["brainId"]})
         return revision
 
+    def create_initial(self, name, output, *, seed, learning_enabled=False):
+        name = model_name(name)
+        target = self.root / (name + ".json")
+        if target.exists() or target.is_symlink():
+            raise ValueError("new model requires an unused name; existing record preserved")
+        from train_paper_ppo import PaperTrainer
+        trainer = PaperTrainer(output, seed=seed, rollout_size=32, maximum=32, max_bytes=4*1024*1024,
+                               start_state="fresh", learning_enabled=learning_enabled)
+        trainer.close()  # Shared architecture, zero decisions and zero gradient updates.
+        return self.save(name, brain_session.load(output / "runtime-session.json"))
+
     def selected(self):
         selection = read_record(self.root / "selected-model.json")
         if selection.get("schema") != SCHEMA:
@@ -217,13 +228,7 @@ def main():
         args.output.parent.mkdir(parents=True, exist_ok=True)
         brain_session.save(args.output, result["session"])
     else:
-        if (catalog.root / (args.name + ".json")).exists():
-            raise ValueError("new model requires an unused name")
-        from train_paper_ppo import PaperTrainer
-        trainer = PaperTrainer(args.output, seed=args.seed, rollout_size=32, maximum=32, max_bytes=4*1024*1024,
-                               start_state="fresh", learning_enabled=args.learning == "on")
-        trainer.close()  # Saves the shared architecture's INITIAL state, without a decision or gradient update.
-        result = catalog.save(args.name, brain_session.load(args.output / "runtime-session.json"))
+        result = catalog.create_initial(args.name, args.output, seed=args.seed, learning_enabled=args.learning == "on")
     print(json.dumps(result, ensure_ascii=False, allow_nan=False))
 
 

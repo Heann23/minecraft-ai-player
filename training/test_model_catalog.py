@@ -129,6 +129,19 @@ class ModelCatalogTests(unittest.TestCase):
                 self.assertFalse(saved["models"][0]["learningEnabled"])
                 self.assertEqual(command("model-list")["models"][0]["name"], "current")
                 self.assertEqual(command("model-info", "current")["models"], saved["models"])
+                trainer.catalog.select("current")
+                selected_before = (trainer.catalog.root / "selected-model.json").read_bytes()
+                created = command("model-new", "new-candidate")
+                fresh = created["models"][0]
+                self.assertNotEqual(fresh["brainId"], trainer.brain_id)
+                self.assertTrue(fresh["initializationOnly"])
+                self.assertEqual(fresh["policyVersion"], 0)
+                self.assertEqual(fresh["gradientUpdates"], 0)
+                self.assertFalse(fresh["learningEnabled"])
+                self.assertEqual(created["weightsSha256"], saved["weightsSha256"])
+                self.assertEqual((trainer.catalog.root / "selected-model.json").read_bytes(), selected_before)
+                with self.assertRaises(ValueError):
+                    command("model-new", "current")
                 self.assertEqual(json.dumps(trainer.model.rng.bit_generator.state, sort_keys=True), before)
                 self.assertEqual(trainer.model.updates, 0)
                 with self.assertRaises(ValueError):
@@ -136,6 +149,8 @@ class ModelCatalogTests(unittest.TestCase):
                 (root / "manifest.json").write_text(json.dumps({"preparedScenario": True}))
                 with self.assertRaises(ValueError):
                     command("model-save", "prepared")
+                with self.assertRaises(ValueError):
+                    command("model-new", "prepared-new")
                 self.assertFalse((root / "catalog/prepared.json").exists())
             finally:
                 trainer.close()
