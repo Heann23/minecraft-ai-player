@@ -1,14 +1,29 @@
 """Plan boundary fixtures only. These tests never start Paper, train a model or claim survival performance."""
 import argparse
 import json
+import queue
 from pathlib import Path
 import tempfile
 import unittest
+from unittest import mock
 
-from paper_lab import read_plan, validate_options, summarize_game_log, validate_plan_extension, read_scenario
+from paper_lab import read_plan, validate_options, summarize_game_log, validate_plan_extension, read_scenario, confirm_model_save
 
 
 class SeedPlanTests(unittest.TestCase):
+    def test_final_model_save_requires_the_matching_asynchronous_acknowledgement(self):
+        process = mock.Mock()
+        process.poll.return_value = None
+        send = mock.Mock()
+        replies = queue.Queue()
+        replies.put("현재 두뇌를 'other' 이름으로 저장했습니다.")
+        replies.put("현재 두뇌를 'normal' 이름으로 저장했습니다.")
+        self.assertTrue(confirm_model_save(process, replies, send, "normal"))
+        send.assert_called_once_with("ai model save normal")
+        self.assertFalse(confirm_model_save(process, queue.Queue(), send, "normal", timeout=0))
+        replies.put("모델 명령을 확인하지 못했습니다.")
+        self.assertFalse(confirm_model_save(process, replies, send, "normal"))
+
     def test_control_scenario_cannot_inject_world_commands_or_change_their_order(self):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "scenario.json"
@@ -74,6 +89,10 @@ class SeedPlanTests(unittest.TestCase):
                 validate_options(args)
             args.world_seed = "1"
             self.assertIsNotNone(validate_options(args))
+            args.save_model_at_end, args.model_catalog, args.scenario = "normal", artifact, artifact
+            with self.assertRaisesRegex(ValueError, "prepared scenarios are excluded"):
+                validate_options(args)
+            args.save_model_at_end, args.scenario = None, None
             args.start_time = 24000
             with self.assertRaisesRegex(ValueError, "initial world time"):
                 validate_options(args)

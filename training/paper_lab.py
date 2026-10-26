@@ -89,6 +89,11 @@ def validate_plan_extension(parent: dict, current: dict):
 
 def validate_options(args):
     plan = read_plan(args.plan)
+    if getattr(args, "save_model_at_end", None):
+        from model_catalog import model_name
+        model_name(args.save_model_at_end)
+        if args.mode != "train" or not getattr(args, "model_catalog", None) or getattr(args, "scenario", None):
+            raise ValueError("final snapshot requires a normal backend run and an explicit catalog; prepared scenarios are excluded")
     if getattr(args, "restore_model", None) and not getattr(args, "catalog", None):
         raise ValueError("restore-model requires a catalog")
     if getattr(args, "catalog", None) and (args.mode != "train" or args.resume is not None
@@ -120,6 +125,23 @@ def validate_options(args):
     if not re.search(r"^\s*eula\s*=\s*true\s*$", args.eula.read_text(), re.MULTILINE):
         raise ValueError("supply an existing accepted EULA; this tool does not accept it for you")
     return plan
+
+
+def confirm_model_save(process, events, send, name, *, timeout=8):
+    """A dispatch is not a successful save. Wait for the server's asynchronous success/failure reply."""
+    send("ai model save " + name)
+    deadline = time.monotonic() + timeout
+    expected = "현재 두뇌를 '" + name + "' 이름으로 저장했습니다."
+    while process.poll() is None and time.monotonic() < deadline:
+        try:
+            line = events.get(timeout=min(0.25, max(0.001, deadline-time.monotonic())))
+        except queue.Empty:
+            continue
+        if expected in line:
+            return True
+        if "모델 명령을 확인하지 못했습니다." in line:
+            return False
+    return False
 
 
 def summarize_game_log(path: Path):
@@ -216,6 +238,9 @@ def run(args):
                 "tools": {name: sha256(source / "training" / name) for name in ("paper_lab.py", "rl_actor.py", "train_paper_ppo.py", "checkpoint_store.py", "brain_session.py", "model_catalog.py")},
                 "teacherLabels": False, "grantedItems": False, "teleportDuringEpisode": False,
                 "allWorldAutonomyProven": False}
+    if args.save_model_at_end:
+        manifest.update({"requestedFinalModelSave": args.save_model_at_end, "finalModelSaveAcknowledged": False,
+                         "finalModelSaveVerified": False})
     if catalog_state:
         manifest.update({"catalogName": catalog_state["name"], "catalogBrainId": catalog_state["session"]["brainId"],
                          "catalogSessionSha256": sha256(output / "catalog-source-session.json")})
@@ -357,6 +382,22 @@ def run(args):
                     process.terminate(); process.wait(timeout=20)
                     reason += ":startup-child-terminated"
                 else:
+                    if args.save_model_at_end and trainer and trainer.poll() is None:
+                        acknowledged = confirm_model_save(process, events, send, args.save_model_at_end)
+                        manifest["finalModelSaveAcknowledged"] = acknowledged
+                        if acknowledged:
+                            try:
+                                from model_catalog import ModelCatalog
+                                saved = ModelCatalog(args.model_catalog).load(args.save_model_at_end)["session"]
+                                if saved["brainId"] != initialized["brainId"]:
+                                    raise ValueError("saved model belongs to another brain")
+                                manifest["finalModelSaveVerified"] = True
+                                manifest["savedModel"] = {key: saved[key] for key in ("brainId", "checkpointSha256",
+                                                                                   "policyVersion", "gradientUpdates", "learningEnabled")}
+                            except (OSError, ValueError, KeyError, TypeError) as failure:
+                                manifest["finalModelSaveError"] = type(failure).__name__
+                        if not manifest["finalModelSaveVerified"]:
+                            reason += ":model-save-unconfirmed"
                     for text in ("ai status RLLearner", "ai stats RLLearner", "data get entity RLLearner Health", "data get entity RLLearner Inventory", "ai stop RLLearner"):
                         send(text)
                     time.sleep(2)
@@ -400,6 +441,7 @@ def main():
     parser.add_argument("--catalog", type=Path, help="restore an exact named catalog snapshot using the shared backend")
     parser.add_argument("--restore-model", help="catalog model name; omitted uses the saved selection")
     parser.add_argument("--model-catalog", type=Path, help="explicit private catalog for in-game list/info/save")
+    parser.add_argument("--save-model-at-end", help="save the normal live brain after gameplay, await acknowledgement and verify its reference")
     parser.add_argument("--upgrade-context", action="store_true", help="explicitly expand v1 trained context when resuming PPO")
     parser.add_argument("--start-state", choices=("fresh", "pretrained", "resume"))
     parser.add_argument("--inference-only", action="store_true", help="shared backend with learning disabled, for startup/mode scenarios")
