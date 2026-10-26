@@ -450,7 +450,7 @@ final class AIBrain {
                     if (plan != null) plan.cancel(ai);
                     plan = null; activeLearned = null;
                     ai.getBody().clearInputs();
-                    ai.debug("Learned execution unavailable: " + failure.getClass().getSimpleName());
+                    ai.debug("Learned execution unavailable: " + failure.getClass().getSimpleName() + ": " + failure.getMessage());
                 }
             }
         }
@@ -471,7 +471,8 @@ final class AIBrain {
                 } catch (RuntimeException failure) {
                     if (plan != null) plan.cancel(ai);
                     plan = null; activeLearned = null; ai.getBody().clearInputs();
-                    ai.debug("Training decision not executed: " + failure.getClass().getSimpleName());
+                    ai.debug("Training decision not executed: " + decision.selected().id() + " — "
+                            + failure.getClass().getSimpleName() + ": " + failure.getMessage());
                 }
             }
         }
