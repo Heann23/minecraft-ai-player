@@ -21,7 +21,11 @@ import java.util.*;
 /** Enumerates supported concrete inputs. No Goal score, utility, progression order, best-food/tool or Teacher selection. */
 public final class PolicyCandidates {
     public record Candidate(String id, PrimitiveCommand command, RecipeOption recipe, SurvivalObservation.Item consumable,
-                            PolicyFrame.Option encoded, int commitmentTicks, String inputId, ExactEquipment.Choice equipment) {
+                            PolicyFrame.Option encoded, int commitmentTicks, String inputId, ExactEquipment.Choice equipment, WaterInput water) {
+        public Candidate(String id, PrimitiveCommand command, RecipeOption recipe, SurvivalObservation.Item consumable,
+                         PolicyFrame.Option encoded, int commitmentTicks, String inputId, ExactEquipment.Choice equipment) {
+            this(id, command, recipe, consumable, encoded, commitmentTicks, inputId, equipment, null);
+        }
         public Candidate(String id, PrimitiveCommand command, RecipeOption recipe, SurvivalObservation.Item consumable, PolicyFrame.Option encoded) {
             this(id, command, recipe, consumable, encoded, 0, id, null);
         }
@@ -30,15 +34,16 @@ public final class PolicyCandidates {
             this(id, command, recipe, consumable, encoded, commitmentTicks, inputId, null);
         }
         public PrimitiveType type() {
-            return equipment != null ? PrimitiveType.EQUIP_ITEM : recipe != null ? PrimitiveType.CRAFT_ITEM
+            return water != null ? PrimitiveType.SWIM : equipment != null ? PrimitiveType.EQUIP_ITEM : recipe != null ? PrimitiveType.CRAFT_ITEM
                     : consumable != null ? PrimitiveType.USE_ITEM : command.type();
         }
         public Candidate committed(int ticks) {
             double[] features = encoded.features(); features[30] = ticks / 600.0;
             String choice = inputId + "@" + ticks;
-            return new Candidate(choice, command, recipe, consumable, new PolicyFrame.Option(choice, features), ticks, inputId, equipment);
+            return new Candidate(choice, command, recipe, consumable, new PolicyFrame.Option(choice, features), ticks, inputId, equipment, water);
         }
         public Action create(AIPlayer ai) {
+            if (water != null) return new WaterInputAction(water, commitmentTicks);
             if (equipment != null) return new EquipExactAction(equipment);
             if (recipe != null) return new CraftItemAction(Material.valueOf(recipe.result()), recipe.resultAmount(), recipe.id());
             if (consumable != null) return new ConsumeExactAction(ai.getWorldId(), consumable);
@@ -56,6 +61,7 @@ public final class PolicyCandidates {
     private int miningCursor;
     private int equipmentCursor;
     private int movementCursor;
+    private int waterCursor;
     private static final List<BlockPoint> MOVE_OFFSETS = movementOffsets();
 
     public record Observed(me.herry.minecraftAI.ai.primitive.control.PrimitiveSnapshot snapshot,
@@ -123,6 +129,7 @@ public final class PolicyCandidates {
             add(ai, found, "look:" + yaw, new PrimitiveCommand.LookAt(target), null, null, -Math.sin(angle) * 4, 0, Math.cos(angle) * 4, "", true);
         }
         add(ai, found, "jump", new PrimitiveCommand.Jump(), null, null, 0, 0, 0, "", true);
+        waterInputs(ai, found);
         equipment(ai, found);
         List<BlockPoint> targets = new ArrayList<>();
         var feet = ai.getPosition();
@@ -189,7 +196,7 @@ public final class PolicyCandidates {
             if (candidate.commitmentTicks() > 0) {
                 double[] retained = candidate.encoded().features(); retained[55] = 1;
                 expanded.add(new Candidate(candidate.id(), candidate.command(), candidate.recipe(), candidate.consumable(),
-                        new PolicyFrame.Option(candidate.id(), retained), candidate.commitmentTicks(), candidate.inputId(), candidate.equipment()));
+                        new PolicyFrame.Option(candidate.id(), retained), candidate.commitmentTicks(), candidate.inputId(), candidate.equipment(), candidate.water()));
             } else if (candidate.equipment() != null) expanded.add(candidate.committed(5));
             else for (int ticks : new int[]{5, 20, 80, 600}) expanded.add(candidate.committed(ticks));
         }
@@ -197,6 +204,22 @@ public final class PolicyCandidates {
         return new Capture(new PolicyFrame(ai.getWorldId(), Integer.toUnsignedLong(Bukkit.getCurrentTick()), body,
                 candidates.stream().map(Candidate::encoded).toList(), inspected.complete() && !ai.getWorkBudget().isExhausted()
                 && recipeCursor >= Material.values().length && expanded.size() <= PolicyFrame.MAX_OPTIONS), candidates, survival, observed.stock());
+    }
+
+    private void waterInputs(AIPlayer ai, Map<String, Candidate> found) {
+        if (!ai.getPlayer().isInWater() || ai.getWorkBudget().isExhausted()) return;
+        for (var input : WaterInput.choices(ai.getWorldId(), ai.getPlayer().getLocation().getYaw(), waterCursor, 24)) {
+            if (ai.getWorkBudget().isExhausted()) break;
+            double[] features = new double[PolicyFrame.ACTION_SIZE];
+            features[PrimitiveType.SWIM.ordinal()] = 1;
+            var direction = input.heading();
+            features[24] = direction.x(); features[25] = direction.y(); features[26] = direction.z();
+            features[27] = input.forward(); features[28] = input.vertical() > 0 ? 1 : 0;
+            features[29] = input.vertical() < 0 ? 1 : 0; features[57] = input.sprint() ? 1 : 0; features[63] = 1;
+            String id = input.identity();
+            found.putIfAbsent(id, new Candidate(id, null, null, null, new PolicyFrame.Option(id, features), 0, id, null, input));
+        }
+        waterCursor = (waterCursor + 1) % WaterInput.CHOICES;
     }
 
     private void equipment(AIPlayer ai, Map<String, Candidate> found) {
