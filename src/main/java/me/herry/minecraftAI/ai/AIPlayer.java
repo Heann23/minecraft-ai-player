@@ -84,8 +84,10 @@ public final class AIPlayer {
     private AIState state = AIState.STOPPED;
     private UUID executionId = UUID.randomUUID();
     private java.util.function.Function<Boolean, java.util.concurrent.CompletableFuture<Void>> executionIntentListener;
-    private volatile long executionIntentRevision;
-    private volatile String executionIntentStatus = "플레이어 상태 저장 꺼짐";
+    private record IntentSave(long revision, String status) {}
+    private long executionIntentRevision;
+    private final java.util.concurrent.atomic.AtomicReference<IntentSave> executionIntentSave =
+            new java.util.concurrent.atomic.AtomicReference<>(new IntentSave(0, "플레이어 상태 저장 꺼짐"));
     private boolean resumeAfterRespawn;
     private long ticks;
     private BlockFace digDirection;
@@ -153,19 +155,23 @@ public final class AIPlayer {
     public UUID executionId() { return executionId; }
     void restoreExecutionId(UUID value) { executionId = java.util.Objects.requireNonNull(value); }
     void setExecutionIntentListener(java.util.function.Function<Boolean, java.util.concurrent.CompletableFuture<Void>> listener) {
-        executionIntentListener = listener; executionIntentStatus = "저장된 의사 적용 또는 명시 요청 대기";
+        executionIntentListener = listener;
+        executionIntentSave.set(new IntentSave(0, "저장된 의사 적용 또는 명시 요청 대기"));
     }
-    public String executionIntentStatus() { return executionIntentStatus; }
+    public String executionIntentStatus() { return executionIntentSave.get().status(); }
 
     private void recordExecutionIntent(boolean running) {
         if (executionIntentListener == null) return;
         long revision = ++executionIntentRevision;
-        executionIntentStatus = "저장 중";
+        var pending = new IntentSave(revision, "저장 중");
+        executionIntentSave.set(pending);
         try {
             executionIntentListener.apply(running).whenComplete((ignored, failure) -> {
-                if (revision == executionIntentRevision) executionIntentStatus = failure == null ? "저장 완료" : "저장 실패 — 로그 확인";
+                executionIntentSave.compareAndSet(pending, new IntentSave(revision, failure == null ? "저장 완료" : "저장 실패 — 로그 확인"));
             });
-        } catch (RuntimeException failure) { executionIntentStatus = "저장 실패 — 로그 확인"; }
+        } catch (RuntimeException failure) {
+            executionIntentSave.compareAndSet(pending, new IntentSave(revision, "저장 실패 — 로그 확인"));
+        }
     }
 
     private boolean start(boolean explicit) {
@@ -571,7 +577,7 @@ public final class AIPlayer {
 
     public java.util.List<String> policyDetails() {
         var details = new java.util.ArrayList<>(brain.policyDetails());
-        details.add("재시작 의사 저장: " + executionIntentStatus);
+        details.add("재시작 의사 저장: " + executionIntentStatus());
         return java.util.List.copyOf(details);
     }
     public String connectedBrainId() { return brain.connectedBrainId(); }
