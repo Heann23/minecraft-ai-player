@@ -431,6 +431,68 @@ public final class AIController {
                 });
     }
 
+    public void manageModel(String operation, String name, BiConsumer<Boolean, List<String>> completed) {
+        if (!Bukkit.isPrimaryThread()) throw new IllegalStateException("model control must start on server thread");
+        if (trainingBridge == null) {
+            completed.accept(false, List.of("모델 관리 백엔드가 연결되지 않았습니다. 현재 모델은 유지됩니다.")); return;
+        }
+        if (!java.util.Set.of("list", "info", "save").contains(operation)
+                || (operation.equals("list") ? !name.isEmpty() : !me.herry.minecraftAI.ai.learned.PpoBridge.validModelName(name))) {
+            completed.accept(false, List.of("올바른 모델 이름과 관리 명령을 입력하세요.")); return;
+        }
+        var identities = entries.values().stream().map(entry -> entry.ai.connectedBrainId())
+                .filter(java.util.Objects::nonNull).distinct().toList();
+        if (identities.size() != 1) {
+            completed.accept(false, List.of("/ai stats 로 같은 두뇌의 연결 상태를 먼저 확인하세요.")); return;
+        }
+        boolean changing = operation.equals("save");
+        if (changing ? !trainingBridge.beginTransition() : trainingBridge.isTransitioning()) {
+            completed.accept(false, List.of("다른 두뇌 설정 변경을 확인 중입니다.")); return;
+        }
+        long generation = changing ? ++policyControlGeneration : policyControlGeneration;
+        var drains = new ArrayList<java.util.concurrent.CompletableFuture<Void>>();
+        try {
+            // Inspection does not cancel an active action. Saving first closes its acknowledged transition.
+            if (changing) for (Entry entry : entries.values()) drains.add(entry.ai.prepareLearningChange());
+        } catch (RuntimeException failure) {
+            if (changing) trainingBridge.endTransition();
+            completed.accept(false, List.of("현재 행동을 정리하지 못해 모델을 저장하지 않았습니다.")); return;
+        }
+        java.util.concurrent.CompletableFuture.allOf(drains.toArray(java.util.concurrent.CompletableFuture[]::new))
+                .thenCompose(ignored -> trainingBridge.modelCommand(identities.getFirst(), operation, name))
+                .whenComplete((result, failure) -> {
+                    if (!plugin.isEnabled()) { if (changing) trainingBridge.endTransition(); return; }
+                    try {
+                        Bukkit.getScheduler().runTask(plugin, () -> {
+                            if (generation != policyControlGeneration) {
+                                completed.accept(false, List.of("조회 중 두뇌 설정이 바뀌었습니다. 다시 조회하세요.")); return;
+                            }
+                            if (changing && failure == null) for (Entry entry : entries.values()) entry.ai.acceptLearningChange(result.status());
+                            if (changing) trainingBridge.endTransition();
+                            if (failure != null) {
+                                plugin.getLogger().log(Level.WARNING, "Model command not confirmed; active brain retained", failure);
+                                completed.accept(false, List.of("모델 명령을 확인하지 못했습니다. 목록 설정·원본·이름 충돌 또는 시험용 자료 제한을 확인하세요.",
+                                        "현재 두뇌를 교체하거나 AI를 다시 시작하지 않았습니다."));
+                                return;
+                            }
+                            var lines = new ArrayList<String>();
+                            lines.add(operation.equals("save") ? "현재 두뇌를 '" + name + "' 이름으로 저장했습니다." : "저장된 모델 " + result.models().size() + "개");
+                            for (var model : result.models()) {
+                                if (!model.valid()) { lines.add(model.name() + ": 원본 누락 또는 손상 — 사용 불가"); continue; }
+                                lines.add(model.name() + " | ID " + model.brainId() + " | 버전 " + model.policyVersion()
+                                        + " | 갱신 " + model.gradientUpdates() + " | 학습 " + (model.learningEnabled() ? "켜짐" : "꺼짐")
+                                        + (model.initializationOnly() ? " | 학습 전 초기 상태" : ""));
+                            }
+                            if (result.hasMore()) lines.add("목록은 32개까지 표시합니다. 나머지는 이름으로 조회하세요.");
+                            completed.accept(true, List.copyOf(lines));
+                        });
+                    } catch (RuntimeException stopped) {
+                        if (changing) trainingBridge.endTransition();
+                        plugin.getLogger().warning("Server stopped before model acknowledgement could be delivered");
+                    }
+                });
+    }
+
     public void shutdown() {
         policyControlGeneration++;
         saveAll(false, "shutdown");

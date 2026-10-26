@@ -140,7 +140,9 @@ class ModelCatalog:
             raise ValueError("selected brain identity changed")
         return revision
 
-    def list(self):
+    def list(self, *, limit=None):
+        if limit is not None and (type(limit) is not int or not 1 <= limit <= 10000):
+            raise ValueError("invalid catalog list limit")
         if not self.root.exists():
             return []
         paths = sorted(self.root.glob("*.json"))
@@ -157,6 +159,8 @@ class ModelCatalog:
                               ("brainId", "policyVersion", "gradientUpdates", "learningEnabled", "initializationOnly")}})
             except (OSError, ValueError, KeyError, TypeError) as failure:
                 result.append({"name": path.stem, "valid": False, "error": type(failure).__name__})
+            if limit is not None and len(result) >= limit:
+                break
         return result
 
 

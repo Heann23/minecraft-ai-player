@@ -112,6 +112,34 @@ class ModelCatalogTests(unittest.TestCase):
                 catalog.save("brain", state)
             self.assertEqual((catalog.root / "catalog.lock").read_text(), "active writer")
 
+    def test_connected_commands_save_same_brain_and_do_not_change_learning_or_rng(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            trainer = PaperTrainer(root / "source", seed=7, rollout_size=32, maximum=32, max_bytes=4*1024*1024,
+                                   start_state="fresh", learning_enabled=False, model_catalog_path=root / "catalog")
+            try:
+                import uuid
+                before = json.dumps(trainer.model.rng.bit_generator.state, sort_keys=True)
+                def command(operation, name="", brain=None):
+                    return trainer.control({"schema": "minecraft-brain-control/v1", "id": str(uuid.uuid4()),
+                        "operation": operation, "name": name, "brainId": brain or trainer.brain_id})
+                saved = command("model-save", "current")
+                self.assertTrue(saved["ok"])
+                self.assertEqual(saved["models"][0]["brainId"], trainer.brain_id)
+                self.assertFalse(saved["models"][0]["learningEnabled"])
+                self.assertEqual(command("model-list")["models"][0]["name"], "current")
+                self.assertEqual(command("model-info", "current")["models"], saved["models"])
+                self.assertEqual(json.dumps(trainer.model.rng.bit_generator.state, sort_keys=True), before)
+                self.assertEqual(trainer.model.updates, 0)
+                with self.assertRaises(ValueError):
+                    command("model-save", "wrong", str(uuid.uuid4()))
+                (root / "manifest.json").write_text(json.dumps({"preparedScenario": True}))
+                with self.assertRaises(ValueError):
+                    command("model-save", "prepared")
+                self.assertFalse((root / "catalog/prepared.json").exists())
+            finally:
+                trainer.close()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -128,7 +128,7 @@ def resume_checkpoint(path: Path, *, upgrade_context=False, allow_initial=False)
 class PaperTrainer:
     def __init__(self, output: Path, *, seed: int, rollout_size: int, maximum: int, max_bytes: int,
                  resume: Path | None = None, upgrade_context=False, learning_enabled=True, start_state=None,
-                 restore_state: dict | None = None, session_save_seconds: int = 30):
+                 restore_state: dict | None = None, session_save_seconds: int = 30, model_catalog_path: Path | None = None):
         if not 32 <= rollout_size <= 4096 or maximum < rollout_size or max_bytes < MAX_PACKET:
             raise ValueError("invalid training budget")
         if upgrade_context and resume is None:
@@ -152,6 +152,7 @@ class PaperTrainer:
             model.rng.bit_generator.state = restore_state["rng"]
         output.mkdir(parents=True, exist_ok=False)  # A new run never overwrites another model or provenance.
         self.output = output
+        self.catalog = None if model_catalog_path is None else model_catalog.ModelCatalog(model_catalog_path)
         self.restricted_training_use = parent is not None and parent["notForAutonomousTraining"]
         write_atomic(output / "catalog-use.json", {"notForAutonomousTraining": self.restricted_training_use})
         self.run = str(uuid.uuid4())
@@ -209,6 +210,8 @@ class PaperTrainer:
         self.last_session_save = time.monotonic()
 
     def control(self, packet):
+        if packet.get("operation") in {"model-list", "model-info", "model-save"}:
+            return self.model_control(packet)
         if set(packet) != {"schema", "id", "operation", "brainId", "enabled"} \
                 or packet["schema"] != CONTROL_SCHEMA or packet["operation"] != "learning":
             raise ValueError("unsupported brain control request")
@@ -227,6 +230,43 @@ class PaperTrainer:
         weights_hash = hashlib.sha256(checkpoint_store.encoded({key: value.tolist() for key, value in self.model.params.items()})).hexdigest()
         return {"schema": CONTROL_SCHEMA, "id": packet["id"], "ok": True, "weightsSha256": weights_hash,
                 "status": self.status()}
+
+    def model_control(self, packet):
+        if set(packet) != {"schema", "id", "operation", "brainId", "name"} or packet["schema"] != CONTROL_SCHEMA:
+            raise ValueError("unsupported model control request")
+        uuid.UUID(packet["id"])
+        if packet["brainId"] != self.brain_id:
+            raise ValueError("brain identity mismatch")
+        if self.catalog is None:
+            raise ValueError("model catalog is not configured for this backend")
+        operation = packet["operation"]
+        name = packet["name"]
+        if operation == "model-list":
+            if name != "":
+                raise ValueError("list must not select a model")
+            entries = self.catalog.list(limit=33)
+            summaries, has_more = entries[:32], len(entries) > 32
+        elif operation in {"model-info", "model-save"}:
+            model_catalog.model_name(name)
+            if operation == "model-save":
+                if self.restricted_training_use or model_catalog.restricted_training_use(self.output / "optimizer-checkpoint.json"):
+                    raise ValueError("prepared scenario snapshots cannot enter the autonomous model catalog")
+                self.poll_training(wait=True)
+                self.persist_session()
+                try:
+                    revision = self.catalog.save(name, brain_session.load(self.output / "runtime-session.json"))
+                except FileExistsError as failure:
+                    raise ValueError("another catalog writer is active; model was not replaced") from failure
+            else:
+                revision = self.catalog.load(name)
+            summaries = [{"name": name, "valid": True, **{key: revision["session"][key] for key in
+                         ("brainId", "policyVersion", "gradientUpdates", "learningEnabled", "initializationOnly")}}]
+            has_more = False
+        else:
+            raise ValueError("unsupported model operation")
+        weights_hash = hashlib.sha256(checkpoint_store.encoded({key: value.tolist() for key, value in self.model.params.items()})).hexdigest()
+        return {"schema": CONTROL_SCHEMA, "id": packet["id"], "ok": True, "operation": operation, "name": name,
+                "weightsSha256": weights_hash, "status": self.status(), "models": summaries, "hasMore": has_more}
 
     def status(self):
         return {"modelVersion": self.model.version, "environmentSteps": self.parent_steps + self.steps,
@@ -527,6 +567,7 @@ def main():
     parser.add_argument("--session-save-seconds", type=int, default=30)
     parser.add_argument("--catalog", type=Path, help="private named model catalog; read-only during this run")
     parser.add_argument("--restore-model", help="restore a named model, or the catalog selection when omitted")
+    parser.add_argument("--model-catalog", type=Path, help="explicit private catalog for connected in-game list/info/save")
     args = parser.parse_args()
     if args.max_decisions is not None and args.max_decisions < 1:
         raise ValueError("max-decisions must be positive")
@@ -553,7 +594,8 @@ def main():
                            resume=args.resume, upgrade_context=args.upgrade_context,
                            start_state=args.start_state,
                            learning_enabled=False if args.inference_only else restored["learningEnabled"] if restored else True,
-                           restore_state=restored, session_save_seconds=args.session_save_seconds)
+                           restore_state=restored, session_save_seconds=args.session_save_seconds,
+                           model_catalog_path=args.model_catalog)
     print("Waiting for real Paper transitions. No Teacher or synthetic game environment. Run:", trainer.run, flush=True)
     serve(args.channel, trainer, args.stop_file, args.max_decisions)
 

@@ -14,6 +14,11 @@ public final class PpoBridge implements AutoCloseable {
     public record Status(long modelVersion, long environmentSteps, Metadata metadata) {}
     public record Control(String schema, String id, String operation, String brainId, boolean enabled) {}
     public record ControlResult(String schema, String id, boolean ok, String error, String weightsSha256, Status status) {}
+    public record ModelCommand(String schema, String id, String operation, String brainId, String name) {}
+    public record ModelSummary(String name, boolean valid, String brainId, long policyVersion,
+                               long gradientUpdates, boolean learningEnabled, boolean initializationOnly) {}
+    public record ModelResult(String schema, String id, boolean ok, String error, String operation, String name,
+                              String weightsSha256, Status status, java.util.List<ModelSummary> models, boolean hasMore) {}
     private final java.util.concurrent.atomic.AtomicBoolean transitioning = new java.util.concurrent.atomic.AtomicBoolean();
     public boolean beginTransition() { return transitioning.compareAndSet(false, true); }
     public boolean isTransitioning() { return transitioning.get(); }
@@ -82,6 +87,74 @@ public final class PpoBridge implements AutoCloseable {
         String id = UUID.randomUUID().toString();
         String payload = gson.toJson(new Control(CONTROL_SCHEMA, id, "learning", brainId, enabled));
         return CompletableFuture.supplyAsync(() -> exchangeControl(id, payload, brainId, enabled), io);
+    }
+
+    public CompletableFuture<ModelResult> modelCommand(String brainId, String operation, String name) {
+        UUID.fromString(brainId);
+        if (!java.util.Set.of("list", "info", "save").contains(operation)
+                || (operation.equals("list") ? !name.isEmpty() : !validModelName(name)))
+            throw new IllegalArgumentException("invalid model command");
+        String id = UUID.randomUUID().toString();
+        var command = new ModelCommand(CONTROL_SCHEMA, id, "model-" + operation, brainId, name);
+        String payload = gson.toJson(command);
+        return CompletableFuture.supplyAsync(() -> exchangeModel(command, payload), io);
+    }
+
+    public static boolean validModelName(String name) {
+        return name != null && name.matches("[a-z0-9][a-z0-9_-]{0,63}") && !name.equals("selected-model")
+                && !name.startsWith("revision-") && !name.matches("con|prn|aux|nul|com[0-9]|lpt[0-9]");
+    }
+
+    private ModelResult exchangeModel(ModelCommand command, String payload) {
+        Path temporary = directory.resolve(command.id() + ".control.tmp");
+        Path request = directory.resolve(command.id() + ".control.json");
+        Path response = directory.resolve(command.id() + ".control-response.json");
+        try {
+            Files.writeString(temporary, payload, StandardOpenOption.CREATE_NEW);
+            Files.move(temporary, request, StandardCopyOption.ATOMIC_MOVE);
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+            while (System.nanoTime() < deadline && !Thread.currentThread().isInterrupted()) {
+                if (Files.isRegularFile(response)) {
+                    if (Files.size(response) > 16384) throw new IOException("oversized model response");
+                    var result = gson.fromJson(Files.readString(response), ModelResult.class);
+                    if (result == null || !CONTROL_SCHEMA.equals(result.schema()) || !command.id().equals(result.id()))
+                        throw new IOException("invalid model response identity");
+                    if (!result.ok()) throw new IOException("model command rejected; catalog or source is unavailable");
+                    var status = result.status();
+                    if (!command.operation().equals(result.operation()) || !command.name().equals(result.name())
+                            || status == null || status.metadata() == null || status.modelVersion() < 0 || status.environmentSteps() < 0
+                            || !command.brainId().equals(status.metadata().brainId())
+                            || result.weightsSha256() == null || !result.weightsSha256().matches("[0-9a-f]{64}")
+                            || result.models() == null || result.models().size() > 32
+                            || !command.operation().equals("model-list") && result.models().size() != 1)
+                        throw new IOException("model acknowledgement mismatch");
+                    for (var model : result.models()) {
+                        if (model == null || !validModelName(model.name())) throw new IOException("invalid model entry");
+                        if (model.valid()) {
+                            UUID.fromString(model.brainId());
+                            if (model.policyVersion() < 0 || model.gradientUpdates() < 0)
+                                throw new IOException("invalid model counters");
+                        }
+                    }
+                    if (command.operation().equals("model-save")) {
+                        var saved = result.models().getFirst();
+                        if (!saved.valid() || !command.name().equals(saved.name()) || !command.brainId().equals(saved.brainId())
+                                || saved.policyVersion() != status.modelVersion()
+                                || saved.gradientUpdates() != status.metadata().gradientUpdates()
+                                || saved.learningEnabled() != status.metadata().learningEnabled())
+                            throw new IOException("saved model differs from active brain");
+                    }
+                    return result;
+                }
+                Thread.sleep(10);
+            }
+            throw new IOException("model command timeout; save not confirmed");
+        } catch (IOException | InterruptedException | RuntimeException failure) {
+            if (failure instanceof InterruptedException) Thread.currentThread().interrupt();
+            throw new CompletionException(failure);
+        } finally {
+            for (Path path : new Path[]{temporary, request, response}) try { Files.deleteIfExists(path); } catch (IOException ignored) {}
+        }
     }
 
     private ControlResult exchangeControl(String id, String payload, String brainId, boolean enabled) {

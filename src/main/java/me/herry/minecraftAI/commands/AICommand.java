@@ -30,7 +30,7 @@ import java.util.function.Function;
  */
 public class AICommand implements TabExecutor {
     public static final String PERMISSION = "minecraftai.admin";
-    private static final List<String> SUB_COMMANDS = List.of("spawn", "remove", "start", "stop", "status", "stats", "training", "inv", "goal", "debug",
+    private static final List<String> SUB_COMMANDS = List.of("spawn", "remove", "start", "stop", "status", "stats", "training", "model", "inv", "goal", "debug",
             "why", "brain", "plan", "observe", "learn", "memory", "perf", "home", "say", "save");
     // 디버그를 켜고 끄는 말. "/ai debug start" 처럼 입력해도 알아듣게 한다.
     private static final List<String> SWITCH_ON = List.of("on", "start", "true", "enable", "켜기");
@@ -64,6 +64,7 @@ public class AICommand implements TabExecutor {
             case "status" -> status(sender, args);
             case "stats" -> inspect(sender, args, "두뇌와 학습 상태", AIPlayer::policyDetails);
             case "training" -> training(sender, args);
+            case "model" -> model(sender, args);
             case "inv", "inventory" -> inventory(sender, args);
             case "goal" -> goal(sender, args);
             case "debug" -> debug(sender, args);
@@ -153,6 +154,21 @@ public class AICommand implements TabExecutor {
     private void save(CommandSender sender) {
         controller.saveAll(false);
         info(sender, "AI " + controller.count() + "명의 상태를 저장했습니다.");
+    }
+
+    private void model(CommandSender sender, String[] args) {
+        String operation = args.length >= 2 ? args[1].toLowerCase(Locale.ROOT) : "";
+        if (!(operation.equals("list") && args.length == 2
+                || List.of("info", "save").contains(operation) && args.length == 3)) {
+            error(sender, "사용법: /ai model <list|info 이름|save 이름>"); return;
+        }
+        String name = operation.equals("list") ? "" : args[2];
+        if (!operation.equals("list") && !me.herry.minecraftAI.ai.learned.PpoBridge.validModelName(name)) {
+            error(sender, "모델 이름은 소문자 영숫자·밑줄·하이픈 1~64자로 입력하세요. 예약 이름은 사용할 수 없습니다."); return;
+        }
+        controller.manageModel(operation, name, (success, lines) -> {
+            for (String line : lines) { if (success) info(sender, line); else error(sender, line); }
+        });
     }
 
     private void spawn(CommandSender sender, String[] args) {
@@ -333,6 +349,7 @@ public class AICommand implements TabExecutor {
                 case "goal" -> filter(goalNames(), args[1]);
                 case "debug" -> filter(List.of("on", "off"), args[1]);
                 case "training" -> filter(List.of("on", "off"), args[1]);
+                case "model" -> filter(List.of("list", "info", "save"), args[1]);
                 case "home" -> filter(List.of("set", "clear"), args[1]);
                 default -> List.of();
             };

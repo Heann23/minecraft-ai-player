@@ -65,12 +65,17 @@ def read_scenario(path: Path):
         raise ValueError("invalid control scenario")
     previous = -1
     for event in scenario["events"]:
-        keys = {"atSeconds", "command", "enabled"} if event.get("command") == "learning" else {"atSeconds", "command"}
+        command = event.get("command")
+        keys = {"atSeconds", "command", "enabled"} if command == "learning" else \
+               {"atSeconds", "command", "name"} if command in {"model-info", "model-save"} else {"atSeconds", "command"}
         if set(event) != keys or type(event["atSeconds"]) is not int or not previous <= event["atSeconds"] <= 86400 \
-                or event["atSeconds"] < 0 or event["command"] not in {"learning", "stop", "start", "stats"}:
+                or event["atSeconds"] < 0 or command not in {"learning", "stop", "start", "stats", "model-list", "model-info", "model-save"}:
             raise ValueError("unsupported scenario command or ordering")
         if event["command"] == "learning" and type(event["enabled"]) is not bool:
             raise ValueError("invalid scenario learning flag")
+        if command in {"model-info", "model-save"}:
+            from model_catalog import model_name
+            model_name(event["name"])
         previous = event["atSeconds"]
     return scenario["events"]
 
@@ -266,6 +271,8 @@ def run(args):
                     command.extend(["--start-state", args.start_state])
                 if args.max_decisions is not None:
                     command.extend(["--max-decisions", str(args.max_decisions)])
+                if args.model_catalog:
+                    command.extend(["--model-catalog", str(args.model_catalog.resolve())])
                 env = dict(os.environ, OPENBLAS_NUM_THREADS="1", OMP_NUM_THREADS="1", MKL_NUM_THREADS="1")
                 trainer = subprocess.Popen(command, stdout=trainer_log, stderr=subprocess.STDOUT, env=env)
                 ready_deadline = time.monotonic() + 30
@@ -309,6 +316,10 @@ def run(args):
                         send("ai training " + ("on" if event["enabled"] else "off"))
                     elif event["command"] == "stats":
                         send("ai status RLLearner"); send("ai stats RLLearner")
+                    elif event["command"] == "model-list":
+                        send("ai model list")
+                    elif event["command"] in {"model-info", "model-save"}:
+                        send("ai model " + event["command"].removeprefix("model-") + " " + event["name"])
                     else:
                         send("ai " + event["command"] + " RLLearner")
                     with (output / "scenario-dispatch.jsonl").open("a", encoding="utf-8") as dispatched:
@@ -388,6 +399,7 @@ def main():
     parser.add_argument("--resume", type=Path)
     parser.add_argument("--catalog", type=Path, help="restore an exact named catalog snapshot using the shared backend")
     parser.add_argument("--restore-model", help="catalog model name; omitted uses the saved selection")
+    parser.add_argument("--model-catalog", type=Path, help="explicit private catalog for in-game list/info/save")
     parser.add_argument("--upgrade-context", action="store_true", help="explicitly expand v1 trained context when resuming PPO")
     parser.add_argument("--start-state", choices=("fresh", "pretrained", "resume"))
     parser.add_argument("--inference-only", action="store_true", help="shared backend with learning disabled, for startup/mode scenarios")
