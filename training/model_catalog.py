@@ -2,12 +2,13 @@
 from __future__ import annotations
 
 import argparse
-from contextlib import contextmanager
+from contextlib import contextmanager, redirect_stdout
 import hashlib
 import json
 import os
 from pathlib import Path
 import re
+import sys
 import uuid
 
 import brain_session
@@ -192,7 +193,8 @@ def main():
         result = catalog.save(args.name, brain_session.load(args.session))
     elif args.operation == "import":
         from train_paper_ppo import resume_checkpoint, CONTRACT
-        model, parent = resume_checkpoint(args.checkpoint)  # Imported pretrained models must have real updates.
+        with redirect_stdout(sys.stderr):  # Recovery diagnostics must not corrupt the CLI's JSON result.
+            model, parent = resume_checkpoint(args.checkpoint)  # Imported models must have real updates.
         result = catalog.save(args.name, {"schema": brain_session.SCHEMA, "brainId": parent["brainId"],
             "checkpoint": parent["checkpointPath"], "checkpointSha256": parent["checkpointSha256"],
             "policyVersion": model.version, "gradientUpdates": model.updates,

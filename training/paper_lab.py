@@ -278,6 +278,8 @@ def run(args):
                 initialized = json.loads((output / "training/run.json").read_text(encoding="utf-8"))
                 manifest["actualStartState"] = initialized.get("trainingStartState")
                 manifest["actualLearningEnabled"] = initialized.get("learningEnabled")
+                manifest["backendLearningEnabled"] = initialized["learningEnabled"]
+                manifest["maxTransitions"] = args.steps if initialized["learningEnabled"] else 0
                 write_json(output / "manifest.json", manifest)
                 if initialized.get("parents"):
                     manifest["resolvedParentCheckpointSha256"] = initialized["parents"][-1]["checkpointSha256"]
@@ -337,7 +339,7 @@ def run(args):
                     print(json.dumps({"elapsedSeconds": round(now-started), "ready": gameplay_start is not None,
                           "environmentSteps": status.get("environmentSteps", 0), "modelVersion": status.get("modelVersion")}), flush=True)
                 if trainer and trainer.poll() is not None:
-                    reason = ("backend-inference-budget-complete" if args.inference_only else "trainer-budget-complete") if trainer.returncode == 0 else "trainer-failed"; break
+                    reason = ("backend-inference-budget-complete" if not manifest["actualLearningEnabled"] else "trainer-budget-complete") if trainer.returncode == 0 else "trainer-failed"; break
         finally:
             if process and process.poll() is None:
                 if gameplay_start is None:
