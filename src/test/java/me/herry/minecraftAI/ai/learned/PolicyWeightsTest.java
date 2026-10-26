@@ -52,6 +52,23 @@ class PolicyWeightsTest {
         assertThrows(java.io.IOException.class, () -> PolicyWeights.load(malformed));
     }
 
+    @Test void categoricalExecutionUsesTheLearnedProbabilitiesAndReportsTheChosenLogProbability() throws Exception {
+        var policy = PolicyWeights.load(fixture(1, "minecraft-paper", 2));
+        var observed = frame();
+        var random = new java.util.Random(741);
+        int right = 0;
+        double margin = 2 * Math.tanh(2);
+        double expectedRight = 1 / (1 + Math.exp(-margin));
+        for (int i = 0; i < 2000; i++) {
+            var selected = policy.sample(observed, random);
+            boolean isRight = selected.candidate().equals("right");
+            if (isRight) right++;
+            assertEquals(Math.log(isRight ? expectedRight : 1 - expectedRight), selected.logProbability(), 1e-12);
+        }
+        assertEquals(expectedRight, right / 2000.0, 0.04);
+        assertTrue(right < 2000, "categorical execution must not silently become greedy argmax");
+    }
+
     @Test void observationsAndCandidateFeaturesCannotBeChangedAfterSelectionInputWasCaptured() {
         double[] state = new double[PolicyFrame.STATE_SIZE];
         double[] action = new double[PolicyFrame.ACTION_SIZE]; action[0] = 1;

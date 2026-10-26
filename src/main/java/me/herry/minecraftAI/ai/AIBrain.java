@@ -434,7 +434,7 @@ final class AIBrain {
                     && (plan == null || plan.isFinished() || now >= learnedNextChoiceAt)) {
                 try {
                     var captured = learnedCandidates.capture(ai, activeLearned, (int) Math.min(2400, now - learnedStartedAt));
-                    var predicted = learnedPolicy.predict(captured.frame());
+                    var predicted = learnedPolicy.sample(captured.frame(), java.util.concurrent.ThreadLocalRandom.current());
                     var selected = captured.candidates().get(predicted.index());
                     if (activeLearned == null || !selected.inputId().equals(activeLearned.inputId()) || plan == null || plan.isFinished()) {
                         if (plan != null) plan.cancel(ai);

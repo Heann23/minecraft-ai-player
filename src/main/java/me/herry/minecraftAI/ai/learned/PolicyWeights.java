@@ -55,6 +55,15 @@ public final class PolicyWeights {
     }
 
     public Prediction predict(PolicyFrame frame) {
+        return select(frame, null);
+    }
+
+    /** Match PPO's categorical behavior policy. Greedy predict remains available for diagnostics. */
+    public Prediction sample(PolicyFrame frame, java.util.random.RandomGenerator random) {
+        return select(frame, java.util.Objects.requireNonNull(random));
+    }
+
+    private Prediction select(PolicyFrame frame, java.util.random.RandomGenerator random) {
         double[] scores = new double[frame.options().size()];
         int best = 0;
         for (int option = 0; option < scores.length; option++) {
@@ -71,7 +80,16 @@ public final class PolicyWeights {
         }
         double total = 0;
         for (double score : scores) total += Math.exp(score - scores[best]);
-        return new Prediction(best, frame.options().get(best).id(), -Math.log(total), sha256);
+        int chosen = best;
+        if (random != null) {
+            double draw = random.nextDouble() * total;
+            chosen = scores.length - 1;
+            for (int option = 0; option < scores.length; option++) {
+                draw -= Math.exp(scores[option] - scores[best]);
+                if (draw < 0) { chosen = option; break; }
+            }
+        }
+        return new Prediction(chosen, frame.options().get(chosen).id(), scores[chosen] - scores[best] - Math.log(total), sha256);
     }
 
     public String sha256() { return sha256; }
