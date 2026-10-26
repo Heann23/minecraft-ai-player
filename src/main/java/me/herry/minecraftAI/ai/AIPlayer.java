@@ -583,6 +583,9 @@ public final class AIPlayer {
     public String connectedBrainId() { return brain.connectedBrainId(); }
     public java.util.concurrent.CompletableFuture<Void> prepareLearningChange() { requireMainThread(); return brain.prepareLearningChange(); }
     public void acceptLearningChange(me.herry.minecraftAI.ai.learned.PpoBridge.Status status) { requireMainThread(); brain.acceptLearningChange(status); }
+    public void acceptKnownStatus(me.herry.minecraftAI.ai.learned.PpoBridge.Status status, long receivedTick) {
+        requireMainThread(); brain.acceptKnownStatus(status, receivedTick);
+    }
 
     public String policyStatus() {
         if (!services.config().learnedControl) return "기존 규칙 정책 (명시적 teacher 모드)";

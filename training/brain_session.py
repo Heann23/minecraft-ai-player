@@ -23,6 +23,8 @@ def validate(state):
     for key in ("policyVersion", "gradientUpdates", "pendingRolloutTransitions"):
         if type(state[key]) is not int or state[key] < 0:
             raise ValueError("invalid brain session counter")
+    if "environmentSteps" in state and (type(state["environmentSteps"]) is not int or state["environmentSteps"] < 0):
+        raise ValueError("invalid brain session environment count")
     for key in ("learningEnabled", "initializationOnly"):
         if type(state[key]) is not bool:
             raise ValueError("invalid brain session flag")

@@ -69,7 +69,8 @@ public final class TrainingControl {
 
     public boolean isTransitioning() { return bridge.isTransitioning(); }
     public String brainId() { return latestStatus == null || latestStatus.metadata() == null ? null : latestStatus.metadata().brainId(); }
-    public void acceptControl(PpoBridge.Status status) { latestStatus = status; latestReceivedTick = Integer.toUnsignedLong(Bukkit.getCurrentTick()); }
+    public void acceptControl(PpoBridge.Status status) { acceptKnownStatus(status, Integer.toUnsignedLong(Bukkit.getCurrentTick())); }
+    public void acceptKnownStatus(PpoBridge.Status status, long receivedTick) { latestStatus = status; latestReceivedTick = receivedTick; }
     public String modeLabel() {
         if (bridge.isTransitioning()) return "학습 설정 전환 중";
         if (latestStatus == null || latestStatus.metadata() == null) return "두뇌 연결 대기";

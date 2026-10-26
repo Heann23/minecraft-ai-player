@@ -23,6 +23,19 @@ class BrainRuntimeTests(unittest.TestCase):
                     require_runtime_space(root / "new-output", root, artifact, artifact)
             self.assertFalse((root / "new-output").exists())
 
+    def test_idle_initial_session_resume_keeps_the_exact_checkpoint_without_a_duplicate(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            original = self.initial(root / "initial", 7)
+            resumed = PaperTrainer(root / "resumed", seed=99, rollout_size=32, maximum=64, max_bytes=8*1024*1024,
+                    start_state="resume", resume=Path(original["checkpoint"]), restore_state=original, learning_enabled=False)
+            resumed.close()
+            restored = brain_session.load(root / "resumed/runtime-session.json")
+            self.assertEqual(restored["checkpointSha256"], original["checkpointSha256"])
+            self.assertEqual(restored["checkpoint"], original["checkpoint"])
+            self.assertEqual(restored["rng"], original["rng"])
+            self.assertFalse((root / "resumed/checkpoints").exists())
+
     def initial(self, output, seed):
         trainer = PaperTrainer(output, seed=seed, rollout_size=32, maximum=64, max_bytes=16*1024*1024,
                                start_state="fresh", learning_enabled=False)

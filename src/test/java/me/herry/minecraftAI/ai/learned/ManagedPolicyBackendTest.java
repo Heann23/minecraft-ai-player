@@ -37,7 +37,9 @@ class ManagedPolicyBackendTest {
         Files.createDirectories(output);
         Files.writeString(output.resolve("run.json"), "{}");
         Files.writeString(output.resolve("runtime-session.json"), "{\"payload\":{\"schema\":\"minecraft-brain-runtime-session/v1\","
-                + "\"brainId\":\"" + identity + "\",\"learningEnabled\":false}}");
+                + "\"brainId\":\"" + identity + "\",\"learningEnabled\":false,\"startState\":\"fresh\","
+                + "\"gradientUpdates\":0,\"policyVersion\":0,\"environmentSteps\":0,\"initializationOnly\":true,"
+                + "\"checkpointSha256\":\"" + "a".repeat(64) + "\"}}");
         return new Child();
     }
 

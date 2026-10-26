@@ -85,6 +85,8 @@ public final class AIController {
     private long serverTicks;
     private long lastSaveTick;
     private long policyControlGeneration;
+    private me.herry.minecraftAI.ai.learned.PpoBridge.Status backendStatus;
+    private long backendStatusTick;
 
     /**
      * @param store AI 상태를 저장할 곳. null 이면 저장하지 않는다.
@@ -167,6 +169,7 @@ public final class AIController {
 
         AIPlayer ai = new AIPlayer(name, body, services, skin);
         if (executionIntents != null) ai.setExecutionIntentListener(running -> executionIntents.save(ai.getName(), ai.executionId(), running));
+        if (backendStatus != null) ai.acceptKnownStatus(backendStatus, backendStatusTick);
         entries.put(key(name), new Entry(ai, body));
         hub.join(new Conversation(ai));
         refreshTickList();
@@ -437,7 +440,7 @@ public final class AIController {
                     try {
                         Bukkit.getScheduler().runTask(plugin, () -> {
                             if (generation != policyControlGeneration) return;
-                            if (failure == null) for (Entry entry : entries.values()) entry.ai.acceptLearningChange(result.status());
+                            if (failure == null) acceptBackendStatus(result.status());
                             trainingBridge.endTransition();
                             if (failure != null) {
                                 plugin.getLogger().log(Level.WARNING, "Brain learning change not confirmed; no model initialization", failure);
@@ -491,7 +494,7 @@ public final class AIController {
                             if (generation != policyControlGeneration) {
                                 completed.accept(false, List.of("조회 중 두뇌 설정이 바뀌었습니다. 다시 조회하세요.")); return;
                             }
-                            if (changing && failure == null) for (Entry entry : entries.values()) entry.ai.acceptLearningChange(result.status());
+                            if (changing && failure == null) acceptBackendStatus(result.status());
                             if (changing) trainingBridge.endTransition();
                             if (failure != null) {
                                 plugin.getLogger().log(Level.WARNING, "Model command not confirmed; no automatic initialization", failure);
@@ -533,6 +536,13 @@ public final class AIController {
         if (!Bukkit.isPrimaryThread()) throw new IllegalStateException("backend lifecycle must return to server thread");
         if (trainingBridge != null) trainingBridge.setAvailable(available);
         if (!available) for (Entry entry : entries.values()) entry.ai.stopForBackendFailure();
+    }
+
+    public void acceptBackendStatus(me.herry.minecraftAI.ai.learned.PpoBridge.Status status) {
+        if (!Bukkit.isPrimaryThread()) throw new IllegalStateException("backend status must return to server thread");
+        backendStatus = java.util.Objects.requireNonNull(status);
+        backendStatusTick = Integer.toUnsignedLong(Bukkit.getCurrentTick());
+        for (Entry entry : entries.values()) entry.ai.acceptKnownStatus(status, backendStatusTick);
     }
 
     public void shutdown() {

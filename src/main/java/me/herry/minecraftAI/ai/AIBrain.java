@@ -511,6 +511,9 @@ final class AIBrain {
     void acceptLearningChange(me.herry.minecraftAI.ai.learned.PpoBridge.Status status) {
         if (trainingControl != null) trainingControl.acceptControl(status);
     }
+    void acceptKnownStatus(me.herry.minecraftAI.ai.learned.PpoBridge.Status status, long receivedTick) {
+        if (trainingControl != null) trainingControl.acceptKnownStatus(status, receivedTick);
+    }
 
     private Choice choose(Situation situation, long now) {
         if (forcedGoal != null) return new Choice(forcedGoal, Double.MAX_VALUE, DecisionTrace.Origin.FORCED);

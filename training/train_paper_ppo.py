@@ -143,6 +143,7 @@ class PaperTrainer:
             raise ValueError("session save interval must be 1..3600 seconds")
         model, parent = (ActorCritic(seed), None) if resume is None else resume_checkpoint(
                 resume, upgrade_context=upgrade_context, allow_initial=start_state != "pretrained")
+        checkpoint_rng = copy.deepcopy(model.rng.bit_generator.state)
         if restore_state is not None:
             brain_session.validate(restore_state)
             if parent is None or parent["brainId"] != restore_state["brainId"] \
@@ -172,6 +173,7 @@ class PaperTrainer:
         self.session_save_seconds = session_save_seconds
         self.last_session_save = 0.0
         self.model, self.parent = model, parent
+        self.saved_checkpoint_rng = checkpoint_rng
         self.parent_steps = 0 if parent is None else parent["environmentSteps"]
         self.parents = [] if parent is None else [*parent["lineage"], {key: parent[key] for key in ("checkpointSha256", "trainingRun", "environmentSteps", "contextUpgrade")}]
         self.rollout_size, self.maximum, self.max_bytes = rollout_size, maximum, max_bytes
@@ -190,7 +192,7 @@ class PaperTrainer:
         self.episode_raw = (output / "episode-outcomes.jsonl").open("ab")
         self.episodes = {}
         self.completed_episodes = self.death_episodes = self.episode_bytes = 0
-        if self.model.updates == 0:
+        if self.model.updates == 0 and parent is None:
             self.save_initial_state()
         write_atomic(output / "run.json", {"schema": SCHEMA, "contract": CONTRACT, "algorithm": "ppo",
                      "brainId": self.brain_id, "trainingStartState": self.training_start_state,
@@ -209,6 +211,7 @@ class PaperTrainer:
         state = {"schema": brain_session.SCHEMA,
                 "brainId": self.brain_id, "checkpoint": self.checkpoint_reference, "checkpointSha256": self.saved_checkpoint_sha,
                 "policyVersion": self.model.version, "gradientUpdates": self.model.updates, "learningEnabled": self.learning_enabled,
+                "environmentSteps": self.parent_steps + self.steps,
                 "rng": self.model.rng.bit_generator.state, "initializationOnly": self.model.updates == 0,
                 "pendingRolloutTransitions": len(self.rows), "startState": self.training_start_state, "contract": CONTRACT,
                 "contextUpgrade": self.checkpoint_upgrade, "notForAutonomousTraining": self.restricted_training_use,
@@ -308,6 +311,7 @@ class PaperTrainer:
         self.checkpoint_upgrade = False
         self.saved_model_version = 0
         self.saved_checkpoint_sha = hashlib.sha256(checkpoint_store.encoded(initial)).hexdigest()
+        self.saved_checkpoint_rng = copy.deepcopy(self.model.rng.bit_generator.state)
 
     def handle(self, packet: dict) -> dict:
         self.poll_training()
@@ -459,7 +463,7 @@ class PaperTrainer:
         try:
             self.poll_training(wait=True)
             if publish_session:
-                if self.model.updates == 0:
+                if self.model.updates == 0 and self.model.rng.bit_generator.state != self.saved_checkpoint_rng:
                     self.save_initial_state()  # Preserve the current RNG stream without claiming training.
                 self.persist_session()
         finally:

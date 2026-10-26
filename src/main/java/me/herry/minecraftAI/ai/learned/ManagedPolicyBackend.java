@@ -40,6 +40,7 @@ public final class ManagedPolicyBackend implements AutoCloseable {
         Thread thread = new Thread(task, "minecraft-ai-brain-process"); thread.setDaemon(true); return thread;
     });
     private volatile Process process;
+    private volatile PpoBridge.Status readyStatus;
     private volatile boolean closed;
     private FileChannel owner;
     private FileLock lock;
@@ -58,6 +59,7 @@ public final class ManagedPolicyBackend implements AutoCloseable {
     }
 
     public Path channel() { return channel; }
+    public PpoBridge.Status readyStatus() { return readyStatus; }
 
     public synchronized CompletableFuture<String> start() {
         if (closed) return CompletableFuture.failedFuture(new IllegalStateException("brain manager is closed"));
@@ -134,6 +136,12 @@ public final class ManagedPolicyBackend implements AutoCloseable {
                         || expectedBrain != null && !expectedBrain.equals(brain)
                         || !settings.allowTraining() && state.get("learningEnabled").getAsBoolean())
                     throw new IOException("managed brain restoration mismatch; no new model selected");
+                var metadata = new PpoBridge.Metadata(brain, state.get("startState").getAsString(),
+                        state.get("gradientUpdates").getAsLong(), state.get("learningEnabled").getAsBoolean(), "saved",
+                        state.get("checkpointSha256").getAsString(), state.get("initializationOnly").getAsBoolean());
+                long version = state.get("policyVersion").getAsLong(), steps = state.get("environmentSteps").getAsLong();
+                if (version < 0 || steps < 0) throw new IOException("invalid restored policy counters");
+                readyStatus = new PpoBridge.Status(version, steps, metadata);
                 JsonObject payload = new JsonObject();
                 payload.addProperty("schema", SCHEMA); payload.addProperty("startupBrainId", brain);
                 payload.addProperty("session", run + "/runtime-session.json");

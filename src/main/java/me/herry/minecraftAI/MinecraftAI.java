@@ -77,6 +77,7 @@ public final class MinecraftAI extends JavaPlugin {
                                 "Managed brain unavailable; saved players retained, no new model or Teacher fallback", failure);
                         return;
                     }
+                    controller.acceptBackendStatus(backend.readyStatus());
                     controller.setBackendAvailable(true);
                     getLogger().info("Managed brain ready: " + brain);
                     restoreSavedPlayers();
