@@ -129,7 +129,7 @@ public final class PolicyCandidates {
             add(ai, found, "look:" + yaw, new PrimitiveCommand.LookAt(target), null, null, -Math.sin(angle) * 4, 0, Math.cos(angle) * 4, "", true);
         }
         add(ai, found, "jump", new PrimitiveCommand.Jump(), null, null, 0, 0, 0, "", true);
-        waterInputs(ai, found);
+        boolean waterChoicesComplete = waterInputs(ai, found);
         equipment(ai, found);
         List<BlockPoint> targets = new ArrayList<>();
         var feet = ai.getPosition();
@@ -203,11 +203,12 @@ public final class PolicyCandidates {
         var candidates = selectFair(expanded, active == null ? "" : active.id());
         return new Capture(new PolicyFrame(ai.getWorldId(), Integer.toUnsignedLong(Bukkit.getCurrentTick()), body,
                 candidates.stream().map(Candidate::encoded).toList(), inspected.complete() && !ai.getWorkBudget().isExhausted()
-                && recipeCursor >= Material.values().length && expanded.size() <= PolicyFrame.MAX_OPTIONS), candidates, survival, observed.stock());
+                && recipeCursor >= Material.values().length && expanded.size() <= PolicyFrame.MAX_OPTIONS && waterChoicesComplete), candidates, survival, observed.stock());
     }
 
-    private void waterInputs(AIPlayer ai, Map<String, Candidate> found) {
-        if (!ai.getPlayer().isInWater() || ai.getWorkBudget().isExhausted()) return;
+    private boolean waterInputs(AIPlayer ai, Map<String, Candidate> found) {
+        if (!ai.getPlayer().isInWater()) return true;
+        if (ai.getWorkBudget().isExhausted()) return false;
         for (var input : WaterInput.choices(ai.getWorldId(), ai.getPlayer().getLocation().getYaw(), waterCursor, 24)) {
             if (ai.getWorkBudget().isExhausted()) break;
             double[] features = new double[PolicyFrame.ACTION_SIZE];
@@ -220,6 +221,7 @@ public final class PolicyCandidates {
             found.putIfAbsent(id, new Candidate(id, null, null, null, new PolicyFrame.Option(id, features), 0, id, null, input));
         }
         waterCursor = (waterCursor + 1) % WaterInput.CHOICES;
+        return false; // A rotating subset never claims that unoffered water inputs do not exist.
     }
 
     private void equipment(AIPlayer ai, Map<String, Candidate> found) {
