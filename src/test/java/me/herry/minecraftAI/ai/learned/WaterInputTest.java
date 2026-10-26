@@ -35,8 +35,10 @@ class WaterInputTest {
     }
     @Test void commitmentAndFamilySelectionRetainTheChosenKeysWithoutALegacySwimCommand() {
         var input = new WaterInput(UUID.randomUUID(), 0, -60, 1, 1, false);
-        var candidate = new PolicyCandidates.Candidate(input.identity(), null, null, null,
-                new PolicyFrame.Option(input.identity(), new double[PolicyFrame.ACTION_SIZE]), 0, input.identity(), null, input).committed(80);
+        var base = new PolicyCandidates.Candidate(input.identity(), null, null, null,
+                new PolicyFrame.Option(input.identity(), new double[PolicyFrame.ACTION_SIZE]), 0, input.identity(), null, input);
+        var candidate = base.committed(80);
+        assertNotEquals(candidate.inputId(), base.committed(5).inputId());
         assertEquals(input, candidate.water());
         assertEquals(PrimitiveType.SWIM, candidate.type());
         assertEquals(List.of(candidate), PolicyCandidates.selectFair(List.of(candidate), ""));

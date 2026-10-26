@@ -40,7 +40,9 @@ public final class PolicyCandidates {
         public Candidate committed(int ticks) {
             double[] features = encoded.features(); features[30] = ticks / 600.0;
             String choice = inputId + "@" + ticks;
-            return new Candidate(choice, command, recipe, consumable, new PolicyFrame.Option(choice, features), ticks, inputId, equipment, water);
+            // Changing a finite water hold must replace the old Action rather than keep its old deadline.
+            return new Candidate(choice, command, recipe, consumable, new PolicyFrame.Option(choice, features), ticks,
+                    water == null ? inputId : choice, equipment, water);
         }
         public Action create(AIPlayer ai) {
             if (water != null) return new WaterInputAction(water, commitmentTicks);
