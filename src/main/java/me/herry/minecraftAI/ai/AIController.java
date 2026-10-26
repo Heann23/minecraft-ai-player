@@ -524,6 +524,7 @@ public final class AIController {
 
     public void shutdown() {
         policyControlGeneration++;
+        try {
         saveAll(false, "shutdown");
         List<Entry> all = new ArrayList<>(entries.values());
         entries.clear();
@@ -537,7 +538,9 @@ public final class AIController {
         // 남은 기록을 다 쓰고 파일을 닫는다. 오래 걸리면 기다리지 않는다 (서버 종료를 붙잡지 않는다).
         if (experience != null) experience.close();
         if (trainingBridge != null) trainingBridge.close();
-        if (executionIntents != null) executionIntents.close();
+        } finally {
+            if (executionIntents != null) executionIntents.close();
+        }
     }
 
     private void respawn(Entry entry) {

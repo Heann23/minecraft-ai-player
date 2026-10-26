@@ -89,6 +89,8 @@ def validate_plan_extension(parent: dict, current: dict):
 
 def validate_options(args):
     plan = read_plan(args.plan)
+    if getattr(args, "player_persistence", False) and not getattr(args, "managed_backend", False):
+        raise ValueError("player persistence acceptance requires the plugin-owned backend")
     if getattr(args, "managed_backend", False) and (args.mode != "train" or not getattr(args, "catalog", None)
             or not getattr(args, "inference_only", False) or args.resume is not None or getattr(args, "save_model_at_end", None)):
         raise ValueError("managed backend acceptance requires a named inference-only model and no external resume/final snapshot")
@@ -218,6 +220,8 @@ def run(args):
     config = (source / "src/main/resources/config.yml").read_text(encoding="utf-8")
     # Disable persistence and chat in the new experiment only. No old AI state or credentials are loaded.
     config = config.replace("enabled: true", "enabled: false")
+    if args.player_persistence:
+        config = config.replace("persistence:\n  enabled: false", "persistence:\n  enabled: true")
     if args.managed_backend:
         from model_catalog import ModelCatalog
         private_catalog = ModelCatalog(plugin / "brain-catalog")
@@ -250,6 +254,7 @@ def run(args):
                 "teacherLabels": False, "grantedItems": False, "teleportDuringEpisode": False,
                 "allWorldAutonomyProven": False}
     manifest["backendOwner"] = "plugin" if args.managed_backend else "external-lab"
+    manifest["playerPersistence"] = args.player_persistence
     if args.save_model_at_end:
         manifest.update({"requestedFinalModelSave": args.save_model_at_end, "finalModelSaveAcknowledged": False,
                          "finalModelSaveVerified": False})
@@ -471,6 +476,7 @@ def main():
     parser.add_argument("--model-catalog", type=Path, help="explicit private catalog for in-game list/info/save")
     parser.add_argument("--save-model-at-end", help="save the normal live brain after gameplay, await acknowledgement and verify its reference")
     parser.add_argument("--managed-backend", action="store_true", help="acceptance of plugin-owned inference backend; never starts a second external trainer")
+    parser.add_argument("--player-persistence", action="store_true", help="enable player persistence in the new isolated managed-backend acceptance server")
     parser.add_argument("--upgrade-context", action="store_true", help="explicitly expand v1 trained context when resuming PPO")
     parser.add_argument("--start-state", choices=("fresh", "pretrained", "resume"))
     parser.add_argument("--inference-only", action="store_true", help="shared backend with learning disabled, for startup/mode scenarios")
