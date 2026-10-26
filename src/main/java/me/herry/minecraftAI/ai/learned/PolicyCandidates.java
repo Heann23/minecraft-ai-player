@@ -116,7 +116,7 @@ public final class PolicyCandidates {
         Map<String, Candidate> found = new LinkedHashMap<>();
         // Waiting is always a legal input choice, without awarding it any hand-written priority.
         add(ai, found, "wait:5", new PrimitiveCommand.Wait(5), null, null, 0, 0, 0, "", false);
-        if (active != null) found.putIfAbsent(active.id(), active);
+        if (active != null && (active.water() == null || WaterDomain.observed(body))) found.putIfAbsent(active.id(), active);
         for (var delta : movementOffsets(movementCursor)) {
             if (ai.getWorkBudget().isExhausted()) break;
             BlockPoint target = ai.getPosition().offset(delta.x(), delta.y(), delta.z());
@@ -131,7 +131,7 @@ public final class PolicyCandidates {
             add(ai, found, "look:" + yaw, new PrimitiveCommand.LookAt(target), null, null, -Math.sin(angle) * 4, 0, Math.cos(angle) * 4, "", true);
         }
         add(ai, found, "jump", new PrimitiveCommand.Jump(), null, null, 0, 0, 0, "", true);
-        boolean waterChoicesComplete = waterInputs(ai, found);
+        boolean waterChoicesComplete = waterInputs(ai, found, body);
         equipment(ai, found);
         List<BlockPoint> targets = new ArrayList<>();
         var feet = ai.getPosition();
@@ -208,8 +208,8 @@ public final class PolicyCandidates {
                 && recipeCursor >= Material.values().length && expanded.size() <= PolicyFrame.MAX_OPTIONS && waterChoicesComplete), candidates, survival, observed.stock());
     }
 
-    private boolean waterInputs(AIPlayer ai, Map<String, Candidate> found) {
-        if (!ai.getPlayer().isInWater()) return true;
+    private boolean waterInputs(AIPlayer ai, Map<String, Candidate> found, double[] observed) {
+        if (!WaterDomain.observed(observed)) return WaterDomain.knownDry(observed);
         if (ai.getWorkBudget().isExhausted()) return false;
         for (var input : WaterInput.choices(ai.getWorldId(), ai.getPlayer().getLocation().getYaw(), waterCursor, 24)) {
             if (ai.getWorkBudget().isExhausted()) break;

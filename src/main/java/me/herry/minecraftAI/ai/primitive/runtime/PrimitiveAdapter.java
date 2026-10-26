@@ -211,6 +211,14 @@ public final class PrimitiveAdapter {
         return new PrimitiveContext(state, blocks, List.of(), complete);
     }
 
+    /** One bounded current cell, without capturing the entire inventory for a held input tick. */
+    public static PrimitiveContext.BlockView inspectLocalBlock(AIPlayer ai, BlockPoint point) {
+        requireMainThread();
+        Objects.requireNonNull(point, "point");
+        if (ai.getWorkBudget().isExhausted()) return new PrimitiveContext.BlockView(point, "UNKNOWN", false, false, "REQUESTED");
+        return inspectBlock(ai, point, "REQUESTED");
+    }
+
     private static PrimitiveContext.BlockView inspectBlock(AIPlayer ai, BlockPoint point, String source) {
         World world = ai.getPlayer().getWorld();
         if (!checkBlock(ai, point, LOCAL_RANGE).isEmpty()) {

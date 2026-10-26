@@ -24,7 +24,11 @@ final class WaterInputAction extends AbstractAction implements PrimitiveAction {
         if (!ai.getBody().isUsable() || !input.world().equals(ai.getWorldId())) { fail("body/world changed"); return; }
         if (getElapsed() > ticks) { succeed(); return; }
         var player = ai.getPlayer();
-        if (!player.isInWater()) { fail("left water"); return; }
+        var domain = WaterDomain.current(ai);
+        if (domain != WaterDomain.Check.AVAILABLE) {
+            fail(domain == WaterDomain.Check.UNKNOWN ? "water context unconfirmed" : "outside observed water area");
+            return;
+        }
         var eye = player.getEyeLocation(); var heading = input.heading();
         ai.getBody().lookAt(eye.getX() + heading.x() * 4, eye.getY() + heading.y() * 4, eye.getZ() + heading.z() * 4);
         ai.getBody().inputMove(input.forward(), 0.0F);
