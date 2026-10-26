@@ -44,6 +44,7 @@ public final class PolicyCandidates {
     private final Set<String> recipeIds = new HashSet<>();
     private int recipeCursor;
     private long recipeRevision = Long.MIN_VALUE;
+    private int miningCursor;
 
     public record Observed(me.herry.minecraftAI.ai.primitive.control.PrimitiveSnapshot snapshot,
                            SurvivalObservation.Body body, Map<String, Integer> stock, double[] features) {
@@ -110,21 +111,22 @@ public final class PolicyCandidates {
         var ray = rayLoaded ? p.getTargetBlockExact(4) : null;
         if (ray != null) targets.add(Positions.of(ray));
         // Inspect only local visible cells. Unloaded/hidden cells never become material observations.
-        for (int dx = -2; dx <= 2 && targets.size() < 24; dx++) for (int dz = -2; dz <= 2 && targets.size() < 24; dz++)
-            for (int dy : new int[]{0, 1, 2}) if (targets.size() < 24) targets.add(ai.getPosition().offset(dx, dy, dz));
+        targets.addAll(nearbyTargets(feet));
         var inspected = PrimitiveAdapter.inspect(ai, targets.stream().distinct().limit(24).toList());
-        int mined = 0;
-        for (var slot : state.inventory()) {
-            if (slot.slot() >= 36 || mined >= 32) continue;
+        var tools = miningSlots(state.inventory());
+        var blocks = inspected.blocks().stream().filter(block -> block.visible() && block.loaded()).toList();
+        int mined = 0, attempted = 0, pairs = tools.size() * blocks.size();
+        while (pairs > 0 && attempted < Math.min(pairs, 64) && mined < 32 && !ai.getWorkBudget().isExhausted()) {
+            int pair = Math.floorMod(miningCursor + attempted++, pairs);
+            var slot = tools.get(pair % tools.size());
+            var block = blocks.get(pair / tools.size());
             ToolChoice tool = new ToolChoice(slot.slot(), slot.material(), slot.enchantments());
-            for (var block : inspected.blocks()) {
-                if (!block.visible() || !block.loaded() || mined >= 32) continue;
-                var delta = block.point().offset(-ai.getPosition().x(), -ai.getPosition().y(), -ai.getPosition().z());
-                String id = "mine:" + block.point().encode() + ":" + slot.slot();
-                if (add(ai, found, id, new PrimitiveCommand.BreakBlock(block.point(), tool), null, null,
-                        delta.x(), delta.y(), delta.z(), block.material() + ":" + slot.material(), true)) mined++;
-            }
+            var delta = block.point().offset(-ai.getPosition().x(), -ai.getPosition().y(), -ai.getPosition().z());
+            String id = "mine:" + block.point().encode() + ":" + slot.slot();
+            if (add(ai, found, id, new PrimitiveCommand.BreakBlock(block.point(), tool), null, null,
+                    delta.x(), delta.y(), delta.z(), block.material() + ":" + slot.material(), true)) mined++;
         }
+        miningCursor = pairs == 0 ? 0 : Math.floorMod(miningCursor + attempted, pairs);
         int equipped = 0, placed = 0;
         for (var slot : state.inventory()) {
             if (slot.slot() >= 36 || slot.amount() == 0 || ai.getWorkBudget().isExhausted()) continue;
@@ -188,6 +190,31 @@ public final class PolicyCandidates {
             if (!target.isItem() || target.isAir()) continue;
             for (var option : ai.getCrafting().recipeOptions(target)) if (option.countPlannable() && !option.smelting() && recipeIds.add(option.id())) recipes.add(option);
         }
+    }
+
+    static List<BlockPoint> nearbyTargets(BlockPoint feet) {
+        var points = new ArrayList<BlockPoint>();
+        for (int dx = -2; dx <= 2; dx++) for (int dz = -2; dz <= 2; dz++)
+            for (int dy = 0; dy <= 2; dy++) points.add(feet.offset(dx, dy, dz));
+        // Geometric proximity, never material desirability; the old prefix inspected almost only negative X.
+        points.sort(Comparator.comparingInt(point -> {
+            int dx = point.x() - feet.x(), dy = point.y() - feet.y() - 1, dz = point.z() - feet.z();
+            return dx * dx + dy * dy + dz * dz;
+        }));
+        return List.copyOf(points);
+    }
+
+    static List<me.herry.minecraftAI.ai.primitive.control.PrimitiveSnapshot.ItemSlot> miningSlots(
+            List<me.herry.minecraftAI.ai.primitive.control.PrimitiveSnapshot.ItemSlot> inventory) {
+        var slots = new ArrayList<me.herry.minecraftAI.ai.primitive.control.PrimitiveSnapshot.ItemSlot>();
+        boolean empty = false;
+        for (var slot : inventory) {
+            if (slot.slot() >= 36) continue;
+            if (slot.amount() == 0) { if (empty) continue; empty = true; }
+            // Occupied slots retain their exact component identity. No best-tool preference or material merging.
+            slots.add(slot);
+        }
+        return List.copyOf(slots);
     }
 
     private boolean add(AIPlayer ai, Map<String, Candidate> found, String id, PrimitiveCommand command, RecipeOption recipe,

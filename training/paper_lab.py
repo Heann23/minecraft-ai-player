@@ -115,6 +115,11 @@ def summarize_game_log(path: Path):
 
 def run(args):
     plan = validate_options(args)
+    source = Path(__file__).resolve().parents[1]
+    actual_commit = subprocess.check_output(["git", "-c", "safe.directory=" + source.as_posix(),
+                                              "rev-parse", "HEAD"], cwd=source, text=True).strip()
+    if actual_commit != args.source_commit:
+        raise ValueError("source commit does not match this tool checkout")
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=False)
     shutil.copy2(args.plan, output / "seed-plan.json")
@@ -129,7 +134,6 @@ def run(args):
     plugin = server / "plugins/MinecraftAI"
     plugin.mkdir(parents=True)
     shutil.copy2(args.plugin, plugin.parent / "MinecraftAI.jar")
-    source = Path(__file__).resolve().parents[1]
     config = (source / "src/main/resources/config.yml").read_text(encoding="utf-8")
     # Disable persistence and chat in the new experiment only. No old AI state or credentials are loaded.
     config = config.replace("enabled: true", "enabled: false")

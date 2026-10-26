@@ -97,6 +97,22 @@ class PolicyWeightsTest {
                 choices.stream().map(PolicyCandidates.Candidate::encoded).toList(), false));
     }
 
+    @Test void emptyHandsCannotCrowdOutOccupiedSlotsAndNearbyInspectionCoversAllDirections() {
+        var slots = new java.util.ArrayList<me.herry.minecraftAI.ai.primitive.control.PrimitiveSnapshot.ItemSlot>();
+        for (int i = 0; i < 34; i++) slots.add(new me.herry.minecraftAI.ai.primitive.control.PrimitiveSnapshot.ItemSlot(
+                i, "AIR", 0, 0, 0, java.util.Map.of()));
+        for (int i : new int[]{34, 35}) slots.add(new me.herry.minecraftAI.ai.primitive.control.PrimitiveSnapshot.ItemSlot(
+                i, "IRON_PICKAXE", 1, 0, 250, java.util.Map.of()));
+        var tools = PolicyCandidates.miningSlots(slots);
+        assertEquals(List.of(0, 34, 35), tools.stream().map(slot -> slot.slot()).toList());
+        var feet = new me.herry.minecraftAI.ai.util.BlockPoint(10, 70, -15);
+        var local = PolicyCandidates.nearbyTargets(feet).stream().limit(23).toList();
+        assertTrue(local.stream().anyMatch(p -> p.x() < feet.x()));
+        assertTrue(local.stream().anyMatch(p -> p.x() > feet.x()));
+        assertTrue(local.stream().anyMatch(p -> p.z() < feet.z()));
+        assertTrue(local.stream().anyMatch(p -> p.z() > feet.z()));
+    }
+
     @Test void largeInventoriesCannotHideAllCraftingChoicesAtTheCandidateLimit() {
         var all = new java.util.ArrayList<PolicyCandidates.Candidate>();
         for (int i = 0; i < 150; i++) all.add(new PolicyCandidates.Candidate("move:" + i,
