@@ -194,7 +194,8 @@ def run(args):
             if args.mode == "train":
                 command = [sys.executable, "-u", str(source / "training/train_paper_ppo.py"), "--channel",
                     str(plugin / "training-session/channel"), "--output", str(output / "training"),
-                    "--max-transitions", str(args.steps), "--rollout-size", "32", "--seed", str(args.policy_seed)]
+                    "--max-transitions", str(args.steps), "--rollout-size", "32", "--seed", str(args.policy_seed),
+                    "--stop-file", str(output / "trainer.stop.request")]
                 if args.resume:
                     command.extend(["--resume", str(args.resume.resolve())])
                 if args.upgrade_context:
@@ -224,6 +225,8 @@ def run(args):
             reason, next_report = "server-exited", started
             while process.poll() is None:
                 now = time.monotonic()
+                if (output / "stop.request").is_file():
+                    reason = "operator-stop-request"; break
                 if gameplay_start is None and now - started >= 180:
                     reason = "startup-time-budget"; break
                 if gameplay_start is not None and now - gameplay_start >= args.seconds:
@@ -263,8 +266,12 @@ def run(args):
                         process.terminate(); process.wait(timeout=20)
                         reason += ":forced-server-termination"
             if trainer and trainer.poll() is None:
-                trainer.terminate(); trainer.wait(timeout=20)
-                reason += ":trainer-terminated"
+                (output / "trainer.stop.request").touch(exist_ok=True)
+                try:
+                    trainer.wait(timeout=20)
+                except subprocess.TimeoutExpired:
+                    trainer.terminate(); trainer.wait(timeout=20)
+                    reason += ":trainer-terminated"
             if reader:
                 reader.join(timeout=5)
             manifest.update({"stopReason": reason, "serverExitCode": process.returncode if process else None,

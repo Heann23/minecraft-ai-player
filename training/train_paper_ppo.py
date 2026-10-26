@@ -229,10 +229,12 @@ class PaperTrainer:
             self.discarded_raw.close()
 
 
-def serve(channel: Path, trainer: PaperTrainer):
+def serve(channel: Path, trainer: PaperTrainer, stop_file: Path | None = None):
     channel.mkdir(parents=True, exist_ok=True)
     try:
         while trainer.steps < trainer.maximum or trainer.training is not None:
+            if stop_file is not None and stop_file.is_file():
+                break
             trainer.poll_training()
             for request in sorted(channel.glob("*.request.json")):
                 try:
@@ -268,12 +270,13 @@ def main():
     parser.add_argument("--seed", type=int, default=777)
     parser.add_argument("--resume", type=Path, help="verified optimizer checkpoint; never a Teacher/BC or deployment actor")
     parser.add_argument("--upgrade-context", action="store_true", help="explicit v1->v2 zero-influence context expansion while resuming")
+    parser.add_argument("--stop-file", type=Path, help="explicit cooperative shutdown request; incomplete buffers stay raw")
     args = parser.parse_args()
     trainer = PaperTrainer(args.output, seed=args.seed, rollout_size=args.rollout_size,
                            maximum=args.max_transitions, max_bytes=args.max_megabytes * 1024 * 1024,
                            resume=args.resume, upgrade_context=args.upgrade_context)
     print("Waiting for real Paper transitions. No Teacher or synthetic game environment. Run:", trainer.run, flush=True)
-    serve(args.channel, trainer)
+    serve(args.channel, trainer, args.stop_file)
 
 
 if __name__ == "__main__":

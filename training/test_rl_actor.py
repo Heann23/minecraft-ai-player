@@ -11,7 +11,7 @@ from unittest import mock
 import numpy as np
 
 from rl_actor import ActorCritic, inputs, generalized_advantages, STATE_SIZE, ACTION_SIZE
-from train_paper_ppo import PaperTrainer, SCHEMA, resume_checkpoint
+from train_paper_ppo import PaperTrainer, SCHEMA, resume_checkpoint, serve
 
 
 def frame():
@@ -145,6 +145,18 @@ class ActorTests(unittest.TestCase):
 
 
 class BridgeProtocolTests(unittest.TestCase):
+    def test_explicit_stop_closes_the_trainer_without_inventing_an_update_from_an_incomplete_buffer(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            trainer = PaperTrainer(base / "run", seed=7, rollout_size=32, maximum=32, max_bytes=16*1024*1024)
+            stopped = base / "stop.request"
+            stopped.touch()
+            serve(base / "channel", trainer, stopped)
+            self.assertTrue(trainer.raw.closed)
+            self.assertTrue(trainer.discarded_raw.closed)
+            self.assertIsNone(trainer.training)
+            self.assertFalse((trainer.output / "minecraft-rl-actor.json").exists())
+
     def test_off_policy_death_is_excluded_from_ppo_but_preserved_with_its_actual_outcome(self):
         with tempfile.TemporaryDirectory() as temporary:
             trainer = PaperTrainer(Path(temporary) / "run", seed=7, rollout_size=32, maximum=32, max_bytes=16*1024*1024)
