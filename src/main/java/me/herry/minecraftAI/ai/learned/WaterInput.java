@@ -17,8 +17,8 @@ record WaterInput(UUID world, double yaw, double pitch, int forward, int vertica
         double y = Math.toRadians(yaw), p = Math.toRadians(pitch);
         return new PrimitiveTarget.Point(-Math.sin(y) * Math.cos(p), -Math.sin(p), Math.cos(y) * Math.cos(p));
     }
-    boolean canSprint(int food, boolean blind, boolean alreadySprinting) {
-        return sprint && forward > 0 && food > 6 && (!blind || alreadySprinting);
+    boolean canSprint(int food, boolean blind, boolean alreadySprinting, boolean inWater) {
+        return sprint && forward > 0 && food > 6 && (!blind || alreadySprinting) && (vertical >= 0 || inWater);
     }
     String identity() { return "water:" + yaw + ":" + pitch + ":" + forward + ":" + vertical + ":" + sprint; }
 

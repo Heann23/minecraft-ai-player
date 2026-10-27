@@ -27,9 +27,11 @@ class WaterInputTest {
     }
     @Test void hungerRestrictsSprintRatherThanChoosingAscentOrAbortingWaterInput() {
         var input = new WaterInput(UUID.randomUUID(), 0, 60, 1, -1, true);
-        assertFalse(input.canSprint(6, false, false));
-        assertTrue(input.canSprint(7, false, false));
-        assertFalse(input.canSprint(20, true, false));
+        assertFalse(input.canSprint(6, false, false, true));
+        assertTrue(input.canSprint(7, false, false, true));
+        assertFalse(input.canSprint(20, true, false, true));
+        assertFalse(input.canSprint(20, false, true, false));
+        assertTrue(new WaterInput(input.world(), 0, 0, 1, 1, true).canSprint(20, false, false, false));
         assertEquals(-1, input.vertical());
         assertEquals(60, input.pitch());
     }

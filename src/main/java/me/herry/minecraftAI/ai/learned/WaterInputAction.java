@@ -38,7 +38,8 @@ final class WaterInputAction extends AbstractAction implements PrimitiveAction {
         ai.getBody().inputJump(input.vertical() > 0);
         ai.getBody().inputSneak(input.vertical() < 0);
         // FakePlayer applies sprint flags directly: retain normal sprint eligibility, not a tactical food preference.
-        ai.getBody().inputSprint(input.canSprint(player.getFoodLevel(), player.hasPotionEffect(PotionEffectType.BLINDNESS), player.isSprinting()));
+        ai.getBody().inputSprint(input.canSprint(player.getFoodLevel(), player.hasPotionEffect(PotionEffectType.BLINDNESS),
+                player.isSprinting(), player.isInWater()));
         heldTicks++;
         boolean inWater = player.isInWater();
         if (!phaseObserved || inWater != lastInWater) {
