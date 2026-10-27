@@ -16,7 +16,7 @@ final class MotionPolicyContext {
         encode(state, player.getLocation().getYaw(), velocity.getX(), velocity.getZ(),
                 new boolean[]{player.isSwimming(), handle.isEyeInFluid(FluidTags.WATER), player.isSprinting(),
                         player.isSneaking(), player.isGliding(), handle.onClimbable(), player.isInsideVehicle(),
-                        player.getPose() == Pose.CROUCHING},
+                        player.getPose() == Pose.SNEAKING},
                 new double[]{player.getWidth(), player.getHeight(), player.getEyeHeight()}, body.exhaustion());
     }
 
