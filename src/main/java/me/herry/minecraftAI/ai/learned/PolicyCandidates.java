@@ -21,7 +21,7 @@ import java.util.*;
 /** Enumerates supported concrete inputs. No Goal score, utility, progression order, best-food/tool or Teacher selection. */
 public final class PolicyCandidates {
     public record Candidate(String id, PrimitiveCommand command, RecipeOption recipe, SurvivalObservation.Item consumable,
-                            PolicyFrame.Option encoded, int commitmentTicks, String inputId, ExactEquipment.Choice equipment, WaterInput water) {
+                            PolicyFrame.Option encoded, int commitmentTicks, String inputId, ExactEquipment.Choice equipment, MovementInput movement) {
         public Candidate(String id, PrimitiveCommand command, RecipeOption recipe, SurvivalObservation.Item consumable,
                          PolicyFrame.Option encoded, int commitmentTicks, String inputId, ExactEquipment.Choice equipment) {
             this(id, command, recipe, consumable, encoded, commitmentTicks, inputId, equipment, null);
@@ -34,18 +34,18 @@ public final class PolicyCandidates {
             this(id, command, recipe, consumable, encoded, commitmentTicks, inputId, null);
         }
         public PrimitiveType type() {
-            return water != null ? PrimitiveType.SWIM : equipment != null ? PrimitiveType.EQUIP_ITEM : recipe != null ? PrimitiveType.CRAFT_ITEM
+            return movement != null ? PrimitiveType.MOVE_INPUT : equipment != null ? PrimitiveType.EQUIP_ITEM : recipe != null ? PrimitiveType.CRAFT_ITEM
                     : consumable != null ? PrimitiveType.USE_ITEM : command.type();
         }
         public Candidate committed(int ticks) {
             double[] features = encoded.features(); features[30] = ticks / 600.0;
             String choice = inputId + "@" + ticks;
-            // Changing a finite water hold must replace the old Action rather than keep its old deadline.
+            // Changing a finite key hold must replace the old Action rather than keep its old deadline.
             return new Candidate(choice, command, recipe, consumable, new PolicyFrame.Option(choice, features), ticks,
-                    water == null ? inputId : choice, equipment, water);
+                    movement == null ? inputId : choice, equipment, movement);
         }
         public Action create(AIPlayer ai) {
-            if (water != null) return new WaterInputAction(water, commitmentTicks);
+            if (movement != null) return new MovementInputAction(movement, commitmentTicks);
             if (equipment != null) return new EquipExactAction(equipment);
             if (recipe != null) return new CraftItemAction(Material.valueOf(recipe.result()), recipe.resultAmount(), recipe.id());
             if (consumable != null) return new ConsumeExactAction(ai.getWorldId(), consumable);
@@ -63,7 +63,7 @@ public final class PolicyCandidates {
     private int miningCursor;
     private int equipmentCursor;
     private int movementCursor;
-    private int waterCursor;
+    private int movementInputCursor;
     private static final List<BlockPoint> MOVE_OFFSETS = movementOffsets();
 
     public record Observed(me.herry.minecraftAI.ai.primitive.control.PrimitiveSnapshot snapshot,
@@ -116,7 +116,8 @@ public final class PolicyCandidates {
         Map<String, Candidate> found = new LinkedHashMap<>();
         // Waiting is always a legal input choice, without awarding it any hand-written priority.
         add(ai, found, "wait:5", new PrimitiveCommand.Wait(5), null, null, 0, 0, 0, "", false);
-        if (active != null && (active.water() == null || WaterDomain.observed(body))) found.putIfAbsent(active.id(), active);
+        if (active != null) found.putIfAbsent(active.id(), active);
+        boolean movementChoicesComplete = movementInputs(ai, found);
         for (var delta : movementOffsets(movementCursor)) {
             if (ai.getWorkBudget().isExhausted()) break;
             BlockPoint target = ai.getPosition().offset(delta.x(), delta.y(), delta.z());
@@ -131,7 +132,6 @@ public final class PolicyCandidates {
             add(ai, found, "look:" + yaw, new PrimitiveCommand.LookAt(target), null, null, -Math.sin(angle) * 4, 0, Math.cos(angle) * 4, "", true);
         }
         add(ai, found, "jump", new PrimitiveCommand.Jump(), null, null, 0, 0, 0, "", true);
-        boolean waterChoicesComplete = waterInputs(ai, found, body);
         equipment(ai, found);
         List<BlockPoint> targets = new ArrayList<>();
         var feet = ai.getPosition();
@@ -198,32 +198,32 @@ public final class PolicyCandidates {
             if (candidate.commitmentTicks() > 0) {
                 double[] retained = candidate.encoded().features(); retained[55] = 1;
                 expanded.add(new Candidate(candidate.id(), candidate.command(), candidate.recipe(), candidate.consumable(),
-                        new PolicyFrame.Option(candidate.id(), retained), candidate.commitmentTicks(), candidate.inputId(), candidate.equipment(), candidate.water()));
+                        new PolicyFrame.Option(candidate.id(), retained), candidate.commitmentTicks(), candidate.inputId(), candidate.equipment(), candidate.movement()));
             } else if (candidate.equipment() != null) expanded.add(candidate.committed(5));
             else for (int ticks : new int[]{5, 20, 80, 600}) expanded.add(candidate.committed(ticks));
         }
         var candidates = selectFair(expanded, active == null ? "" : active.id());
         return new Capture(new PolicyFrame(ai.getWorldId(), Integer.toUnsignedLong(Bukkit.getCurrentTick()), body,
                 candidates.stream().map(Candidate::encoded).toList(), inspected.complete() && !ai.getWorkBudget().isExhausted()
-                && recipeCursor >= Material.values().length && expanded.size() <= PolicyFrame.MAX_OPTIONS && waterChoicesComplete), candidates, survival, observed.stock());
+                && recipeCursor >= Material.values().length && expanded.size() <= PolicyFrame.MAX_OPTIONS && movementChoicesComplete), candidates, survival, observed.stock());
     }
 
-    private boolean waterInputs(AIPlayer ai, Map<String, Candidate> found, double[] observed) {
-        if (!WaterDomain.observed(observed)) return WaterDomain.knownDry(observed);
+    private boolean movementInputs(AIPlayer ai, Map<String, Candidate> found) {
         if (ai.getWorkBudget().isExhausted()) return false;
-        for (var input : WaterInput.choices(ai.getWorldId(), ai.getPlayer().getLocation().getYaw(), waterCursor, 24)) {
+        for (var input : MovementInput.choices(ai.getWorldId(), ai.getPlayer().getLocation().getYaw(), movementInputCursor, 24)) {
             if (ai.getWorkBudget().isExhausted()) break;
             double[] features = new double[PolicyFrame.ACTION_SIZE];
-            features[PrimitiveType.SWIM.ordinal()] = 1;
+            features[PrimitiveType.MOVE_INPUT.ordinal()] = 1;
             var direction = input.heading();
             features[24] = direction.x(); features[25] = direction.y(); features[26] = direction.z();
-            features[27] = input.forward(); features[28] = input.vertical() > 0 ? 1 : 0;
-            features[29] = input.vertical() < 0 ? 1 : 0; features[57] = input.sprint() ? 1 : 0; features[63] = 1;
+            features[27] = input.forward(); features[28] = input.jump() ? 1 : 0;
+            features[29] = input.sneak() ? 1 : 0; features[56] = input.strafe();
+            features[57] = input.sprint() ? 1 : 0; features[63] = 1;
             String id = input.identity();
             found.putIfAbsent(id, new Candidate(id, null, null, null, new PolicyFrame.Option(id, features), 0, id, null, input));
         }
-        waterCursor = (waterCursor + 1) % WaterInput.CHOICES;
-        return false; // A rotating subset never claims that unoffered water inputs do not exist.
+        movementInputCursor = (movementInputCursor + 1) % MovementInput.CHOICES;
+        return false; // A rotating subset never claims that unoffered key inputs do not exist.
     }
 
     private void equipment(AIPlayer ai, Map<String, Candidate> found) {
