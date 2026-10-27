@@ -83,7 +83,7 @@ def migrate_context_session(source: Path, destination: Path, *, name=None):
     if destination.exists() or destination.is_symlink():
         raise ValueError("migration requires a new output; existing session preserved")
     state = brain_session.load(source)
-    if state.get("contract") not in {"minecraft-primitive-candidates/v1", "minecraft-primitive-candidates/v2"} \
+    if state.get("contract") not in {"minecraft-primitive-candidates/v1", "minecraft-primitive-candidates/v2", "minecraft-primitive-candidates/v3"} \
             or state["initializationOnly"] or state["pendingRolloutTransitions"] != 0:
         raise ValueError("migration requires a saved trained legacy brain without pending transitions")
     migrated = dict(state, contract=CONTRACT, contextUpgrade=True,

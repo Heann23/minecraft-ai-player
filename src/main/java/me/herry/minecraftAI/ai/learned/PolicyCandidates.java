@@ -95,6 +95,7 @@ public final class PolicyCandidates {
         for (var item : state.inventory()) body[48 + bucket(item.material(), 16)] += item.amount() / 64.0;
         LocalPolicyContext.capture(ai, body);
         EquipmentPolicyContext.capture(p, body);
+        MotionPolicyContext.capture(p, survival, body);
         for (int i = 0; i < body.length; i++) body[i] = Math.clamp(body[i], -16, 16);
         Map<String, Integer> counts = new HashMap<>();
         for (var item : state.inventory()) if (item.amount() > 0) counts.merge(item.material(), item.amount(), Integer::sum);
