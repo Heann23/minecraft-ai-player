@@ -9,6 +9,9 @@ import org.bukkit.potion.PotionEffectType;
 final class WaterInputAction extends AbstractAction implements PrimitiveAction {
     private final WaterInput input;
     private final int ticks;
+    private int heldTicks;
+    private boolean phaseObserved;
+    private boolean lastInWater;
     WaterInputAction(WaterInput input, int ticks) {
         super("WaterInput", duration(ticks) + 1);
         this.input = java.util.Objects.requireNonNull(input); this.ticks = ticks;
@@ -36,10 +39,19 @@ final class WaterInputAction extends AbstractAction implements PrimitiveAction {
         ai.getBody().inputSneak(input.vertical() < 0);
         // FakePlayer applies sprint flags directly: retain normal sprint eligibility, not a tactical food preference.
         ai.getBody().inputSprint(input.canSprint(player.getFoodLevel(), player.hasPotionEffect(PotionEffectType.BLINDNESS), player.isSprinting()));
+        heldTicks++;
+        boolean inWater = player.isInWater();
+        if (!phaseObserved || inWater != lastInWater) {
+            ai.debug("WaterInput observed: inWater=" + inWater + " elapsed=" + getElapsed()
+                    + " tick=" + Integer.toUnsignedLong(org.bukkit.Bukkit.getCurrentTick()) + " input=" + input.identity());
+            phaseObserved = true; lastInWater = inWater;
+        }
     }
     @Override protected void onEnd(AIPlayer ai) {
         ai.getBody().inputMove(0, 0); ai.getBody().inputJump(false);
         ai.getBody().inputSneak(false); ai.getBody().inputSprint(false);
+        ai.debug("WaterInput released: heldTicks=" + heldTicks + " lastObservedInWater="
+                + (phaseObserved ? Boolean.toString(lastInWater) : "UNKNOWN"));
     }
     @Override public PrimitiveType getPrimitiveType() { return PrimitiveType.SWIM; }
     @Override public PrimitiveTarget getTarget() { return new PrimitiveTarget.Ticks(ticks); }
