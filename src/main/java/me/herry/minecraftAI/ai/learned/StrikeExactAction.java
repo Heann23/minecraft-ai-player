@@ -20,7 +20,11 @@ public final class StrikeExactAction extends AbstractAction {
         if (!(entity instanceof LivingEntity living) || !canReach(ai, living)) {
             fail("target unavailable or outside melee reach"); return;
         }
+        double healthBefore = living.getHealth(), absorptionBefore = living.getAbsorptionAmount();
         ai.getPlayer().attack(living); ai.getPlayer().swingMainHand();
+        ai.debug("Learned strike observed: target=" + target + " healthBefore=" + healthBefore
+                + " healthAfter=" + living.getHealth() + " absorptionBefore=" + absorptionBefore
+                + " absorptionAfter=" + living.getAbsorptionAmount() + " deadAfter=" + living.isDead());
         // Normal attack input accepted, not a claim of hit, damage or kill. The next observed state carries the outcome.
         succeed();
     }
