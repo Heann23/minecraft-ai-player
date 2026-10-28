@@ -56,7 +56,7 @@ class PolicyWeightsTest {
         var policy = PolicyWeights.load(fixture(1, "minecraft-paper", 1));
         assertTrue(policy.details().contains("정책 버전: 미기록"));
         assertTrue(policy.details().contains("가중치 갱신: 미기록"));
-        assertTrue(policy.details().contains("누적 전이: 1"));
+        assertTrue(policy.details().contains("가중치 학습에 사용한 전이: 1"));
     }
 
     @Test void categoricalExecutionUsesTheLearnedProbabilitiesAndReportsTheChosenLogProbability() throws Exception {
