@@ -37,6 +37,10 @@ public final class PolicyCandidates {
             return movement != null ? PrimitiveType.MOVE_INPUT : equipment != null ? PrimitiveType.EQUIP_ITEM : recipe != null ? PrimitiveType.CRAFT_ITEM
                     : consumable != null ? PrimitiveType.USE_ITEM : command.type();
         }
+        /** A hold is an upper execution bound, not permission to hide the world from the policy for that long. */
+        public int reconsiderAfterTicks() {
+            return Math.max(1, Math.min(20, commitmentTicks));
+        }
         public Candidate committed(int ticks) {
             double[] features = encoded.features(); features[30] = ticks / 600.0;
             String choice = inputId + "@" + ticks;

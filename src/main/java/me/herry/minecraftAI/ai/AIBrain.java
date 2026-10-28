@@ -445,7 +445,7 @@ final class AIBrain {
                         activeLearned = selected; learnedStartedAt = now;
                         ai.debug("Model " + predicted.modelSha256() + " selected " + predicted.candidate());
                     }
-                    activeLearned = selected; learnedNextChoiceAt = now + selected.commitmentTicks();
+                    activeLearned = selected; learnedNextChoiceAt = now + selected.reconsiderAfterTicks();
                 } catch (RuntimeException failure) {
                     if (plan != null) plan.cancel(ai);
                     plan = null; activeLearned = null;
@@ -466,7 +466,7 @@ final class AIBrain {
                         plan = new Plan(GoalType.IDLE, List.of(selected.create(ai)));
                         activeLearned = selected; learnedStartedAt = now;
                     }
-                    activeLearned = selected; learnedNextChoiceAt = now + selected.commitmentTicks();
+                    activeLearned = selected; learnedNextChoiceAt = now + selected.reconsiderAfterTicks();
                     trainingControl.applied(decision);
                 } catch (RuntimeException failure) {
                     if (plan != null) plan.cancel(ai);
