@@ -12,7 +12,7 @@ import brain_session
 import model_catalog
 import pending_rollout
 from rl_actor import ActorCritic
-from train_paper_ppo import PaperTrainer, verify_runtime_session
+from train_paper_ppo import PaperTrainer, BrainRuntime, verify_runtime_session
 from test_rl_actor import frame, row
 
 
@@ -46,6 +46,9 @@ class PendingRolloutTests(unittest.TestCase):
             resumed = PaperTrainer(root / "resumed", seed=99, rollout_size=32, maximum=64, max_bytes=16*1024*1024,
                     resume=Path(state["checkpoint"]), restore_state=state, learning_enabled=False, model_catalog_path=catalog.root)
             try:
+                runtime = BrainRuntime(resumed)
+                self.assertEqual(runtime.steps, 18)
+                self.assertEqual(runtime.bytes, resumed.bytes)
                 original = json.loads(Path(state["checkpoint"]).read_bytes())["optimizer"]
                 self.assertEqual({k:v.tolist() for k,v in resumed.model.params.items()}, original["params"])
                 self.assertEqual(resumed.model.rng.bit_generator.state, state["rng"])

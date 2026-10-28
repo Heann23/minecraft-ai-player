@@ -597,7 +597,8 @@ class BrainRuntime:
         self.root = trainer.output
         self.maximum = trainer.maximum
         self.max_bytes = trainer.max_bytes
-        self.steps = self.decisions = self.bytes = self.switches = 0
+        self.steps, self.decisions, self.bytes = self.counters(trainer)
+        self.switches = 0
         self.require_identity = False
         self.control_epoch = None
 
@@ -668,6 +669,8 @@ class BrainRuntime:
             replacement.close(publish_session=False)
             raise ValueError("new model session was not committed; active model retained") from failure
         self.active = replacement
+        self.steps += replacement.steps
+        self.bytes += replacement.bytes + replacement.discarded_bytes + replacement.episode_bytes
         self.require_identity = True
         self.control_epoch = packet["id"]
         self.switches += 1
