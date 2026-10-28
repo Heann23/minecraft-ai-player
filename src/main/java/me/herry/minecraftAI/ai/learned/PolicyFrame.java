@@ -1,16 +1,32 @@
 package me.herry.minecraftAI.ai.learned;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 
 /** Value-only inputs captured before selection. No Teacher label, score, future result or live world reference. */
-public record PolicyFrame(UUID world, long serverTick, double[] state, List<Option> options, boolean complete) {
+public record PolicyFrame(UUID world, long serverTick, double[] state, List<Option> options, boolean complete, Discovery discovery) {
     public static final String CONTRACT = "minecraft-primitive-candidates/v4";
     public static final int STATE_SIZE = 208;
     public static final int ACTION_SIZE = 256;
     public static final int INPUT_SIZE = STATE_SIZE + ACTION_SIZE;
     public static final int MAX_OPTIONS = 128;
+
+    public PolicyFrame(UUID world, long serverTick, double[] state, List<Option> options, boolean complete) {
+        this(world, serverTick, state, options, complete, null);
+    }
+
+    /** Optional evidence only; not concatenated into the actor or critic input. Negative counts mean not visited. */
+    public record Discovery(String schema, List<String> visitedSources, Map<String, Integer> generatedBySource,
+                            boolean budgetExhausted, int recipeOptions, int recipesChecked, boolean recipeScanComplete) {
+        public Discovery {
+            if (!"candidate-discovery/v1".equals(schema) || recipeOptions < -1 || recipesChecked < -1)
+                throw new IllegalArgumentException("invalid discovery evidence");
+            visitedSources = List.copyOf(visitedSources);
+            generatedBySource = Map.copyOf(generatedBySource);
+        }
+    }
 
     public PolicyFrame {
         Objects.requireNonNull(world);
