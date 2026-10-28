@@ -87,7 +87,12 @@ public final class PpoBridge implements AutoCloseable {
         }
     }
     public record Metadata(String brainId, String trainingStartState, long gradientUpdates,
-                           boolean learningEnabled, String saveState, String checkpointSha256, Boolean initializationOnly) {
+                           boolean learningEnabled, String saveState, String checkpointSha256, Boolean initializationOnly,
+                           Long collectedEnvironmentSteps, Long trainedEnvironmentSteps, Long pendingRolloutTransitions) {
+        public Metadata(String brainId, String trainingStartState, long gradientUpdates,
+                        boolean learningEnabled, String saveState, String checkpointSha256, Boolean initializationOnly) {
+            this(brainId, trainingStartState, gradientUpdates, learningEnabled, saveState, checkpointSha256, initializationOnly, null, null, null);
+        }
         public Metadata(String brainId, String trainingStartState, long gradientUpdates,
                         boolean learningEnabled, String saveState, String checkpointSha256) {
             this(brainId, trainingStartState, gradientUpdates, learningEnabled, saveState, checkpointSha256, null);
@@ -98,6 +103,13 @@ public final class PpoBridge implements AutoCloseable {
                     || !java.util.Set.of("saved", "updating", "not-saved").contains(saveState)
                     || checkpointSha256 != null && !checkpointSha256.matches("[0-9a-f]{64}"))
                 throw new IllegalArgumentException("invalid brain metadata");
+            if (collectedEnvironmentSteps != null && collectedEnvironmentSteps < 0
+                    || trainedEnvironmentSteps != null && trainedEnvironmentSteps < 0
+                    || pendingRolloutTransitions != null && pendingRolloutTransitions < 0
+                    || collectedEnvironmentSteps != null && trainedEnvironmentSteps != null && pendingRolloutTransitions != null
+                    && (trainedEnvironmentSteps > collectedEnvironmentSteps
+                    || collectedEnvironmentSteps - trainedEnvironmentSteps != pendingRolloutTransitions))
+                throw new IllegalArgumentException("invalid brain transition counters");
         }
     }
     private final Path directory;

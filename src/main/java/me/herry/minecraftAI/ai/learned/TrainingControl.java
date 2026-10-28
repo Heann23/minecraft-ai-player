@@ -89,6 +89,8 @@ public final class TrainingControl {
                 "초기 가중치 상태: " + (metadata.initializationOnly() == null ? "미기록" : metadata.initializationOnly()),
                 "학습 활성화: " + metadata.learningEnabled(), "최근 수신 정책 버전: " + latestStatus.modelVersion(),
                 "누적 수집 전이: " + latestStatus.environmentSteps(), "가중치 갱신: " + metadata.gradientUpdates(),
+                "가중치 학습에 사용한 전이: " + (metadata.trainedEnvironmentSteps() == null ? "미기록" : metadata.trainedEnvironmentSteps()),
+                "아직 학습에 반영되지 않은 전이: " + (metadata.pendingRolloutTransitions() == null ? "미기록" : metadata.pendingRolloutTransitions()),
                 "정책 저장 상태: " + metadata.saveState(),
                 "체크포인트 해시: " + (metadata.checkpointSha256() == null ? "아직 없음" : metadata.checkpointSha256()),
                 "상태 수신 후 경과 틱: " + Math.max(0, Integer.toUnsignedLong(Bukkit.getCurrentTick()) - latestReceivedTick),

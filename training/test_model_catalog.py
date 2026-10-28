@@ -19,10 +19,21 @@ class ModelCatalogTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 catalog.save("missing", state, require_existing=True)
             self.assertFalse((catalog.root / "missing.json").exists())
-            catalog.save("brain", dict(state, environmentSteps=10))
+            catalog.save("brain", state)
+            # A genuinely collected pending row is not an invented counter on an initial checkpoint.
+            from test_rl_actor import frame, row
+            import uuid
+            continued = PaperTrainer(root / "continued", seed=99, rollout_size=32, maximum=32, max_bytes=4*1024*1024,
+                                     resume=Path(state["checkpoint"]), restore_state=state, learning_enabled=True)
+            sample = row(continued.model, session=str(uuid.uuid4()))
+            sample.pop("nextValue")
+            continued.handle({"schema": "minecraft-paper-ppo/v2", "environment": "minecraft-paper", "id": str(uuid.uuid4()),
+                              "frame": frame(), "transitions": [sample]})
+            continued.close()
+            catalog.save("brain", brain_session.load(root / "continued/runtime-session.json"))
             before = (catalog.root / "brain.json").read_bytes()
             with self.assertRaises(ValueError):
-                catalog.save("brain", dict(state, environmentSteps=9), require_existing=True)
+                catalog.save("brain", state, require_existing=True)
             self.assertEqual((catalog.root / "brain.json").read_bytes(), before)
 
     def initial(self, output, *, seed=7):

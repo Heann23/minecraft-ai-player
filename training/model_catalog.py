@@ -57,15 +57,8 @@ def restricted_training_use(checkpoint):
 
 def verify_state(state):
     # Reuse the same actor/critic loader, raw-prefix provenance and exact restoration checks as the runtime.
-    from train_paper_ppo import resume_checkpoint
-    brain_session.validate(state)
-    model, parent = resume_checkpoint(Path(state["checkpoint"]), upgrade_context=state.get("contextUpgrade", False),
-                                      allow_initial=state["initializationOnly"])
-    if parent["brainId"] != state["brainId"] or parent["checkpointSha256"] != state["checkpointSha256"] \
-            or model.version != state["policyVersion"] or model.updates != state["gradientUpdates"] \
-            or parent["initializationOnly"] != state["initializationOnly"]:
-        raise ValueError("catalog session/model identity mismatch; no initialization")
-    model.rng.bit_generator.state = state["rng"]
+    from train_paper_ppo import verify_runtime_session
+    verify_runtime_session(state)
     # Prepared control cases have genuine transitions but are not autonomous training sources.
     if state.get("notForAutonomousTraining") or restricted_training_use(state["checkpoint"]):
         raise ValueError("prepared scenario models cannot enter the autonomous model catalog")
@@ -89,6 +82,49 @@ def migrate_context_session(source: Path, destination: Path, *, name=None):
     migrated = dict(state, contract=CONTRACT, contextUpgrade=True,
                     modelName=state.get("modelName") if name is None else model_name(name))
     verify_state(migrated)  # Raw provenance, full optimizer, counters, identity and saved RNG, before any write.
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    brain_session.save(destination, migrated, recoverable=True)
+    return migrated
+
+
+def migrate_pending_session(source: Path, destination: Path, *, name=None):
+    """Explicit legacy suffix admission, not a new update. Never changes the old session, raw or catalog."""
+    import pending_rollout
+    from train_paper_ppo import _session_checkpoint, validate_pending_row, CONTRACT
+    if destination.exists() or destination.is_symlink():
+        raise ValueError("migration output must be new; original session preserved")
+    state = brain_session.load(source)
+    if state.get("contract") != CONTRACT or state.get("contextUpgrade", False) \
+            or state["pendingRolloutTransitions"] <= 0 or state.get("pendingRollout") is not None:
+        raise ValueError("migration requires a legacy pending count in the current input contract")
+    _, parent = _session_checkpoint(state)
+    if state.get("notForAutonomousTraining") or restricted_training_use(state["checkpoint"]):
+        raise ValueError("prepared pending evidence cannot enter the autonomous catalog")
+    trained = parent["environmentSteps"]
+    collected = pending_rollout.counters(state, trained)
+    checkpoint = Path(state["checkpoint"])
+    report = json.loads((checkpoint.parent / "training-report.json").read_bytes())
+    raw = checkpoint.parent / "paper-rollouts.jsonl"
+    if "rolloutFile" in report:
+        # _session_checkpoint already verified this exact bundle path and the trained prefix.
+        raw = checkpoint.parent.parent.parent / "paper-rollouts.jsonl"
+    offset = report["rolloutBytesUsed"]
+    size = raw.stat().st_size - offset
+    if raw.is_symlink() or raw.parent.is_symlink() or not 0 < size <= pending_rollout.MAX_BYTES:
+        raise ValueError("legacy pending suffix missing or exceeds its byte budget")
+    with raw.open("rb") as stream:
+        stream.seek(offset)
+        data = stream.read(size)
+    reference = {"path": str(raw.absolute()), "offset": offset, "bytes": size,
+                 "sha256": hashlib.sha256(data).hexdigest()}
+    rows = pending_rollout.raw_rows(reference)
+    pending_rollout.validate_rows(state, rows, validate_pending_row)
+    migrated = dict(state, trainedEnvironmentSteps=trained, collectedEnvironmentSteps=collected,
+                    environmentSteps=collected, modelName=state.get("modelName") if name is None else model_name(name),
+                    pendingMigration={"sourceSessionSha256": hashlib.sha256(source.read_bytes()).hexdigest(), "raw": reference})
+    migrated["pendingRollout"] = pending_rollout.publish(destination.parent / "pending-rollouts", migrated, rows,
+                                                        raw, offset, size)
+    verify_state(migrated)
     destination.parent.mkdir(parents=True, exist_ok=True)
     brain_session.save(destination, migrated, recoverable=True)
     return migrated
@@ -141,6 +177,7 @@ class ModelCatalog:
                 if old["brainId"] != state["brainId"] or old["policyVersion"] > state["policyVersion"] \
                         or old["gradientUpdates"] > state["gradientUpdates"] \
                         or old.get("environmentSteps", 0) > state.get("environmentSteps", 0) \
+                        or old.get("trainedEnvironmentSteps", 0) > state.get("trainedEnvironmentSteps", 0) \
                         or old["policyVersion"] == state["policyVersion"] and optimizer_identity(old) != optimizer_identity(state):
                     raise ValueError("name already belongs to another brain or newer/different weights; choose another name")
                 if old == state:
@@ -211,15 +248,15 @@ def main():
     commands = parser.add_subparsers(dest="operation", required=True)
     commands.add_parser("list")
     commands.add_parser("selected")
-    for command in ("info", "select", "save", "restore", "new", "import", "migrate-context"):
+    for command in ("info", "select", "save", "restore", "new", "import", "migrate-context", "migrate-pending"):
         sub = commands.add_parser(command)
         sub.add_argument("name", type=model_name)
-        if command in {"save", "migrate-context"}:
+        if command in {"save", "migrate-context", "migrate-pending"}:
             sub.add_argument("--session", type=Path, required=True)
         if command == "import":
             sub.add_argument("--checkpoint", type=Path, required=True)
             sub.add_argument("--learning", choices=("on", "off"), required=True)
-        if command in ("restore", "new", "migrate-context"):
+        if command in ("restore", "new", "migrate-context", "migrate-pending"):
             sub.add_argument("--output", type=Path, required=True)
         if command == "new":
             sub.add_argument("--seed", type=int, required=True)
@@ -236,12 +273,13 @@ def main():
         result = catalog.select(args.name)
     elif args.operation == "save":
         result = catalog.save(args.name, brain_session.load(args.session))
-    elif args.operation == "migrate-context":
+    elif args.operation in {"migrate-context", "migrate-pending"}:
         # A different catalog/name can preserve the entire previous contract and its selection.
         target = catalog.root / (args.name + ".json")
         if target.exists() or target.is_symlink():
             raise ValueError("migration requires an unused catalog name; existing model preserved")
-        state = migrate_context_session(args.session, args.output, name=args.name)
+        migration = migrate_context_session if args.operation == "migrate-context" else migrate_pending_session
+        state = migration(args.session, args.output, name=args.name)
         result = catalog.save(args.name, state)
     elif args.operation == "import":
         from train_paper_ppo import resume_checkpoint, CONTRACT

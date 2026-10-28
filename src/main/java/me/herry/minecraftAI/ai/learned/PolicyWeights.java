@@ -112,7 +112,7 @@ public final class PolicyWeights {
         return java.util.List.of("두뇌 ID: " + (artifact.brainId() == null ? "이전 모델에 미기록" : artifact.brainId()),
                 "실행 상태: 고정 가중치 추론 / 학습 비활성",
                 "정책 버전: " + (artifact.modelVersion() == null ? "미기록" : artifact.modelVersion()),
-                "누적 전이: " + artifact.environmentSteps(),
+                "가중치 학습에 사용한 전이: " + artifact.environmentSteps(),
                 "가중치 갱신: " + (artifact.gradientUpdates() == null ? "미기록" : artifact.gradientUpdates()),
                 "모델 해시: " + sha256, "학습 run: " + artifact.trainingRun(),
                 "학습 당시 시작 상태: " + (artifact.trainingStartState() == null ? "미기록" : artifact.trainingStartState()),

@@ -26,6 +26,14 @@ def validate(state):
             raise ValueError("invalid brain session counter")
     if "environmentSteps" in state and (type(state["environmentSteps"]) is not int or state["environmentSteps"] < 0):
         raise ValueError("invalid brain session environment count")
+    for key in ("collectedEnvironmentSteps", "trainedEnvironmentSteps"):
+        if key in state and (type(state[key]) is not int or state[key] < 0):
+            raise ValueError("invalid explicit brain transition counter")
+    if "collectedEnvironmentSteps" in state and state.get("environmentSteps") != state["collectedEnvironmentSteps"]:
+        raise ValueError("session collection counters disagree")
+    if "trainedEnvironmentSteps" in state and "collectedEnvironmentSteps" in state \
+            and state["trainedEnvironmentSteps"] + state["pendingRolloutTransitions"] != state["collectedEnvironmentSteps"]:
+        raise ValueError("session trained/pending/collection counters disagree")
     for key in ("learningEnabled", "initializationOnly"):
         if type(state[key]) is not bool:
             raise ValueError("invalid brain session flag")

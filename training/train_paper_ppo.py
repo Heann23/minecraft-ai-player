@@ -25,6 +25,7 @@ from rl_actor import ActorCritic, CONTRACT, STATE_SIZE, inputs
 import checkpoint_store
 import brain_session
 import model_catalog
+import pending_rollout
 import sys
 
 SCHEMA = "minecraft-paper-ppo/v2"
@@ -142,7 +143,7 @@ def resolve_learning_mode(saved_state=None, *, learning=None, inference_only=Fal
         saved_state["learningEnabled"] if saved_state is not None else True
 
 
-def verify_runtime_session(state):
+def _session_checkpoint(state):
     brain_session.validate(state)
     model, parent = resume_checkpoint(Path(state["checkpoint"]),
             upgrade_context=state.get("contextUpgrade", False), allow_initial=state["initializationOnly"])
@@ -151,6 +152,19 @@ def verify_runtime_session(state):
             or parent["initializationOnly"] != state["initializationOnly"]:
         raise ValueError("runtime recovery identity/optimizer mismatch; no replacement")
     model.rng.bit_generator.state = state["rng"]
+    return model, parent
+
+
+def validate_pending_row(row):
+    if not isinstance(row, dict) or "nextValue" not in row or type(row["nextValue"]) not in (int, float) \
+            or not math.isfinite(row["nextValue"]):
+        raise ValueError("invalid saved pending next-state value")
+    validate_transition({key: value for key, value in row.items() if key != "nextValue"})
+
+
+def verify_runtime_session(state):
+    _, parent = _session_checkpoint(state)
+    pending_rollout.load(state, parent["environmentSteps"], validate_pending_row)
 
 
 class PaperTrainer:
@@ -171,6 +185,7 @@ class PaperTrainer:
         model, parent = (ActorCritic(seed), None) if resume is None else resume_checkpoint(
                 resume, upgrade_context=upgrade_context, allow_initial=start_state != "pretrained")
         checkpoint_rng = copy.deepcopy(model.rng.bit_generator.state)
+        restored_rows = []
         if restore_state is not None:
             brain_session.validate(restore_state)
             if parent is None or parent["brainId"] != restore_state["brainId"] \
@@ -179,6 +194,9 @@ class PaperTrainer:
                     or restore_state.get("contextUpgrade", False) != upgrade_context:
                 raise ValueError("session/model identity mismatch; no reset or hidden model replacement")
             model.rng.bit_generator.state = restore_state["rng"]
+            restored_rows = pending_rollout.load(restore_state, parent["environmentSteps"], validate_pending_row)
+            if len(restored_rows) >= rollout_size or len(restored_rows) >= maximum:
+                raise ValueError("restored pending buffer needs a larger rollout and transition budget")
         output.mkdir(parents=True, exist_ok=False)  # A new run never overwrites another model or provenance.
         self.output = output
         self.session_alias = None
@@ -203,6 +221,9 @@ class PaperTrainer:
         self.model, self.parent = model, parent
         self.saved_checkpoint_rng = checkpoint_rng
         self.parent_steps = 0 if parent is None else parent["environmentSteps"]
+        self.trained_steps = self.parent_steps
+        self.trained_bytes = 0
+        self.restored_pending_count = len(restored_rows)
         self.parents = [] if parent is None else [*parent["lineage"], {key: parent[key] for key in ("checkpointSha256", "trainingRun", "environmentSteps", "contextUpgrade")}]
         self.rollout_size, self.maximum, self.max_bytes = rollout_size, maximum, max_bytes
         self.rows = []
@@ -221,6 +242,17 @@ class PaperTrainer:
         self.episode_raw = (output / "episode-outcomes.jsonl").open("ab")
         self.episodes = {}
         self.completed_episodes = self.death_episodes = self.episode_bytes = 0
+        # Carried rows were already collected, but have never been included in this checkpoint's training.
+        for row in restored_rows:
+            data = (json.dumps(row, ensure_ascii=False, allow_nan=False, separators=(",", ":")) + "\n").encode()
+            if self.bytes + len(data) > self.max_bytes:
+                raise ValueError("restored pending evidence exceeds the requested byte budget")
+            self.raw.write(data); self.digest.update(data); self.bytes += len(data)
+            self.rows.append(row); self.steps += 1; self.ticks += row["elapsedTicks"]
+            self.last_sequence[row["session"]] = max(self.last_sequence.get(row["session"], -1), row["sequence"])
+            contract = row.get("rewardContract", "survival-progress/v1")
+            self.reward_contracts[contract] = self.reward_contracts.get(contract, 0) + 1
+        self.raw.flush()
         if self.model.updates == 0 and parent is None:
             self.save_initial_state()
         write_atomic(output / "run.json", {"schema": SCHEMA, "contract": CONTRACT, "algorithm": "ppo",
@@ -228,6 +260,8 @@ class PaperTrainer:
                      "learningEnabled": self.learning_enabled,
                      "environment": "minecraft-paper", "run": self.run, "seed": seed,
                      "maxTransitions": maximum, "rolloutSize": rollout_size, "teacherLabels": False,
+                     "restoredPendingTransitions": self.restored_pending_count,
+                     "restoredPendingEvidence": None if restore_state is None else restore_state.get("pendingRollout"),
                      "initialWeights": "random" if parent is None else "verified-initial-state" if parent.get("initializationOnly") else "verified-ppo-checkpoint", "parents": self.parents,
                      "resumeRecovery": None if parent is None else parent.get("recoveredCheckpoint"),
                      "gammaPerServerTick": 0.99997, "gaeLambda": 0.95,
@@ -235,22 +269,32 @@ class PaperTrainer:
         self.persist_session(sync_catalog=False)  # Construction can be a staged, not-yet-active model load.
 
     def persist_session(self, *, sync_catalog=True):
+        # The worker owns an in-flight buffer whose checkpoint is not committed yet. Do not publish a half-state.
+        if self.training is not None:
+            return False
         if self.checkpoint_reference is None or self.saved_model_version != self.model.version:
             raise RuntimeError("active brain has no matching durable checkpoint; session not replaced")
         state = {"schema": brain_session.SCHEMA,
                 "brainId": self.brain_id, "checkpoint": self.checkpoint_reference, "checkpointSha256": self.saved_checkpoint_sha,
                 "policyVersion": self.model.version, "gradientUpdates": self.model.updates, "learningEnabled": self.learning_enabled,
                 "environmentSteps": self.parent_steps + self.steps,
+                "collectedEnvironmentSteps": self.parent_steps + self.steps,
+                "trainedEnvironmentSteps": self.trained_steps,
                 "rng": self.model.rng.bit_generator.state, "initializationOnly": self.model.updates == 0,
                 "pendingRolloutTransitions": len(self.rows), "startState": self.training_start_state, "contract": CONTRACT,
                 "contextUpgrade": self.checkpoint_upgrade, "notForAutonomousTraining": self.restricted_training_use,
                 "modelName": self.model_name}
+        self.raw.flush(); os.fsync(self.raw.fileno())
+        state["pendingRollout"] = pending_rollout.publish(self.output / "pending-rollouts", state, self.rows,
+                self.output / "paper-rollouts.jsonl", self.trained_bytes, self.bytes - self.trained_bytes)
+        pending_rollout.counters(state, self.trained_steps)
         brain_session.save(self.output / "runtime-session.json", state, recoverable=True)
         if self.session_alias is not None:
             brain_session.save(self.session_alias, state, recoverable=True)
         self.last_session_save = time.monotonic()
         if sync_catalog:
             self.refresh_named_model(state)
+        return True
 
     def refresh_named_model(self, state):
         # The authoritative runtime session is durable BEFORE this independent named reference.
@@ -348,6 +392,9 @@ class PaperTrainer:
     def status(self):
         return {"modelVersion": self.model.version, "environmentSteps": self.parent_steps + self.steps,
                 "metadata": {"brainId": self.brain_id, "trainingStartState": self.training_start_state,
+                             "collectedEnvironmentSteps": self.parent_steps + self.steps,
+                             "trainedEnvironmentSteps": self.trained_steps,
+                             "pendingRolloutTransitions": self.parent_steps + self.steps - self.trained_steps,
                              "initializationOnly": self.model.updates == 0,
                              "gradientUpdates": self.model.updates, "learningEnabled": self.learning_enabled,
                              "saveState": "updating" if self.training is not None else "saved" if self.saved_model_version == self.model.version else "not-saved",
@@ -496,6 +543,10 @@ class PaperTrainer:
         report = {"run": self.run, "environment": "minecraft-paper",
                      "brainId": self.brain_id, "trainingStartState": self.training_start_state,
                      "environmentSteps": total_steps, "runEnvironmentSteps": metadata["steps"], "parents": self.parents,
+                     "trainedEnvironmentSteps": total_steps,
+                     "collectedEnvironmentSteps": self.parent_steps + self.steps,
+                     "restoredPendingTransitions": self.restored_pending_count,
+                     "newCollectedEnvironmentSteps": metadata["steps"] - self.restored_pending_count,
                      "actualServerTicks": metadata["ticks"], "gradientUpdates": self.model.updates,
                      "modelVersion": self.model.version, "rolloutSha256": metadata["sha256"], "rolloutBytesUsed": metadata["bytes"],
                      "rewardContracts": metadata.get("rewardContracts", {}),
@@ -512,6 +563,8 @@ class PaperTrainer:
         self.checkpoint_upgrade = False
         self.saved_model_version = self.model.version
         self.saved_checkpoint_sha = hashlib.sha256(checkpoint_store.encoded(checkpoint)).hexdigest()
+        self.trained_steps = total_steps
+        self.trained_bytes = metadata["bytes"]
         self.persist_session()
 
     def flush_episodes(self):
