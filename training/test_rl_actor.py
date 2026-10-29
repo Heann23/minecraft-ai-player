@@ -37,6 +37,32 @@ def row(model, session="a", sequence=0, reward=1, terminal=True):
 
 
 class ActorTests(unittest.TestCase):
+    def test_v4_task_upgrade_preserves_every_old_tensor_rng_and_zeroes_new_influence(self):
+        import copy
+        model = ActorCritic(31, hidden=4)
+        model.fit([row(model)])
+        legacy = copy.deepcopy(model.optimizer_state())
+        legacy["contract"] = "minecraft-primitive-candidates/v4"
+        for group in ("params", "first", "second"):
+            for key in ("actor_w", "value_w"):
+                tensor = np.asarray(legacy[group][key])
+                legacy[group][key] = np.concatenate((tensor[:, :208], tensor[:, STATE_SIZE:]), axis=1).tolist()
+        upgraded = ActorCritic.upgrade_legacy_context(legacy)
+        observed = frame(); before, value, _ = upgraded.evaluate(observed)
+        observed["state"][208:] = np.linspace(-1, 1, STATE_SIZE - 208).tolist()
+        after, after_value, _ = upgraded.evaluate(observed)
+        np.testing.assert_array_equal(before, after)
+        self.assertEqual(value, after_value)
+        for group in ("params", "first", "second"):
+            for key, old in legacy[group].items():
+                actual = getattr(upgraded, group)[key]
+                if key in ("actor_w", "value_w"):
+                    np.testing.assert_array_equal(actual[:, 208:STATE_SIZE], 0)
+                    actual = np.concatenate((actual[:, :208], actual[:, STATE_SIZE:]), axis=1)
+                np.testing.assert_array_equal(actual, old)
+        self.assertEqual(upgraded.rng.bit_generator.state, legacy["rng"])
+        self.assertEqual((upgraded.version, upgraded.updates), (legacy["version"], legacy["updates"]))
+
     def test_reward_evidence_uses_admission_state_and_rejects_tampered_reward(self):
         sample = row(ActorCritic(7, hidden=4), session=str(uuid.uuid4()), reward=-0.0995, terminal=False)
         sample.pop("nextValue")
