@@ -367,9 +367,10 @@ public class AICommand implements TabExecutor {
 
         if (args.length == 1) return filter(SUB_COMMANDS, args[0]);
         String sub = args[0].toLowerCase(Locale.ROOT);
+        if (sub.equals("objective") && args.length == 3) return filter(List.of("info", "clear", "acquire"), args[2]);
         if (args.length == 2) {
             return switch (sub) {
-                case "remove", "start", "stop", "status", "stats", "inv", "inventory", "why", "brain", "plan", "observe", "learn", "memory", "perf", "say" ->
+                case "remove", "start", "stop", "status", "stats", "objective", "inv", "inventory", "why", "brain", "plan", "observe", "learn", "memory", "perf", "say" ->
                         filter(names(), args[1]);
                 case "goal" -> filter(goalNames(), args[1]);
                 case "debug" -> filter(List.of("on", "off"), args[1]);
