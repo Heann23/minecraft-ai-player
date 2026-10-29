@@ -13,6 +13,19 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /** Protocol/numerical fixtures, not real Minecraft training evidence. */
 class TrainingEpisodeTest {
+    @Test void actualNextObjectiveRemainsBoundToItsTransitionWithoutInventingGoalReward() {
+        var memory = new PolicyTaskMemory(); memory.acquire(WORLD, "OAK_LOG", 4, 1);
+        var requested = new PolicyFrame(WORLD, 1, new double[PolicyFrame.STATE_SIZE], OPTIONS, false,
+                null, memory.observe(WORLD, Map.of()));
+        var episode = new TrainingEpisode();
+        episode.begin(new PolicyCandidates.Capture(requested, List.of(), body(20), Map.of()), response(), actual(20, Map.of()), 1);
+        var next = new PolicyFrame(WORLD, 6, new double[PolicyFrame.STATE_SIZE], OPTIONS, false,
+                null, memory.observe(WORLD, Map.of("OAK_LOG", 4)));
+        var result = episode.finish(next, body(20), Map.of("OAK_LOG", 4), false, false, 0);
+        assertEquals(requested.taskMemory().objective().id(), result.nextTaskMemory().objective().id());
+        assertTrue(result.nextTaskMemory().currentlyAchieved());
+        assertEquals(0.2005, result.reward(), 1e-9); // Existing item discovery only; goal reward is not implemented yet.
+    }
     @Test void onlyConfirmedDisplayedProgressEarnsOnceAndInferenceIsNotRetroactivelyCredited() {
         var rewards = new AdvancementRewards();
         assertEquals(0, rewards.observe("minecraft:recipes/tools/stone_pickaxe", true, false, true));
