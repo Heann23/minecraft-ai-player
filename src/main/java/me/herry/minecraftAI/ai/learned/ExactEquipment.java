@@ -120,4 +120,24 @@ final class ExactEquipment {
                 && (afterSource.amount() == 0 || afterSource.fingerprint().equals(sourceFingerprint))
                 && (afterTarget.amount() == 0 || afterTarget.fingerprint().equals(targetFingerprint));
     }
+
+    /** Move only the selected stack to the active hand through vanilla hotbar swap semantics. */
+    static boolean selectForUse(Player player, int slot, Stack expected) {
+        if (slot < 0 || slot >= 36 || expected.amount() == 0 || !same(read(player, slot), expected)) return false;
+        var handle = ((CraftPlayer) player).getHandle();
+        var menu = handle.inventoryMenu;
+        if (handle.containerMenu != menu || !menu.getCarried().isEmpty() || player.hasActiveItem()) return false;
+        if (slot < 9) {
+            player.getInventory().setHeldItemSlot(slot);
+            return player.getInventory().getHeldItemSlot() == slot && same(read(player, slot), expected);
+        }
+        int held = player.getInventory().getHeldItemSlot();
+        var previousHand = read(player, held);
+        // SWAP preserves whole stacks, including identical fingerprints with different counts.
+        // The real menu decides permissions; denied/partial transfers never become consumption success.
+        menu.clicked(menuSlot(slot), held, ContainerInput.SWAP, handle);
+        menu.broadcastChanges();
+        return menu.getCarried().isEmpty() && player.getInventory().getHeldItemSlot() == held
+                && same(read(player, held), expected) && same(read(player, slot), previousHand);
+    }
 }

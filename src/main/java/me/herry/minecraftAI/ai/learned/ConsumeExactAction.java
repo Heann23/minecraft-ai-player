@@ -12,6 +12,7 @@ public final class ConsumeExactAction extends AbstractAction {
     private final java.util.UUID world;
     private int held;
     private boolean using;
+    private SurvivalObservation.Body beforeUse;
 
     public ConsumeExactAction(java.util.UUID world, SurvivalObservation.Item selected) {
         super("LearnedConsume[" + selected.slot() + "]", 220);
@@ -33,8 +34,11 @@ public final class ConsumeExactAction extends AbstractAction {
             fail("stale selected item"); return;
         }
         ai.getNavigation().stop(); ai.getBody().clearInputs();
-        if (!ai.getInventory().equipSlot(selected.slot())) { fail("cannot equip selected slot"); return; }
+        if (!ExactEquipment.selectForUse(ai.getPlayer(), selected.slot(), ExactEquipment.read(ai.getPlayer(), selected.slot()))) {
+            fail("vanilla selected-slot transfer denied or changed"); return;
+        }
         held = ai.getPlayer().getInventory().getHeldItemSlot();
+        beforeUse = SurvivalCapture.body(ai.getPlayer());
     }
 
     @Override protected void onTick(AIPlayer ai) {
@@ -53,6 +57,16 @@ public final class ConsumeExactAction extends AbstractAction {
     }
 
     @Override protected void onEnd(AIPlayer ai) {
+        if (beforeUse != null && ai.getBody().isUsable()) {
+            var after = SurvivalCapture.body(ai.getPlayer());
+            ai.debug("Learned consume observed: source=" + selected.slot() + " held=" + held
+                    + " material=" + selected.material() + " status=" + getStatus() + " reason=" + getFailReason()
+                    + " using=" + using + " elapsed=" + getElapsed()
+                    + " healthBefore=" + beforeUse.health() + " healthAfter=" + after.health()
+                    + " foodBefore=" + beforeUse.foodLevel() + " foodAfter=" + after.foodLevel()
+                    + " saturationBefore=" + beforeUse.saturation() + " saturationAfter=" + after.saturation());
+            beforeUse = null;
+        }
         if (using) ai.getPlayer().clearActiveItem();
         ai.getBody().clearInputs();
     }
