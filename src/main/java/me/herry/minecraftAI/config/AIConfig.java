@@ -52,6 +52,15 @@ public final class AIConfig {
     public final String shadowPolicy;
 
     public final boolean debugEnabled;
+    public final boolean learnedControl;
+    public final String learnedModelFile;
+    public final boolean trainingControl;
+    public final String trainingChannel;
+    public final boolean managedBackend;
+    public final boolean allowPolicyTraining;
+    public final boolean maskObjectiveInput;
+    public final String backendPython, backendScript, backendCatalog, backendRuns, backendModel;
+    public final int backendMaxTransitions, backendSessionSaveSeconds;
 
     /**
      * @param warn 관계가 맞지 않는 값을 고쳤을 때 그 내용을 받는다 (보통 플러그인 로거의 warning)
@@ -102,6 +111,42 @@ public final class AIConfig {
                 GoalPolicies.NAMES, GoalPolicies.NONE, warn);
 
         debugEnabled = config.getBoolean("debug.enabled", false);
+        String policyMode = config.getString("policy.mode", "learned");
+        if (!java.util.Set.of("learned", "teacher", "training").contains(policyMode)) {
+            warn.accept("Unknown policy.mode; learned mode remains stopped until a compatible trained model is available");
+            policyMode = "learned";
+        }
+        if (policyMode.equals("training") && !config.getBoolean("policy.allow-training", false)) {
+            warn.accept("Training mode requires explicit policy.allow-training; learned inference remains idle without a model");
+            policyMode = "learned";
+        }
+        managedBackend = config.getBoolean("policy.runtime.enabled", false) && !policyMode.equals("teacher");
+        allowPolicyTraining = config.getBoolean("policy.allow-training", false);
+        trainingControl = policyMode.equals("training") || managedBackend;
+        learnedControl = !policyMode.equals("teacher");
+        maskObjectiveInput = config.getBoolean("policy.mask-objective-input", false);
+        if (maskObjectiveInput) warn.accept("Objective input is masked for a development ablation; actual task accounting remains enabled");
+        java.nio.file.Path channel = java.nio.file.Path.of(config.getString("policy.training-channel", "training-session/channel")).normalize();
+        if (channel.toString().isBlank() || channel.isAbsolute() || channel.startsWith("..")) throw new IllegalArgumentException("training channel must stay inside plugin directory");
+        trainingChannel = channel.toString();
+        String modelFile = config.getString("policy.model", "models/minecraft-rl-actor.json");
+        java.nio.file.Path modelPath = java.nio.file.Path.of(modelFile).normalize();
+        if (modelPath.toString().isBlank() || modelPath.isAbsolute() || modelPath.startsWith("..")) throw new IllegalArgumentException("policy.model must stay inside the plugin data directory");
+        learnedModelFile = modelPath.toString();
+        backendPython = config.getString("policy.runtime.python", "python");
+        backendScript = config.getString("policy.runtime.script", "training/train_paper_ppo.py");
+        backendCatalog = relativePath(config.getString("policy.runtime.catalog", "brain-catalog"));
+        backendRuns = relativePath(config.getString("policy.runtime.runs", "brain-runtime"));
+        backendModel = config.getString("policy.runtime.model", "");
+        backendMaxTransitions = clamp(config.getInt("policy.runtime.max-transitions", 1_000_000), 32, 10_000_000);
+        backendSessionSaveSeconds = clamp(config.getInt("policy.runtime.session-save-seconds", 30), 1, 3600);
+    }
+
+    private static String relativePath(String value) {
+        var path = java.nio.file.Path.of(value).normalize();
+        if (path.toString().isBlank() || path.isAbsolute() || path.startsWith(".."))
+            throw new IllegalArgumentException("managed brain storage must stay inside plugin directory");
+        return path.toString();
     }
 
     private static int clamp(int value, int min, int max) {

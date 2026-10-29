@@ -62,6 +62,8 @@ import java.util.UUID;
  * 행동(Action)과 계획(Planner)은 이 객체를 통해 필요한 시스템에 접근한다.
  */
 public final class AIPlayer {
+    private final me.herry.minecraftAI.ai.learned.PolicyTaskMemory policyTaskMemory = new me.herry.minecraftAI.ai.learned.PolicyTaskMemory();
+    public me.herry.minecraftAI.ai.learned.PolicyTaskMemory getPolicyTaskMemory() { return policyTaskMemory; }
     private final String name;
     private final AIBody body;
     private final AIServices services;
@@ -82,6 +84,12 @@ public final class AIPlayer {
     private final Map<Milestone, Long> deferredUntil = new EnumMap<>(Milestone.class);
 
     private AIState state = AIState.STOPPED;
+    private UUID executionId = UUID.randomUUID();
+    private java.util.function.Function<Boolean, java.util.concurrent.CompletableFuture<Void>> executionIntentListener;
+    private record IntentSave(long revision, String status) {}
+    private long executionIntentRevision;
+    private final java.util.concurrent.atomic.AtomicReference<IntentSave> executionIntentSave =
+            new java.util.concurrent.atomic.AtomicReference<>(new IntentSave(0, "플레이어 상태 저장 꺼짐"));
     private boolean resumeAfterRespawn;
     private long ticks;
     private BlockFace digDirection;
@@ -123,7 +131,8 @@ public final class AIPlayer {
             return;
         }
         if (state == AIState.RUNNING) {
-            String text = brain.getCurrentGoal().name() + (brain.getForcedGoal() != null ? " (고정)" : "");
+            String text = services.config().learnedControl ? brain.policyLabel()
+                    : brain.getCurrentGoal().name() + (brain.getForcedGoal() != null ? " (고정)" : "");
             label.update(body.getPlayer(), text, NamedTextColor.YELLOW);
         } else {
             label.update(body.getPlayer(), state.name(), NamedTextColor.GRAY);
@@ -140,10 +149,41 @@ public final class AIPlayer {
     }
 
     public boolean start() {
+        return start(true);
+    }
+
+    boolean resumeFromSavedState() { return start(false); }
+    boolean stopForBackendFailure() { return stop(false); }
+    public UUID executionId() { return executionId; }
+    void restoreExecutionId(UUID value) { executionId = java.util.Objects.requireNonNull(value); }
+    void setExecutionIntentListener(java.util.function.Function<Boolean, java.util.concurrent.CompletableFuture<Void>> listener) {
+        executionIntentListener = listener;
+        executionIntentSave.set(new IntentSave(0, "저장된 의사 적용 또는 명시 요청 대기"));
+    }
+    public String executionIntentStatus() { return executionIntentSave.get().status(); }
+
+    private void recordExecutionIntent(boolean running) {
+        if (executionIntentListener == null) return;
+        long revision = ++executionIntentRevision;
+        var pending = new IntentSave(revision, "저장 중");
+        executionIntentSave.set(pending);
+        try {
+            executionIntentListener.apply(running).whenComplete((ignored, failure) -> {
+                executionIntentSave.compareAndSet(pending, new IntentSave(revision, failure == null ? "저장 완료" : "저장 실패 — 로그 확인"));
+            });
+        } catch (RuntimeException failure) {
+            executionIntentSave.compareAndSet(pending, new IntentSave(revision, "저장 실패 — 로그 확인"));
+        }
+    }
+
+    private boolean start(boolean explicit) {
         if (state != AIState.STOPPED) return false;
+        if (services.trainingBridge() != null && !services.trainingBridge().isAvailable()) return false;
+        if (services.config().learnedControl && services.learnedPolicy() == null && services.trainingBridge() == null) return false;
         state = AIState.RUNNING;
+        if (explicit) recordExecutionIntent(true);
         debug("Autonomous behavior started");
-        brain.getJournal().beginEpisode(Experience.StartReason.START);
+        if (!services.config().learnedControl) brain.getJournal().beginEpisode(Experience.StartReason.START);
         getTeam().say(this, Phrases.hello(getTeam().teamSize()), true);
         return true;
     }
@@ -229,17 +269,23 @@ public final class AIPlayer {
     }
 
     public boolean stop() {
+        return stop(true);
+    }
+
+    private boolean stop(boolean explicit) {
         if (state == AIState.DEAD) {
             // 리스폰 후에 다시 움직이지 않도록 예약만 취소한다.
             resumeAfterRespawn = false;
+            if (explicit) recordExecutionIntent(false);
             return true;
         }
-        if (state != AIState.RUNNING) return false;
+        if (state != AIState.RUNNING) { if (explicit) recordExecutionIntent(false); return false; }
         brain.getJournal().endEpisode(Experience.EndReason.STOPPED);
         brain.reset();
         // 멈춰 있는 동안 주변 엔티티나 월드에 대한 참조를 들고 있지 않는다.
         perception.reset();
         state = AIState.STOPPED;
+        if (explicit) recordExecutionIntent(false);
         debug("Autonomous behavior stopped");
         return true;
     }
@@ -270,7 +316,7 @@ public final class AIPlayer {
         state = resumeAfterRespawn ? AIState.RUNNING : AIState.STOPPED;
         debug("Respawned");
         if (state != AIState.RUNNING) return;
-        brain.getJournal().beginEpisode(Experience.StartReason.RESPAWN);
+        if (!services.config().learnedControl) brain.getJournal().beginEpisode(Experience.StartReason.RESPAWN);
         getTeam().say(this, Phrases.respawned(), true);
     }
 
@@ -527,6 +573,35 @@ public final class AIPlayer {
     // 지금 하고 있는 일과 그 이유. 아직 한 번도 판단하지 않았으면 null.
     public @Nullable DecisionTrace getDecision() {
         return brain.currentTrace();
+    }
+
+    public boolean acceptsLegacyGoals() { return !services.config().learnedControl; }
+
+    public java.util.List<String> policyDetails() {
+        var details = new java.util.ArrayList<>(brain.policyDetails());
+        details.add("재시작 의사 저장: " + executionIntentStatus());
+        return java.util.List.copyOf(details);
+    }
+    public String connectedBrainId() { return brain.connectedBrainId(); }
+    public java.util.concurrent.CompletableFuture<Void> prepareLearningChange() { requireMainThread(); return brain.prepareLearningChange(); }
+    public void acceptLearningChange(me.herry.minecraftAI.ai.learned.PpoBridge.Status status) { requireMainThread(); brain.acceptLearningChange(status); }
+    public void acceptKnownStatus(me.herry.minecraftAI.ai.learned.PpoBridge.Status status, long receivedTick) {
+        requireMainThread(); brain.acceptKnownStatus(status, receivedTick);
+    }
+
+    public String policyStatus() {
+        if (!services.config().learnedControl) return "기존 규칙 정책 (명시적 teacher 모드)";
+        if (services.config().trainingControl) return services.trainingBridge() == null ? "학습 연결 준비 안 됨" : brain.policyLabel() + " (실제 성능과 구분)";
+        return services.learnedPolicy() == null ? "호환 학습 모델 없음 — 자율 실행 중지"
+                : "학습 가중치 추론 " + services.learnedPolicy().sha256().substring(0, 12);
+    }
+
+    public void recordLearningObjective(double actualReward) {
+        requireMainThread(); brain.recordLearningObjective(actualReward);
+    }
+
+    public void recordLearningAdvancement(String key, boolean completed, boolean displayed) {
+        requireMainThread(); brain.recordLearningAdvancement(key, completed, displayed);
     }
 
     public DecisionLog getDecisionLog() {

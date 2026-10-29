@@ -76,3 +76,27 @@ learning:
 
 debug:
   enabled: false
+
+# Learned autonomous execution. A compatible, genuinely trained Paper RL artifact is required.
+# Missing/incompatible models keep autonomous actions idle; Teacher is never substituted automatically.
+# teacher is an explicit legacy/debug mode, not a learned policy.
+policy:
+  mode: learned
+  model: models/minecraft-rl-actor.json
+  # Development only: training mode additionally requires explicit opt-in. User products use learned inference.
+  allow-training: false
+  training-channel: training-session/channel
+  # Development ablation only: hide goal fields from both actor and critic, retain actual goal rewards/history/sight.
+  mask-objective-input: false
+  # Optional local development backend. Disabled users keep Java-only pretrained inference.
+  # Enabling requires an existing named catalog and Python/NumPy plus these same training sources.
+  # Missing/corrupt saved state never creates a new random model. allow-training remains an independent opt-in.
+  runtime:
+    enabled: false
+    python: python
+    script: training/train_paper_ppo.py
+    catalog: brain-catalog
+    runs: brain-runtime
+    model: ''
+    max-transitions: 1000000
+    session-save-seconds: 30

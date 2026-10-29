@@ -27,5 +27,6 @@ public enum PrimitiveType {
     CRAFT_ITEM,
     WAIT,
     SNEAK,
-    SWIM
+    SWIM,
+    MOVE_INPUT
 }

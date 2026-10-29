@@ -67,7 +67,7 @@ public final class PrimitiveAdapter {
             BlockFace.DOWN, BlockFace.UP, BlockFace.NORTH, BlockFace.SOUTH, BlockFace.EAST, BlockFace.WEST
     };
     private static final EnumSet<PrimitiveType> SUPPORTED = EnumSet.complementOf(
-            EnumSet.of(PrimitiveType.INTERACT_BLOCK, PrimitiveType.INTERACT_ENTITY));
+            EnumSet.of(PrimitiveType.INTERACT_BLOCK, PrimitiveType.INTERACT_ENTITY, PrimitiveType.MOVE_INPUT));
 
     private PrimitiveAdapter() {
     }
@@ -95,6 +95,7 @@ public final class PrimitiveAdapter {
                 case WAIT -> "Wait for a bounded number of ticks";
                 case SNEAK -> "Hold sneak for a bounded number of ticks and release it";
                 case SWIM -> "Use swimming inputs toward a local point in water";
+                case MOVE_INPUT -> "Hold selected player movement keys via the learned candidate lane";
                 case INTERACT_BLOCK, INTERACT_ENTITY -> "Unavailable in control schema version 1";
             };
             String limitation = switch (type) {
@@ -105,6 +106,7 @@ public final class PrimitiveAdapter {
                 case CRAFT_ITEM -> "Recipe action may craft intermediate ingredients; not individual grid clicks";
                 case BREAK_BLOCK -> "Reach, visibility, correct drop tool, floor, home, lava and falling-block guards apply";
                 case PLACE_BLOCK -> "Solid single-cell non-gravity blocks only";
+                case MOVE_INPUT -> "Learned candidate lane only; standalone control schema version 1 does not expose these keys";
                 case INTERACT_BLOCK, INTERACT_ENTITY -> "Unsupported commands are rejected, never replaced with a guessed action";
                 default -> "Availability must be checked for the concrete command before execution";
             };

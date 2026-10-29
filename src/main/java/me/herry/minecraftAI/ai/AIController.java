@@ -70,9 +70,11 @@ public final class AIController {
     private final TeamChat team;
     private final WorkBudget budget;
     private final AIServices services;
+    private final me.herry.minecraftAI.ai.learned.PpoBridge trainingBridge;
     private final SkinFetcher skins;
     private final InventoryViews views = new InventoryViews();
     private final @Nullable AIStateStore store;
+    private final @Nullable me.herry.minecraftAI.persist.ExecutionIntentStore executionIntents;
     // 학습용 기록을 파일로 쓰는 곳. 기록을 꺼 두었으면 null.
     private final @Nullable JsonlExperienceWriter experience;
 
@@ -82,26 +84,62 @@ public final class AIController {
     private @Nullable BukkitTask tickTask;
     private long serverTicks;
     private long lastSaveTick;
+    private long policyControlGeneration;
+    private me.herry.minecraftAI.ai.learned.PpoBridge.Status backendStatus;
+    private long backendStatusTick;
 
     /**
      * @param store AI 상태를 저장할 곳. null 이면 저장하지 않는다.
      */
     public AIController(JavaPlugin plugin, AIConfig config, AIDebugger debugger, CommunicationHub hub, @Nullable AIStateStore store) {
+        this(plugin, config, debugger, hub, store, null);
+    }
+
+    public AIController(JavaPlugin plugin, AIConfig config, AIDebugger debugger, CommunicationHub hub, @Nullable AIStateStore store,
+                        @Nullable java.nio.file.Path managedChannel) {
         this.plugin = plugin;
         this.config = config;
         this.hub = hub;
         this.store = store;
+        this.executionIntents = store == null ? null : new me.herry.minecraftAI.persist.ExecutionIntentStore(
+                plugin.getDataFolder().toPath().resolve("execution-intents"), plugin.getLogger()::info);
         this.team = new TeamChat(this::getAll, hub);
         this.budget = new WorkBudget(config.tickBudgetNanos);
         this.experience = !config.recordExperience ? null : new JsonlExperienceWriter(
                 plugin.getDataFolder().toPath().resolve("training-data"), config.experienceMaxBytes, plugin.getLogger()::warning);
+        this.trainingBridge = loadTrainingBridge(managedChannel);
         this.services = new AIServices(config, debugger, crafting,
                 new CombatSystem(config.engageRange, config.criticalHealth),
                 new SurvivalSystem(config.lowHealth, config.criticalHealth, config.eatBelow),
                 new Planner(), team, budget, experience == null ? ExperienceSink.NONE : experience,
-                plugin.getPluginMeta().getVersion(), plugin.getLogger()::warning);
+                plugin.getPluginMeta().getVersion(), plugin.getLogger()::warning, loadLearnedPolicy(), trainingBridge);
         this.skins = new SkinFetcher(plugin.getLogger());
         crafting.warmUp();
+    }
+
+    private me.herry.minecraftAI.ai.learned.PpoBridge loadTrainingBridge(@Nullable java.nio.file.Path managedChannel) {
+        if (!config.trainingControl) return null;
+        try {
+            var bridge = new me.herry.minecraftAI.ai.learned.PpoBridge(managedChannel == null
+                    ? plugin.getDataFolder().toPath().resolve(config.trainingChannel) : managedChannel);
+            bridge.setAvailable(!config.managedBackend);
+            return bridge;
+        }
+        catch (java.io.IOException failure) {
+            plugin.getLogger().warning("Training bridge unavailable; no Teacher fallback: " + failure.getMessage()); return null;
+        }
+    }
+
+    private me.herry.minecraftAI.ai.learned.PolicyWeights loadLearnedPolicy() {
+        if (!config.learnedControl || config.trainingControl) return null;
+        try {
+            var model = me.herry.minecraftAI.ai.learned.PolicyWeights.load(plugin.getDataFolder().toPath().resolve(config.learnedModelFile));
+            plugin.getLogger().info("Learned policy: " + model.sha256() + ", Paper environment steps=" + model.environmentSteps());
+            return model;
+        } catch (java.io.IOException | RuntimeException failure) {
+            plugin.getLogger().warning("Learned policy unavailable; autonomous execution will stay idle. No Teacher fallback. " + failure.getMessage());
+            return null;
+        }
     }
 
     // 이 이름으로 AI 를 만들 수 있는지 확인한다. 만들 수 있으면 OK.
@@ -130,6 +168,8 @@ public final class AIController {
         }
 
         AIPlayer ai = new AIPlayer(name, body, services, skin);
+        if (executionIntents != null) ai.setExecutionIntentListener(running -> executionIntents.save(ai.getName(), ai.executionId(), running));
+        if (backendStatus != null) ai.acceptKnownStatus(backendStatus, backendStatusTick);
         entries.put(key(name), new Entry(ai, body));
         hub.join(new Conversation(ai));
         refreshTickList();
@@ -176,6 +216,7 @@ public final class AIController {
     public boolean remove(String name) {
         Entry entry = entries.remove(key(name));
         if (entry == null) return false;
+        if (executionIntents != null) executionIntents.save(entry.ai.getName(), entry.ai.executionId(), false);
         discard(entry);
         if (store != null) store.delete(entry.ai.getName());
         refreshTickList();
@@ -247,6 +288,7 @@ public final class AIController {
         views.closeAll(entry.ai);
         team.forget(entry.ai.getName());
         hub.leave(entry.ai.getName());
+        if (executionIntents != null) executionIntents.save(entry.ai.getName(), entry.ai.executionId(), false);
         entry.ai.dispose();
         if (store != null) store.delete(entry.ai.getName());
         refreshTickList();
@@ -318,8 +360,12 @@ public final class AIController {
             // 저장 내용 일부를 읽지 못해도 AI 자체는 살려 둔다.
             plugin.getLogger().log(Level.WARNING, "Could not fully restore the state of AI player " + snapshot.name, e);
         }
-        if (snapshot.running) ai.start();
-        plugin.getLogger().info("Restored AI player " + snapshot.name + (snapshot.running ? " (running)" : " (stopped)"));
+        var desired = executionIntents == null ? java.util.Optional.<Boolean>empty() : executionIntents.read(ai.getName(), ai.executionId());
+        boolean shouldRun = desired.orElse(snapshot.running);
+        if (executionIntents != null && desired.isEmpty()) executionIntents.save(ai.getName(), ai.executionId(), shouldRun);
+        boolean restarted = shouldRun && ai.resumeFromSavedState();
+        plugin.getLogger().info("Restored AI player " + snapshot.name + (restarted ? " (running)" : " (stopped)"));
+        if (shouldRun && !restarted) plugin.getLogger().warning("Saved AI could not resume; no policy was substituted: " + snapshot.name);
         return true;
     }
 
@@ -361,9 +407,147 @@ public final class AIController {
     }
 
     /**
-     * 플러그인이 꺼질 때 호출된다. 상태를 저장하고, 모든 AI 를 내보내고, 틱 작업을 멈춘다.
+     * 공유 두뇌의 실행 전이를 확인한 뒤 같은 가중치의 학습 여부만 비동기로 변경한다.
      */
+    public void changeLearning(boolean enabled, BiConsumer<Boolean, String> completed) {
+        if (!Bukkit.isPrimaryThread()) throw new IllegalStateException("brain control must start on server thread");
+        if (enabled && !config.allowPolicyTraining) {
+            completed.accept(false, "현재 설정은 고정 추론만 허용합니다. 두뇌나 가중치를 바꾸지 않았습니다."); return;
+        }
+        if (trainingBridge == null) {
+            boolean alreadyOff = !enabled && services.learnedPolicy() != null;
+            completed.accept(alreadyOff, alreadyOff ? "현재 두뇌는 이미 고정 가중치 추론 상태입니다."
+                    : "현재 두뇌의 학습 연결이 준비되지 않았습니다. 모델을 초기화하거나 다른 모델로 바꾸지 않았습니다.");
+            return;
+        }
+        var identities = entries.values().stream().map(entry -> entry.ai.connectedBrainId()).filter(java.util.Objects::nonNull).distinct().toList();
+        if (identities.size() != 1) {
+            completed.accept(false, "같은 두뇌의 상태 응답을 먼저 확인해야 합니다. /ai stats 로 연결 상태를 확인하세요.");
+            return;
+        }
+        if (!trainingBridge.beginTransition()) { completed.accept(false, "다른 두뇌 설정 변경을 확인 중입니다."); return; }
+        long generation = ++policyControlGeneration;
+        var drains = new ArrayList<java.util.concurrent.CompletableFuture<Void>>();
+        try {
+            for (Entry entry : entries.values()) drains.add(entry.ai.prepareLearningChange());
+        } catch (RuntimeException failure) {
+            trainingBridge.endTransition(); completed.accept(false, "현재 행동을 안전하게 정리하지 못해 설정을 바꾸지 않았습니다."); return;
+        }
+        java.util.concurrent.CompletableFuture.allOf(drains.toArray(java.util.concurrent.CompletableFuture[]::new))
+                .thenCompose(ignored -> trainingBridge.setLearning(identities.getFirst(), enabled))
+                .whenComplete((result, failure) -> {
+                    if (!plugin.isEnabled()) { trainingBridge.endTransition(); return; }
+                    try {
+                        Bukkit.getScheduler().runTask(plugin, () -> {
+                            if (generation != policyControlGeneration) return;
+                            if (failure == null) acceptBackendStatus(result.status());
+                            trainingBridge.endTransition();
+                            if (failure != null) {
+                                plugin.getLogger().log(Level.WARNING, "Brain learning change not confirmed; no model initialization", failure);
+                                completed.accept(false, "학습 상태 변경을 확인하지 못했습니다. 두뇌를 초기화하지 않았으며 다음 상태 응답을 확인해야 합니다.");
+                            } else {
+                                plugin.getLogger().info("Brain " + identities.getFirst() + " learning=" + enabled + " weights=" + result.weightsSha256());
+                                completed.accept(true, "같은 두뇌의 학습을 " + (enabled ? "켰습니다." : "껐습니다. 고정 가중치로 추론합니다."));
+                            }
+                        });
+                    } catch (RuntimeException stopped) {
+                        trainingBridge.endTransition();
+                        plugin.getLogger().warning("Server stopped before brain state acknowledgement could be delivered");
+                    }
+                });
+    }
+
+    public void manageModel(String operation, String name, BiConsumer<Boolean, List<String>> completed) {
+        if (!Bukkit.isPrimaryThread()) throw new IllegalStateException("model control must start on server thread");
+        if (trainingBridge == null) {
+            completed.accept(false, List.of("모델 관리 백엔드가 연결되지 않았습니다. 현재 모델은 유지됩니다.")); return;
+        }
+        if (!java.util.Set.of("list", "info", "save", "new", "load").contains(operation)
+                || (operation.equals("list") ? !name.isEmpty() : !me.herry.minecraftAI.ai.learned.PpoBridge.validModelName(name))) {
+            completed.accept(false, List.of("올바른 모델 이름과 관리 명령을 입력하세요.")); return;
+        }
+        var identities = entries.values().stream().map(entry -> entry.ai.connectedBrainId())
+                .filter(java.util.Objects::nonNull).distinct().toList();
+        if (identities.size() != 1) {
+            completed.accept(false, List.of("/ai stats 로 같은 두뇌의 연결 상태를 먼저 확인하세요.")); return;
+        }
+        boolean loading = operation.equals("load");
+        boolean changing = operation.equals("save") || loading;
+        if (changing ? !trainingBridge.beginTransition() : trainingBridge.isTransitioning()) {
+            completed.accept(false, List.of("다른 두뇌 설정 변경을 확인 중입니다.")); return;
+        }
+        long generation = changing ? ++policyControlGeneration : policyControlGeneration;
+        var drains = new ArrayList<java.util.concurrent.CompletableFuture<Void>>();
+        try {
+            // Inspection does not cancel an active action. Saving first closes its acknowledged transition.
+            if (changing) for (Entry entry : entries.values()) drains.add(entry.ai.prepareLearningChange());
+        } catch (RuntimeException failure) {
+            if (changing) trainingBridge.endTransition();
+            completed.accept(false, List.of("현재 행동을 정리하지 못해 모델 명령을 실행하지 않았습니다.")); return;
+        }
+        java.util.concurrent.CompletableFuture.allOf(drains.toArray(java.util.concurrent.CompletableFuture[]::new))
+                .thenCompose(ignored -> trainingBridge.modelCommand(identities.getFirst(), operation, name))
+                .whenComplete((result, failure) -> {
+                    if (!plugin.isEnabled()) { if (changing) trainingBridge.endTransition(); return; }
+                    try {
+                        Bukkit.getScheduler().runTask(plugin, () -> {
+                            if (generation != policyControlGeneration) {
+                                completed.accept(false, List.of("조회 중 두뇌 설정이 바뀌었습니다. 다시 조회하세요.")); return;
+                            }
+                            if (changing && failure == null) acceptBackendStatus(result.status());
+                            if (changing) trainingBridge.endTransition();
+                            if (failure != null) {
+                                plugin.getLogger().log(Level.WARNING, "Model command not confirmed; no automatic initialization", failure);
+                                Throwable reason = failure;
+                                while ((reason instanceof java.util.concurrent.CompletionException || reason instanceof java.util.concurrent.ExecutionException)
+                                        && reason.getCause() != null) reason = reason.getCause();
+                                if (loading && !(reason instanceof me.herry.minecraftAI.ai.learned.PpoBridge.ModelRejectedException)) {
+                                    setBackendAvailable(false);
+                                    completed.accept(false, List.of("모델 교체 완료를 확인하지 못해 AI를 정지했습니다.",
+                                            "저장된 세션을 확인하고 서버 재시작으로 복원하세요. 새 초기화로 대체하지 않았습니다."));
+                                    return;
+                                }
+                                completed.accept(false, List.of("모델 명령을 확인하지 못했습니다. 목록 설정·원본·이름 충돌 또는 시험용 자료 제한을 확인하세요.",
+                                        "현재 두뇌를 교체하거나 AI를 다시 시작하지 않았습니다."));
+                                return;
+                            }
+                            var lines = new ArrayList<String>();
+                            lines.add(operation.equals("save") ? "현재 두뇌를 '" + name + "' 이름으로 저장했습니다."
+                                    : loading ? "모델 '" + name + "'을 불러왔습니다. 학습 설정과 AI 정지 의사는 유지됩니다."
+                                    : operation.equals("new") ? "새 초기 두뇌를 '" + name + "' 이름으로 등록했습니다. 현재 두뇌는 유지됩니다."
+                                    : "저장된 모델 " + result.models().size() + "개");
+                            for (var model : result.models()) {
+                                if (!model.valid()) { lines.add(model.name() + ": 원본 누락 또는 손상 — 사용 불가"); continue; }
+                                lines.add(model.name() + " | ID " + model.brainId() + " | 버전 " + model.policyVersion()
+                                        + " | 갱신 " + model.gradientUpdates() + " | 학습 " + (model.learningEnabled() ? "켜짐" : "꺼짐")
+                                        + (model.initializationOnly() ? " | 학습 전 초기 상태" : ""));
+                            }
+                            if (result.hasMore()) lines.add("목록은 32개까지 표시합니다. 나머지는 이름으로 조회하세요.");
+                            completed.accept(true, List.copyOf(lines));
+                        });
+                    } catch (RuntimeException stopped) {
+                        if (changing) trainingBridge.endTransition();
+                        plugin.getLogger().warning("Server stopped before model acknowledgement could be delivered");
+                    }
+                });
+    }
+
+    public void setBackendAvailable(boolean available) {
+        if (!Bukkit.isPrimaryThread()) throw new IllegalStateException("backend lifecycle must return to server thread");
+        if (trainingBridge != null) trainingBridge.setAvailable(available);
+        if (!available) for (Entry entry : entries.values()) entry.ai.stopForBackendFailure();
+    }
+
+    public void acceptBackendStatus(me.herry.minecraftAI.ai.learned.PpoBridge.Status status) {
+        if (!Bukkit.isPrimaryThread()) throw new IllegalStateException("backend status must return to server thread");
+        backendStatus = java.util.Objects.requireNonNull(status);
+        backendStatusTick = Integer.toUnsignedLong(Bukkit.getCurrentTick());
+        for (Entry entry : entries.values()) entry.ai.acceptKnownStatus(status, backendStatusTick);
+    }
+
     public void shutdown() {
+        policyControlGeneration++;
+        try {
         saveAll(false, "shutdown");
         List<Entry> all = new ArrayList<>(entries.values());
         entries.clear();
@@ -376,6 +560,10 @@ public final class AIController {
         refreshTickList();
         // 남은 기록을 다 쓰고 파일을 닫는다. 오래 걸리면 기다리지 않는다 (서버 종료를 붙잡지 않는다).
         if (experience != null) experience.close();
+        if (trainingBridge != null) trainingBridge.close();
+        } finally {
+            if (executionIntents != null) executionIntents.close();
+        }
     }
 
     private void respawn(Entry entry) {

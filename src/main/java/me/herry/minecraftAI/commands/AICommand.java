@@ -30,7 +30,7 @@ import java.util.function.Function;
  */
 public class AICommand implements TabExecutor {
     public static final String PERMISSION = "minecraftai.admin";
-    private static final List<String> SUB_COMMANDS = List.of("spawn", "remove", "start", "stop", "status", "inv", "goal", "debug",
+    private static final List<String> SUB_COMMANDS = List.of("spawn", "remove", "start", "stop", "status", "stats", "training", "model", "objective", "inv", "goal", "debug",
             "why", "brain", "plan", "observe", "learn", "memory", "perf", "home", "say", "save");
     // 디버그를 켜고 끄는 말. "/ai debug start" 처럼 입력해도 알아듣게 한다.
     private static final List<String> SWITCH_ON = List.of("on", "start", "true", "enable", "켜기");
@@ -62,6 +62,10 @@ public class AICommand implements TabExecutor {
             case "start" -> start(sender, args);
             case "stop" -> stop(sender, args);
             case "status" -> status(sender, args);
+            case "stats" -> inspect(sender, args, "두뇌와 학습 상태", AIPlayer::policyDetails);
+            case "training" -> training(sender, args);
+            case "model" -> model(sender, args);
+            case "objective" -> objective(sender, args);
             case "inv", "inventory" -> inventory(sender, args);
             case "goal" -> goal(sender, args);
             case "debug" -> debug(sender, args);
@@ -83,6 +87,35 @@ public class AICommand implements TabExecutor {
     }
 
     // AI 의 속을 들여다보는 명령들. 이름을 생략하면 AI 가 하나뿐일 때 그 AI 를 대상으로 한다.
+    private void objective(CommandSender sender, String[] args) {
+        if (args.length < 3) { error(sender, "사용법: /ai objective <이름> <info|clear|acquire 아이템 수량>"); return; }
+        AIPlayer ai = controller.get(args[1]);
+        if (ai == null) { error(sender, "해당 AI를 찾을 수 없습니다."); return; }
+        if (args[2].equalsIgnoreCase("info") && args.length == 3) {
+            var actual = me.herry.minecraftAI.ai.learned.PolicyCandidates.observe(ai, null, 0);
+            var task = ai.getPolicyTaskMemory().observe(ai.getWorldId(), actual.stock());
+            info(sender, task.objective() == null ? "설정된 작업 목표가 없습니다."
+                    : task.objective().goal().describe() + " / 보유 " + task.owned() + " / 남음 " + task.remaining()
+                    + " / 같은 월드 " + task.worldMatches());
+            info(sender, "최근 완료 행동 " + task.recentOutcomes().size() + "개. 목표와 작업 기억은 정책 입력에 연결돼 있으며, 실제 활용 능력은 별도 평가가 필요합니다.");
+            return;
+        }
+        if (ai.getState() != me.herry.minecraftAI.ai.AIState.STOPPED) { error(sender, "목표를 바꾸려면 AI를 먼저 정지해 주세요."); return; }
+        try {
+            if (args[2].equalsIgnoreCase("clear") && args.length == 3) ai.getPolicyTaskMemory().clearObjective();
+            else if (args[2].equalsIgnoreCase("acquire") && args.length == 5) {
+                var item = org.bukkit.Material.matchMaterial(args[3]);
+                if (item == null || item.isAir() || !item.isItem()) throw new IllegalArgumentException("registered item required");
+                ai.getPolicyTaskMemory().acquire(ai.getWorldId(), item.name(), Integer.parseInt(args[4]), ai.getTicks());
+                var admitted = ai.getPolicyTaskMemory().observe(ai.getWorldId(), java.util.Map.of()).objective();
+                Bukkit.getLogger().info("[AIObjective] name=" + ai.getName() + " item=" + admitted.goal().item()
+                        + " count=" + admitted.goal().count() + " id=" + admitted.id() + " world=" + admitted.world());
+            }
+            else { error(sender, "사용법: /ai objective <이름> <info|clear|acquire 아이템 수량>"); return; }
+            info(sender, "작업 목표 기록을 변경했습니다. 자동 시작하지 않습니다.");
+        } catch (IllegalArgumentException invalid) { error(sender, "정확한 아이템 이름과 1~4096 수량을 입력해 주세요."); }
+    }
+
     private void inspect(CommandSender sender, String[] args, String title, Function<AIPlayer, List<String>> report) {
         AIPlayer ai = resolve(sender, args, 1);
         if (ai == null) return;
@@ -139,9 +172,33 @@ public class AICommand implements TabExecutor {
         controller.tell(ai, sender.getName(), text);
     }
 
+    private void training(CommandSender sender, String[] args) {
+        if (args.length != 2 || !List.of("on", "off").contains(args[1].toLowerCase(Locale.ROOT))) {
+            error(sender, "사용법: /ai training <on|off>"); return;
+        }
+        controller.changeLearning(args[1].equalsIgnoreCase("on"), (success, message) -> {
+            if (success) info(sender, message); else error(sender, message);
+        });
+    }
+
     private void save(CommandSender sender) {
         controller.saveAll(false);
         info(sender, "AI " + controller.count() + "명의 상태를 저장했습니다.");
+    }
+
+    private void model(CommandSender sender, String[] args) {
+        String operation = args.length >= 2 ? args[1].toLowerCase(Locale.ROOT) : "";
+        if (!(operation.equals("list") && args.length == 2
+                || List.of("info", "save", "new", "load").contains(operation) && args.length == 3)) {
+            error(sender, "사용법: /ai model <list|info 이름|save 이름|new 이름|load 이름>"); return;
+        }
+        String name = operation.equals("list") ? "" : args[2];
+        if (!operation.equals("list") && !me.herry.minecraftAI.ai.learned.PpoBridge.validModelName(name)) {
+            error(sender, "모델 이름은 소문자 영숫자·밑줄·하이픈 1~64자로 입력하세요. 예약 이름은 사용할 수 없습니다."); return;
+        }
+        controller.manageModel(operation, name, (success, lines) -> {
+            for (String line : lines) { if (success) info(sender, line); else error(sender, line); }
+        });
     }
 
     private void spawn(CommandSender sender, String[] args) {
@@ -200,7 +257,7 @@ public class AICommand implements TabExecutor {
         AIPlayer ai = resolve(sender, args, 1);
         if (ai == null) return;
         if (ai.start()) info(sender, "AI '" + ai.getName() + "' 의 자율 행동을 시작했습니다.");
-        else error(sender, "AI '" + ai.getName() + "' 은(는) 지금 시작할 수 없습니다. (상태: " + ai.getState() + ")");
+        else error(sender, "AI '" + ai.getName() + "' 은(는) 지금 시작할 수 없습니다. (상태: " + ai.getState() + ", " + ai.policyStatus() + ")");
     }
 
     private void stop(CommandSender sender, String[] args) {
@@ -219,6 +276,8 @@ public class AICommand implements TabExecutor {
         GoalType forced = ai.getForcedGoal();
         line(sender, "AI 이름", ai.getName());
         line(sender, "AI 상태", ai.getState().name());
+        line(sender, "재시작 의사 저장", ai.executionIntentStatus());
+        line(sender, "판단 방식", ai.policyStatus());
         line(sender, "현재 목표", ai.getCurrentGoal().name() + (forced != null ? " (강제 지정)" : ""));
         line(sender, "현재 행동", ai.getCurrentActionName());
         line(sender, "위치", location.getBlockX() + ", " + location.getBlockY() + ", " + location.getBlockZ() + " (" + player.getWorld().getName() + ")");
@@ -256,6 +315,10 @@ public class AICommand implements TabExecutor {
             goal = GoalType.valueOf(args[1].toUpperCase(Locale.ROOT));
         } catch (IllegalArgumentException e) {
             error(sender, "알 수 없는 목표입니다: " + args[1]);
+            return;
+        }
+        if (!ai.acceptsLegacyGoals()) {
+            error(sender, "학습 정책에서는 이전 목표 고정 기능을 사용하지 않습니다. 사용자 목표를 모델 입력으로 전달하는 기능은 준비 중입니다.");
             return;
         }
         ai.setForcedGoal(goal);
@@ -310,12 +373,15 @@ public class AICommand implements TabExecutor {
 
         if (args.length == 1) return filter(SUB_COMMANDS, args[0]);
         String sub = args[0].toLowerCase(Locale.ROOT);
+        if (sub.equals("objective") && args.length == 3) return filter(List.of("info", "clear", "acquire"), args[2]);
         if (args.length == 2) {
             return switch (sub) {
-                case "remove", "start", "stop", "status", "inv", "inventory", "why", "brain", "plan", "observe", "learn", "memory", "perf", "say" ->
+                case "remove", "start", "stop", "status", "stats", "objective", "inv", "inventory", "why", "brain", "plan", "observe", "learn", "memory", "perf", "say" ->
                         filter(names(), args[1]);
                 case "goal" -> filter(goalNames(), args[1]);
                 case "debug" -> filter(List.of("on", "off"), args[1]);
+                case "training" -> filter(List.of("on", "off"), args[1]);
+                case "model" -> filter(List.of("list", "info", "save", "new", "load"), args[1]);
                 case "home" -> filter(List.of("set", "clear"), args[1]);
                 default -> List.of();
             };
