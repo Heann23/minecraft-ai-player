@@ -119,6 +119,7 @@ public final class PolicyCandidates {
             if (item != null && !item.isEmpty()) counts.merge(item.getType().name(), item.getAmount(), Integer::sum);
         }
         TaskPolicyContext.encode(body, ai.getPolicyTaskMemory().observe(ai.getWorldId(), counts), ai.getTicks(), ai.getWorldId());
+        if (ai.getConfig().maskObjectiveInput) TaskPolicyContext.maskObjective(body);
         var sight = DirectionalPolicyContext.capture(ai, body);
         return new Observed(state, survival, counts, body, sight);
     }

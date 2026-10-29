@@ -58,6 +58,7 @@ public final class AIConfig {
     public final String trainingChannel;
     public final boolean managedBackend;
     public final boolean allowPolicyTraining;
+    public final boolean maskObjectiveInput;
     public final String backendPython, backendScript, backendCatalog, backendRuns, backendModel;
     public final int backendMaxTransitions, backendSessionSaveSeconds;
 
@@ -123,6 +124,8 @@ public final class AIConfig {
         allowPolicyTraining = config.getBoolean("policy.allow-training", false);
         trainingControl = policyMode.equals("training") || managedBackend;
         learnedControl = !policyMode.equals("teacher");
+        maskObjectiveInput = config.getBoolean("policy.mask-objective-input", false);
+        if (maskObjectiveInput) warn.accept("Objective input is masked for a development ablation; actual task accounting remains enabled");
         java.nio.file.Path channel = java.nio.file.Path.of(config.getString("policy.training-channel", "training-session/channel")).normalize();
         if (channel.toString().isBlank() || channel.isAbsolute() || channel.startsWith("..")) throw new IllegalArgumentException("training channel must stay inside plugin directory");
         trainingChannel = channel.toString();

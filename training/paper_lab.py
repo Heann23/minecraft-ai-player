@@ -159,6 +159,8 @@ def validate_plan_extension(parent: dict, current: dict):
 
 def validate_options(args, *, plan=None):
     plan = read_plan(args.plan) if plan is None else validate_plan(plan)
+    if getattr(args, "mask_objective_input", False) and requested_objective(args) is None:
+        raise ValueError("objective-input ablation requires an explicit actual objective")
     learning = getattr(args, "learning", None)
     if learning not in (None, "on", "off") or learning is not None and (args.mode != "train"
             or getattr(args, "inference_only", False) or getattr(args, "managed_backend", False)):
@@ -282,6 +284,15 @@ def named_session(revision):
     return dict(revision["session"], modelName=model_name(revision["name"]))
 
 
+def objective_input_config(config, masked):
+    if not masked:
+        return config
+    changed, count = re.subn(r"(?m)^  mask-objective-input: false$", "  mask-objective-input: true", config)
+    if count != 1:
+        raise ValueError("objective input masking was not explicitly configured exactly once")
+    return changed
+
+
 def requested_objective(args):
     item, count = getattr(args, "objective_item", None), getattr(args, "objective_count", None)
     if item is None and count is None:
@@ -356,6 +367,7 @@ def run(args):
     config = (source / "src/main/resources/config.yml").read_text(encoding="utf-8")
     # Disable persistence and chat in the new experiment only. No old AI state or credentials are loaded.
     config = config.replace("enabled: true", "enabled: false")
+    config = objective_input_config(config, getattr(args, "mask_objective_input", False))
     if args.player_persistence:
         config, replaced = re.subn(r"(?m)^(persistence:\n(?:  #[^\n]*\n)*  enabled:) false$", r"\1 true", config)
         if replaced != 1:
@@ -400,6 +412,7 @@ def run(args):
                 "teacherLabels": False, "grantedItems": False, "teleportDuringEpisode": False,
                 "allWorldAutonomyProven": False}
     manifest["requestedObjective"] = objective
+    manifest["objectiveInputMode"] = "masked" if getattr(args, "mask_objective_input", False) else "visible"
     manifest["objectiveAdmission"] = None
     manifest["backendOwner"] = "plugin" if args.managed_backend else "external-lab"
     manifest["seedSelection"] = "random-per-world-run" if random_seed else "explicit-frozen-plan"
@@ -664,6 +677,7 @@ def main():
     parser.add_argument("--policy-seed", type=int, default=777)
     parser.add_argument("--objective-item", help="exact canonical item; server acknowledgement is required before play")
     parser.add_argument("--objective-count", type=int, help="current ownership target 1..4096; requires --objective-item")
+    parser.add_argument("--mask-objective-input", action="store_true", help="development control: zero only goal state columns 208..231 in actor/critic observations; actual reward accounting is unchanged")
     parser.add_argument("--start-time", type=int, default=0, help="explicit world time prepared before spawning; no time changes during play")
     parser.add_argument("--model", type=Path)
     parser.add_argument("--resume", type=Path)

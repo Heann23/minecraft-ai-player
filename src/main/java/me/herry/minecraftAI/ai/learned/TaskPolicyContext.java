@@ -3,6 +3,10 @@ package me.herry.minecraftAI.ai.learned;
 /** v5 state extension. Goal identity is bounded/hashing, not a semantic generalization guarantee. */
 final class TaskPolicyContext {
     private TaskPolicyContext() {}
+    static void maskObjective(double[] state) {
+        if (state.length != PolicyFrame.STATE_SIZE) throw new IllegalArgumentException("invalid task context");
+        java.util.Arrays.fill(state, 208, 232, 0);
+    }
     static void encode(double[] state, PolicyTaskMemory.View view, long tick, java.util.UUID world) {
         if (state.length != PolicyFrame.STATE_SIZE || tick < 0) throw new IllegalArgumentException("invalid task context");
         java.util.Arrays.fill(state, 208, 240, 0);

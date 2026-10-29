@@ -11,6 +11,15 @@ from paper_lab import read_plan, validate_options, summarize_game_log, validate_
 
 
 class SeedPlanTests(unittest.TestCase):
+    def test_objective_masking_is_explicit_and_does_not_change_reward_or_backend_settings(self):
+        from paper_lab import objective_input_config
+        config = "policy:\n  mask-objective-input: false\n  allow-training: true\n  mode: training\n"
+        self.assertEqual(objective_input_config(config, False), config)
+        self.assertEqual(objective_input_config(config, True), config.replace("mask-objective-input: false", "mask-objective-input: true"))
+        for malformed in ("policy:\n", config + "  mask-objective-input: false\n"):
+            with self.assertRaises(ValueError):
+                objective_input_config(malformed, True)
+
     def test_objective_requires_both_exact_fields_and_matching_server_admission(self):
         args = argparse.Namespace(objective_item="OAK_LOG", objective_count=4)
         goal = requested_objective(args)

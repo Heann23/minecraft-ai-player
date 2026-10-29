@@ -5,6 +5,23 @@ import java.util.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 class TaskPolicyContextTest {
+    @Test void goalAblationPreservesOutcomeHistorySightAndActualCompletionAccounting() {
+        UUID world = UUID.randomUUID(); var memory = new PolicyTaskMemory();
+        memory.acquire(world, "OAK_LOG", 1, 10);
+        memory.ended(world, 11, "mine:1", "SUCCESS", "");
+        var actual = memory.observe(world, Map.of("OAK_LOG", 1));
+        double[] state = new double[PolicyFrame.STATE_SIZE];
+        Arrays.fill(state, .25);
+        TaskPolicyContext.encode(state, actual, 12, world);
+        double[] before = state.clone();
+        TaskPolicyContext.maskObjective(state);
+        for (int i = 0; i < state.length; i++)
+            assertEquals(i >= 208 && i < 232 ? 0 : before[i], state[i]);
+        assertTrue(actual.currentlyAchieved());
+        assertEquals(1, actual.owned());
+        assertEquals(1, state[233]);
+        assertEquals(actual, memory.observe(world, Map.of("OAK_LOG", 1)));
+    }
     @Test void goalProgressAndWorldScopeReachTheVectorWithoutChangingPriorFeatures() {
         UUID world = UUID.randomUUID(); var memory = new PolicyTaskMemory();
         memory.acquire(world, "OAK_LOG", 4, 10);

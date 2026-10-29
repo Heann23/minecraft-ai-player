@@ -86,6 +86,8 @@ policy:
   # Development only: training mode additionally requires explicit opt-in. User products use learned inference.
   allow-training: false
   training-channel: training-session/channel
+  # Development ablation only: hide goal fields from both actor and critic, retain actual goal rewards/history/sight.
+  mask-objective-input: false
   # Optional local development backend. Disabled users keep Java-only pretrained inference.
   # Enabling requires an existing named catalog and Python/NumPy plus these same training sources.
   # Missing/corrupt saved state never creates a new random model. allow-training remains an independent opt-in.
