@@ -5,7 +5,7 @@ import org.bukkit.FluidCollisionMode;
 import org.bukkit.util.Vector;
 import java.util.Arrays;
 
-/** Eight horizontal sight rays in the current heading. No resource ranking or suggested movement. */
+/** Eight yaw-offset sight rays at the current view pitch. No resource ranking or suggested movement. */
 final class DirectionalPolicyContext {
     private static final double[] ANGLES = {-60, -30, -10, -2, 2, 10, 30, 60};
     private static final int RANGE = 16;
@@ -18,14 +18,18 @@ final class DirectionalPolicyContext {
         for (int ray = 0; ray < ANGLES.length; ray++) {
             if (ai.getWorkBudget().isExhausted()) break;
             double radians = Math.toRadians(eye.getYaw() + ANGLES[ray]);
-            var direction = new Vector(-Math.sin(radians), 0, Math.cos(radians));
+            double pitch = Math.toRadians(eye.getPitch());
+            var direction = new Vector(-Math.sin(radians) * Math.cos(pitch), -Math.sin(pitch),
+                    Math.cos(radians) * Math.cos(pitch));
             boolean loaded = true;
             // Never ask the ray tracer to load an unseen chunk.
-            for (int step = 0; step <= RANGE; step++) {
-                int x = (int) Math.floor(eye.getX() + direction.getX() * step);
-                int z = (int) Math.floor(eye.getZ() + direction.getZ() * step);
-                if (ai.getWorkBudget().isExhausted() || !world.isChunkLoaded(x >> 4, z >> 4)) { loaded = false; break; }
-            }
+            int startX = eye.getBlockX() >> 4, startZ = eye.getBlockZ() >> 4;
+            int endX = ((int) Math.floor(eye.getX() + direction.getX() * RANGE)) >> 4;
+            int endZ = ((int) Math.floor(eye.getZ() + direction.getZ() * RANGE)) >> 4;
+            // The full bounding rectangle also covers tiny diagonal intersections between sample points.
+            for (int x = Math.min(startX, endX); x <= Math.max(startX, endX) && loaded; x++)
+                for (int z = Math.min(startZ, endZ); z <= Math.max(startZ, endZ); z++)
+                    if (ai.getWorkBudget().isExhausted() || !world.isChunkLoaded(x, z)) { loaded = false; break; }
             if (!loaded) continue;
             var hit = world.rayTraceBlocks(eye, direction, RANGE, FluidCollisionMode.ALWAYS, false);
             var block = hit == null ? null : hit.getHitBlock();
