@@ -51,7 +51,7 @@ public final class PolicyCandidates {
         public Action create(AIPlayer ai) {
             if (movement != null) return new MovementInputAction(movement, commitmentTicks);
             if (equipment != null) return new EquipExactAction(equipment);
-            if (recipe != null) return new CraftItemAction(Material.valueOf(recipe.result()), recipe.resultAmount(), recipe.id());
+            if (recipe != null) return new VanillaCraftAction(Material.valueOf(recipe.result()), recipe.id());
             if (consumable != null) return new ConsumeExactAction(ai.getWorldId(), consumable);
             if (command instanceof PrimitiveCommand.Attack hit) return new StrikeExactAction(ai.getWorldId(), hit.entityId());
             return PrimitiveAdapter.create(ai, command);
