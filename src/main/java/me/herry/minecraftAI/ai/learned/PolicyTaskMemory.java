@@ -1,7 +1,6 @@
 package me.herry.minecraftAI.ai.learned;
 
 import me.herry.minecraftAI.ai.goal.model.AcquireGoal;
-import org.bukkit.Material;
 import java.util.*;
 
 /** Bounded working memory. Describes an objective and actual outcomes; never chooses actions or awards rewards. */
@@ -24,10 +23,12 @@ public final class PolicyTaskMemory {
     private final Deque<Outcome> outcomes = new ArrayDeque<>();
 
     public void acquire(UUID world, String material, int count, long tick) {
-        Material exact = Material.matchMaterial(material);
-        if (exact == null || exact.isAir() || !exact.isItem() || count < 1 || count > 4096 || tick < 0)
+        // Registry resolution belongs to the server admission boundary, not a persisted value object.
+        String exact = material == null ? "" : material.toUpperCase(Locale.ROOT);
+        if (!exact.matches("[A-Z][A-Z0-9_]{0,127}") || Set.of("AIR", "CAVE_AIR", "VOID_AIR").contains(exact)
+                || count < 1 || count > 4096 || tick < 0)
             throw new IllegalArgumentException("exact item, count 1..4096 and valid tick required");
-        objective = new Objective(UUID.randomUUID(), Objects.requireNonNull(world), new AcquireGoal(exact.name(), count), tick);
+        objective = new Objective(UUID.randomUUID(), Objects.requireNonNull(world), new AcquireGoal(exact, count), tick);
     }
     public void clearObjective() { objective = null; }
     public View observe(UUID world, Map<String, Integer> stock) {

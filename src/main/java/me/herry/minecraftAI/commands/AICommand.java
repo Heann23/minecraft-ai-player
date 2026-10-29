@@ -103,8 +103,11 @@ public class AICommand implements TabExecutor {
         if (ai.getState() != me.herry.minecraftAI.ai.AIState.STOPPED) { error(sender, "목표를 바꾸려면 AI를 먼저 정지해 주세요."); return; }
         try {
             if (args[2].equalsIgnoreCase("clear") && args.length == 3) ai.getPolicyTaskMemory().clearObjective();
-            else if (args[2].equalsIgnoreCase("acquire") && args.length == 5)
-                ai.getPolicyTaskMemory().acquire(ai.getWorldId(), args[3], Integer.parseInt(args[4]), ai.getTicks());
+            else if (args[2].equalsIgnoreCase("acquire") && args.length == 5) {
+                var item = org.bukkit.Material.matchMaterial(args[3]);
+                if (item == null || item.isAir() || !item.isItem()) throw new IllegalArgumentException("registered item required");
+                ai.getPolicyTaskMemory().acquire(ai.getWorldId(), item.name(), Integer.parseInt(args[4]), ai.getTicks());
+            }
             else { error(sender, "사용법: /ai objective <이름> <info|clear|acquire 아이템 수량>"); return; }
             info(sender, "작업 목표 기록을 변경했습니다. 자동 시작하지 않습니다.");
         } catch (IllegalArgumentException invalid) { error(sender, "정확한 아이템 이름과 1~4096 수량을 입력해 주세요."); }
