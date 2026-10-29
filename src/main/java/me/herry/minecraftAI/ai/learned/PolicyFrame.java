@@ -19,13 +19,35 @@ public record PolicyFrame(UUID world, long serverTick, double[] state, List<Opti
 
     /** Optional evidence only; not concatenated into the actor or critic input. Negative counts mean not visited. */
     public record Discovery(String schema, List<String> visitedSources, Map<String, Integer> generatedBySource,
-                            boolean budgetExhausted, int recipeOptions, int recipesChecked, boolean recipeScanComplete) {
+                            boolean budgetExhausted, int recipeOptions, int recipesChecked, boolean recipeScanComplete,
+                            ConsumptionScan consumption) {
+        public Discovery(String schema, List<String> visitedSources, Map<String, Integer> generatedBySource,
+                         boolean budgetExhausted, int recipeOptions, int recipesChecked, boolean recipeScanComplete) {
+            this(schema, visitedSources, generatedBySource, budgetExhausted, recipeOptions, recipesChecked, recipeScanComplete, null);
+        }
         public Discovery {
             if (!"candidate-discovery/v1".equals(schema) || recipeOptions < -1 || recipesChecked < -1)
                 throw new IllegalArgumentException("invalid discovery evidence");
             visitedSources = List.copyOf(visitedSources);
             generatedBySource = Map.copyOf(generatedBySource);
         }
+    }
+
+    /** Counts only inspected storage slots. Missing evidence means the source was not visited. */
+    public record ConsumptionScan(int snapshotSlots, int inspectedSlots, int emptySlots, int nonConsumableSlots,
+                                  int hungerBlockedSlots, int otherBlockedSlots, int unknownSlots,
+                                  int unsupportedSlots, int availableSlots) {
+        public ConsumptionScan {
+            int total = 0;
+            for (int count : new int[]{emptySlots, nonConsumableSlots, hungerBlockedSlots, otherBlockedSlots,
+                    unknownSlots, unsupportedSlots, availableSlots}) {
+                if (count < 0 || count > 36) throw new IllegalArgumentException("invalid consumption count");
+                total += count;
+            }
+            if (snapshotSlots < 0 || snapshotSlots > 36 || inspectedSlots < 0 || inspectedSlots > snapshotSlots || total != inspectedSlots)
+                throw new IllegalArgumentException("invalid consumption coverage");
+        }
+        public boolean complete() { return snapshotSlots == 36 && inspectedSlots == 36; }
     }
 
     public PolicyFrame {

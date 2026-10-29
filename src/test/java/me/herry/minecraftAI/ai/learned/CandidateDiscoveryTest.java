@@ -8,6 +8,19 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /** Discovery coverage under a shared tick budget, not learned behavior or Minecraft capability acceptance. */
 class CandidateDiscoveryTest {
+    @Test void consumptionAbsenceRequiresCoverageAndNeverChangesPolicyInputs() {
+        var partial = new PolicyFrame.ConsumptionScan(36, 3, 1, 1, 1, 0, 0, 0, 0);
+        assertFalse(partial.complete());
+        assertTrue(new PolicyFrame.ConsumptionScan(36, 36, 36, 0, 0, 0, 0, 0, 0).complete());
+        assertThrows(IllegalArgumentException.class, () -> new PolicyFrame.ConsumptionScan(36, 3, 0, 0, 0, 0, 0, 0, 0));
+        var options = java.util.List.of(new PolicyFrame.Option("wait", new double[PolicyFrame.ACTION_SIZE]));
+        var world = java.util.UUID.randomUUID();
+        var original = new PolicyFrame(world, 1, new double[PolicyFrame.STATE_SIZE], options, false);
+        var evidence = new PolicyFrame.Discovery("candidate-discovery/v1", java.util.List.of("CONSUME"),
+                java.util.Map.of("CONSUME", 0), true, -1, -1, false, partial);
+        var annotated = new PolicyFrame(world, 1, original.state(), options, false, evidence);
+        assertArrayEquals(original.input(0), annotated.input(0));
+    }
     @Test void aSourceThatUsesTheRemainingBudgetCannotPermanentlyHideOtherSources() {
         var discovery = new CandidateDiscovery();
         var visited = EnumSet.noneOf(CandidateDiscovery.Source.class);

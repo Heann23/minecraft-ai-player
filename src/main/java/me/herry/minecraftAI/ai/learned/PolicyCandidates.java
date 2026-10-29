@@ -69,6 +69,7 @@ public final class PolicyCandidates {
     private int miningCursor;
     private int equipmentCursor;
     private int consumableCursor;
+    private PolicyFrame.ConsumptionScan consumptionScan;
     private int placementCursor;
     private int movementCursor;
     private int movementInputCursor;
@@ -126,6 +127,7 @@ public final class PolicyCandidates {
         if (active != null) found.putIfAbsent(active.id(), active);
         recipeOptions = recipesChecked = -1;
         recipeScanComplete = false;
+        consumptionScan = null;
         Map<String, Integer> generated = new LinkedHashMap<>();
         var visit = discovery.visit(ai.getWorkBudget()::isExhausted, source -> {
             int before = found.size();
@@ -155,7 +157,7 @@ public final class PolicyCandidates {
         }
         var candidates = selectFair(expanded, active == null ? "" : active.id());
         var evidence = new PolicyFrame.Discovery("candidate-discovery/v1", visit.sources().stream().map(Enum::name).toList(),
-                generated, visit.budgetExhausted(), recipeOptions, recipesChecked, recipeScanComplete);
+                generated, visit.budgetExhausted(), recipeOptions, recipesChecked, recipeScanComplete, consumptionScan);
         // Direct keys and budgeted registries are partial observations, even after every source was visited.
         return new Capture(new PolicyFrame(ai.getWorldId(), Integer.toUnsignedLong(Bukkit.getCurrentTick()), body,
                 candidates.stream().map(Candidate::encoded).toList(), false, evidence), candidates, observed.body(), observed.stock());
@@ -213,12 +215,28 @@ public final class PolicyCandidates {
     private void consumables(AIPlayer ai, List<me.herry.minecraftAI.ai.primitive.control.PrimitiveSnapshot.ItemSlot> inventory,
                              Map<String, Candidate> found) {
         int inspected = 0;
+        int snapshotSlots = (int) inventory.stream().filter(slot -> slot.slot() < 36).count();
+        int scanned = 0, empty = 0, nonConsumable = 0, hunger = 0, blocked = 0, unknown = 0, unsupported = 0, available = 0;
         while (inspected < inventory.size() && !ai.getWorkBudget().isExhausted()) {
             var slot = inventory.get(Math.floorMod(consumableCursor++, inventory.size())); inspected++;
-            if (slot.slot() >= 36 || slot.amount() == 0) continue;
+            if (slot.slot() >= 36) continue;
+            scanned++;
+            if (slot.amount() == 0) { empty++; continue; }
             var item = SurvivalCapture.item(ai, slot.slot());
-            if (ConsumeExactAction.supported(item)) add(ai, found, "consume:" + slot.slot(), null, null, item, 0, 0, 0, item.material(), false);
+            var use = item.consumption();
+            if (item.amount() == 0) empty++;
+            else if (ConsumeExactAction.supported(item)) {
+                available++;
+                add(ai, found, "consume:" + slot.slot(), null, null, item, 0, 0, 0, item.material(), false);
+            } else switch (use.eligibility()) {
+                case NOT_CONSUMABLE -> nonConsumable++;
+                case BLOCKED -> { if (use.reason().equals("requires hunger")) hunger++; else blocked++; }
+                case UNKNOWN -> unknown++;
+                case UNSUPPORTED, AVAILABLE -> unsupported++;
+            }
         }
+        consumptionScan = new PolicyFrame.ConsumptionScan(snapshotSlots, scanned, empty, nonConsumable,
+                hunger, blocked, unknown, unsupported, available);
     }
 
     private void placement(AIPlayer ai, List<me.herry.minecraftAI.ai.primitive.control.PrimitiveSnapshot.ItemSlot> inventory,
