@@ -64,7 +64,18 @@ public record PolicyFrame(UUID world, long serverTick, double[] state, List<Opti
     }
     @Override public double[] state() { return state.clone(); }
 
-    public record Option(String id, double[] features) {
+    /** Exact capture evidence, never a policy score or a claim about later world state. */
+    public record BlockEvidence(String material, UUID world, int x, int y, int z, long observedTick) {
+        public BlockEvidence {
+            Objects.requireNonNull(world);
+            if (material == null || !material.matches("[A-Z][A-Z0-9_]{0,127}")
+                    || observedTick < 0 || observedTick > 0xffff_ffffL)
+                throw new IllegalArgumentException("invalid observed block evidence");
+        }
+    }
+
+    public record Option(String id, double[] features, BlockEvidence blockEvidence) {
+        public Option(String id, double[] features) { this(id, features, null); }
         public Option {
             Objects.requireNonNull(id);
             if (id.isBlank() || id.length() > 256) throw new IllegalArgumentException("invalid candidate identity");

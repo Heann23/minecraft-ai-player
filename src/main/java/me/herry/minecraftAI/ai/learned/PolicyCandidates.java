@@ -45,7 +45,7 @@ public final class PolicyCandidates {
             double[] features = encoded.features(); features[30] = ticks / 600.0;
             String choice = inputId + "@" + ticks;
             // Changing a finite key hold must replace the old Action rather than keep its old deadline.
-            return new Candidate(choice, command, recipe, consumable, new PolicyFrame.Option(choice, features), ticks,
+            return new Candidate(choice, command, recipe, consumable, new PolicyFrame.Option(choice, features, encoded.blockEvidence()), ticks,
                     movement == null ? inputId : choice, equipment, movement);
         }
         public Action create(AIPlayer ai) {
@@ -152,7 +152,7 @@ public final class PolicyCandidates {
             if (candidate.commitmentTicks() > 0) {
                 double[] retained = candidate.encoded().features(); retained[55] = 1;
                 expanded.add(new Candidate(candidate.id(), candidate.command(), candidate.recipe(), candidate.consumable(),
-                        new PolicyFrame.Option(candidate.id(), retained), candidate.commitmentTicks(), candidate.inputId(), candidate.equipment(), candidate.movement()));
+                        new PolicyFrame.Option(candidate.id(), retained, candidate.encoded().blockEvidence()), candidate.commitmentTicks(), candidate.inputId(), candidate.equipment(), candidate.movement()));
             } else if (candidate.equipment() != null) expanded.add(candidate.committed(5));
             else for (int ticks : new int[]{5, 20, 80, 600}) expanded.add(candidate.committed(ticks));
         }
@@ -409,7 +409,11 @@ public final class PolicyCandidates {
             features[61] = use.removedEffects().isEmpty() ? 0 : 1; features[63] = 1;
             EffectEncoding.encode(features, use.effects());
         }
+        PolicyFrame.BlockEvidence blockEvidence = null;
         if (command instanceof PrimitiveCommand.BreakBlock mine) {
+            var observedBlock = Positions.block(ai.getPlayer().getWorld(), mine.target());
+            blockEvidence = new PolicyFrame.BlockEvidence(observedBlock.getType().name(), ai.getWorldId(),
+                    mine.target().x(), mine.target().y(), mine.target().z(), Integer.toUnsignedLong(Bukkit.getCurrentTick()));
             var tool = ai.getPlayer().getInventory().getItem(mine.tool().slot());
             if (tool != null && !tool.isEmpty()) {
                 Integer damage = tool.getData(io.papermc.paper.datacomponent.DataComponentTypes.DAMAGE);
@@ -417,10 +421,10 @@ public final class PolicyCandidates {
                 features[56] = maximum == null || maximum <= 0 ? 0 : Math.clamp((damage == null ? 0 : damage) / (double) maximum, 0, 1);
             }
             var actualTool = tool == null ? org.bukkit.inventory.ItemStack.empty() : tool;
-            features[57] = Math.clamp(Positions.block(ai.getPlayer().getWorld(), mine.target()).getBlockData().getDestroySpeed(actualTool, true) / 32.0, 0, 16);
+            features[57] = Math.clamp(observedBlock.getBlockData().getDestroySpeed(actualTool, true) / 32.0, 0, 16);
         }
         if (recipe != null) features[27] = recipe.resultAmount() / 64.0;
-        found.put(id, new Candidate(id, command, recipe, consumable, new PolicyFrame.Option(id, features)));
+        found.put(id, new Candidate(id, command, recipe, consumable, new PolicyFrame.Option(id, features, blockEvidence)));
         return true;
     }
 
