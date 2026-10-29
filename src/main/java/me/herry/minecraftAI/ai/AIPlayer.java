@@ -62,6 +62,8 @@ import java.util.UUID;
  * 행동(Action)과 계획(Planner)은 이 객체를 통해 필요한 시스템에 접근한다.
  */
 public final class AIPlayer {
+    private final me.herry.minecraftAI.ai.learned.PolicyTaskMemory policyTaskMemory = new me.herry.minecraftAI.ai.learned.PolicyTaskMemory();
+    public me.herry.minecraftAI.ai.learned.PolicyTaskMemory getPolicyTaskMemory() { return policyTaskMemory; }
     private final String name;
     private final AIBody body;
     private final AIServices services;

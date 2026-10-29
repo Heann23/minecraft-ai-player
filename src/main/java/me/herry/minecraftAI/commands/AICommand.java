@@ -30,7 +30,7 @@ import java.util.function.Function;
  */
 public class AICommand implements TabExecutor {
     public static final String PERMISSION = "minecraftai.admin";
-    private static final List<String> SUB_COMMANDS = List.of("spawn", "remove", "start", "stop", "status", "stats", "training", "model", "inv", "goal", "debug",
+    private static final List<String> SUB_COMMANDS = List.of("spawn", "remove", "start", "stop", "status", "stats", "training", "model", "objective", "inv", "goal", "debug",
             "why", "brain", "plan", "observe", "learn", "memory", "perf", "home", "say", "save");
     // 디버그를 켜고 끄는 말. "/ai debug start" 처럼 입력해도 알아듣게 한다.
     private static final List<String> SWITCH_ON = List.of("on", "start", "true", "enable", "켜기");
@@ -65,6 +65,7 @@ public class AICommand implements TabExecutor {
             case "stats" -> inspect(sender, args, "두뇌와 학습 상태", AIPlayer::policyDetails);
             case "training" -> training(sender, args);
             case "model" -> model(sender, args);
+            case "objective" -> objective(sender, args);
             case "inv", "inventory" -> inventory(sender, args);
             case "goal" -> goal(sender, args);
             case "debug" -> debug(sender, args);
@@ -86,6 +87,29 @@ public class AICommand implements TabExecutor {
     }
 
     // AI 의 속을 들여다보는 명령들. 이름을 생략하면 AI 가 하나뿐일 때 그 AI 를 대상으로 한다.
+    private void objective(CommandSender sender, String[] args) {
+        if (args.length < 3) { error(sender, "사용법: /ai objective <이름> <info|clear|acquire 아이템 수량>"); return; }
+        AIPlayer ai = controller.get(args[1]);
+        if (ai == null) { error(sender, "해당 AI를 찾을 수 없습니다."); return; }
+        if (args[2].equalsIgnoreCase("info") && args.length == 3) {
+            var actual = me.herry.minecraftAI.ai.learned.PolicyCandidates.observe(ai, null, 0);
+            var task = ai.getPolicyTaskMemory().observe(ai.getWorldId(), actual.stock());
+            info(sender, task.objective() == null ? "설정된 작업 목표가 없습니다."
+                    : task.objective().goal().describe() + " / 보유 " + task.owned() + " / 남음 " + task.remaining()
+                    + " / 같은 월드 " + task.worldMatches());
+            info(sender, "최근 완료 행동 " + task.recentOutcomes().size() + "개. 현재 목표 기록은 가중치 판단 입력 연결 전 단계입니다.");
+            return;
+        }
+        if (ai.getState() != me.herry.minecraftAI.ai.AIState.STOPPED) { error(sender, "목표를 바꾸려면 AI를 먼저 정지해 주세요."); return; }
+        try {
+            if (args[2].equalsIgnoreCase("clear") && args.length == 3) ai.getPolicyTaskMemory().clearObjective();
+            else if (args[2].equalsIgnoreCase("acquire") && args.length == 5)
+                ai.getPolicyTaskMemory().acquire(ai.getWorldId(), args[3], Integer.parseInt(args[4]), ai.getTicks());
+            else { error(sender, "사용법: /ai objective <이름> <info|clear|acquire 아이템 수량>"); return; }
+            info(sender, "작업 목표 기록을 변경했습니다. 자동 시작하지 않습니다.");
+        } catch (IllegalArgumentException invalid) { error(sender, "정확한 아이템 이름과 1~4096 수량을 입력해 주세요."); }
+    }
+
     private void inspect(CommandSender sender, String[] args, String title, Function<AIPlayer, List<String>> report) {
         AIPlayer ai = resolve(sender, args, 1);
         if (ai == null) return;

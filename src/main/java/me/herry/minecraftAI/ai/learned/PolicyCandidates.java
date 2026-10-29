@@ -160,7 +160,8 @@ public final class PolicyCandidates {
                 generated, visit.budgetExhausted(), recipeOptions, recipesChecked, recipeScanComplete, consumptionScan);
         // Direct keys and budgeted registries are partial observations, even after every source was visited.
         return new Capture(new PolicyFrame(ai.getWorldId(), Integer.toUnsignedLong(Bukkit.getCurrentTick()), body,
-                candidates.stream().map(Candidate::encoded).toList(), false, evidence), candidates, observed.body(), observed.stock());
+                candidates.stream().map(Candidate::encoded).toList(), false, evidence,
+                ai.getPolicyTaskMemory().observe(ai.getWorldId(), observed.stock())), candidates, observed.body(), observed.stock());
     }
 
     private void movementTargets(AIPlayer ai, Map<String, Candidate> found) {

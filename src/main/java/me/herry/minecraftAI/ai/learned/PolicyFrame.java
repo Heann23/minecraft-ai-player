@@ -6,7 +6,11 @@ import java.util.Objects;
 import java.util.UUID;
 
 /** Value-only inputs captured before selection. No Teacher label, score, future result or live world reference. */
-public record PolicyFrame(UUID world, long serverTick, double[] state, List<Option> options, boolean complete, Discovery discovery) {
+public record PolicyFrame(UUID world, long serverTick, double[] state, List<Option> options, boolean complete, Discovery discovery,
+                          PolicyTaskMemory.View taskMemory) {
+    public PolicyFrame(UUID world, long serverTick, double[] state, List<Option> options, boolean complete, Discovery discovery) {
+        this(world, serverTick, state, options, complete, discovery, null);
+    }
     public static final String CONTRACT = "minecraft-primitive-candidates/v4";
     public static final int STATE_SIZE = 208;
     public static final int ACTION_SIZE = 256;

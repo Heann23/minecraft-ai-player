@@ -481,6 +481,8 @@ final class AIBrain {
         action.update(ai);
         if (action.getStatus() == ActionStatus.SUCCESS || action.getStatus() == ActionStatus.FAILED) {
             ai.debug("Model action ended: " + action.getName() + " " + action.getStatus() + " " + action.getFailReason());
+            ai.getPolicyTaskMemory().ended(ai.getWorldId(), ai.getTicks(), activeLearned == null ? action.getName() : activeLearned.id(),
+                    action.getStatus().name(), action.getFailReason());
             plan = null; activeLearned = null;
         }
     }
