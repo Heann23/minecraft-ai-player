@@ -32,8 +32,10 @@ public final class VanillaCraftAction extends AbstractAction {
     private ItemStack[] expected;
     private ItemStack[] inventorySnapshot;
     private int[] sources;
+    private int[] allocationRemaining;
     private int cell, phase, searchBudget;
     private boolean taken;
+    private boolean allocated;
 
     public VanillaCraftAction(Material target, String recipeId) {
         super("VanillaCraft", 200); this.target = target; this.recipeId = recipeId;
@@ -62,15 +64,13 @@ public final class VanillaCraftAction extends AbstractAction {
         layout = layout(recipe, menu.getGridWidth(), menu.getGridHeight());
         if (layout == null) { fail("unsupported recipe layout"); return; }
         sources = new int[layout.length]; expected = new ItemStack[layout.length];
-        int[] remaining = new int[36];
+        allocationRemaining = new int[36];
         inventorySnapshot = new ItemStack[36];
         for (int slot = 0; slot < 36; slot++) {
             var stack = ai.getPlayer().getInventory().getItem(slot);
-            remaining[slot] = stack == null ? 0 : stack.getAmount();
+            allocationRemaining[slot] = stack == null ? 0 : stack.getAmount();
             inventorySnapshot[slot] = stack == null ? null : stack.clone();
         }
-        searchBudget = 4096;
-        if (!assign(ai, 0, remaining)) fail("ingredient allocation unavailable or search budget exhausted");
     }
     private boolean assign(AIPlayer ai, int at, int[] remaining) {
         if (--searchBudget < 0 || ai.getWorkBudget().isExhausted()) return false;
@@ -124,6 +124,13 @@ public final class VanillaCraftAction extends AbstractAction {
             initialize(ai, opened); return;
         }
         if (handle.containerMenu != menu || !menu.stillValid(handle)) { fail("crafting menu invalidated"); return; }
+        if (!allocated) {
+            if (ai.getWorkBudget().isExhausted()) return;
+            searchBudget = 4096;
+            allocated = assign(ai, 0, allocationRemaining.clone());
+            if (!allocated && !ai.getWorkBudget().isExhausted()) fail("ingredient allocation unavailable or search budget exhausted");
+            return;
+        }
         while (cell < layout.length && layout[cell] == null) cell++;
         if (cell < layout.length) {
             int source = storageSlot(handle, sources[cell]);
