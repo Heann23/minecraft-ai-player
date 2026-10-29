@@ -37,7 +37,15 @@ public final class PpoBridge implements AutoCloseable {
     public record Transition(String session, long sequence, PolicyFrame frame, int index,
                              double logProbability, double value, long modelVersion, double reward,
                              int elapsedTicks, boolean terminated, boolean truncated, long appliedTick, String nextWorld, double[] nextState,
-                             String rewardContract, java.util.List<String> objectiveEvents, RewardEvidence rewardEvidence) {
+                             String rewardContract, java.util.List<String> objectiveEvents, RewardEvidence rewardEvidence,
+                             PolicyTaskMemory.View nextTaskMemory) {
+        public Transition(String session, long sequence, PolicyFrame frame, int index,
+                          double logProbability, double value, long modelVersion, double reward,
+                          int elapsedTicks, boolean terminated, boolean truncated, long appliedTick, String nextWorld, double[] nextState,
+                          String rewardContract, java.util.List<String> objectiveEvents, RewardEvidence rewardEvidence) {
+            this(session, sequence, frame, index, logProbability, value, modelVersion, reward, elapsedTicks,
+                    terminated, truncated, appliedTick, nextWorld, nextState, rewardContract, objectiveEvents, rewardEvidence, null);
+        }
         public Transition(String session, long sequence, PolicyFrame frame, int index,
                           double logProbability, double value, long modelVersion, double reward,
                           int elapsedTicks, boolean terminated, boolean truncated, long appliedTick, String nextWorld, double[] nextState,

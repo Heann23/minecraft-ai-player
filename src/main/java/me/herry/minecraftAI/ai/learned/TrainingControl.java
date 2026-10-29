@@ -40,7 +40,8 @@ public final class TrainingControl {
                 if (ai.getWorldId().equals(requested.frame().world()) && now >= requested.frame().serverTick()
                         && now - requested.frame().serverTick() <= 40 && ai.getBody().isUsable()) {
                     var actual = PolicyCandidates.observe(ai, active, activeTicks);
-                    PolicyFrame after = new PolicyFrame(ai.getWorldId(), now, actual.features(), requested.frame().options(), false);
+                    PolicyFrame after = new PolicyFrame(ai.getWorldId(), now, actual.features(), requested.frame().options(), false,
+                            null, ai.getPolicyTaskMemory().observe(ai.getWorldId(), actual.stock()));
                     boolean learning = response.metadata() == null || response.metadata().learningEnabled();
                     var previous = episode.finish(after, actual.body(), actual.stock(), false, !learning, objectiveReward, objectiveEvents);
                     if (previous != null) outbox.add(previous);
@@ -120,7 +121,8 @@ public final class TrainingControl {
             if (episode.active()) {
                 long now = Integer.toUnsignedLong(Bukkit.getCurrentTick());
                 var actual = PolicyCandidates.observe(ai, active, activeTicks);
-                PolicyFrame after = new PolicyFrame(ai.getWorldId(), now, actual.features(), episode.before().options(), false);
+                PolicyFrame after = new PolicyFrame(ai.getWorldId(), now, actual.features(), episode.before().options(), false,
+                        null, ai.getPolicyTaskMemory().observe(ai.getWorldId(), actual.stock()));
                 var ended = episode.finish(after, actual.body(), actual.stock(), ai.getPlayer().isDead(), true, objectiveReward, objectiveEvents);
                 if (ended != null) outbox.add(ended);
             }

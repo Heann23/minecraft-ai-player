@@ -42,7 +42,7 @@ def write_atomic(path: Path, value: dict):
 def validate_transition(row: dict):
     required = {"session", "sequence", "frame", "index", "logProbability", "value", "modelVersion", "reward",
                 "elapsedTicks", "terminated", "truncated", "appliedTick", "nextWorld", "nextState"}
-    if set(row) - {"rewardContract", "objectiveEvents", "rewardEvidence"} != required:
+    if set(row) - {"rewardContract", "objectiveEvents", "rewardEvidence", "nextTaskMemory"} != required:
         raise ValueError("transition schema mismatch; Teacher labels are not accepted")
     if row.get("rewardContract", "survival-progress/v1") not in ("survival-progress/v1", "survival-progress/v2"):
         raise ValueError("unsupported observed reward contract")

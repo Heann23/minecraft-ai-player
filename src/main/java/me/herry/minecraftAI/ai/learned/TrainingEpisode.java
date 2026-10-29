@@ -45,7 +45,7 @@ public final class TrainingEpisode {
                 beforeBody.remainingAir(), body.remainingAir(), discoveries, actualObjectiveReward);
         double reward = evidence.total((int) elapsed, terminated);
         var transition = new PpoBridge.Transition(session, sequence++, before, chosen.index(), chosen.logProbability(),
-                chosen.value(), chosen.modelVersion(), reward, (int) elapsed, terminated, truncated, appliedTick, next.world().toString(), next.state(), REWARD_CONTRACT, objectiveEvents, evidence);
+                chosen.value(), chosen.modelVersion(), reward, (int) elapsed, terminated, truncated, appliedTick, next.world().toString(), next.state(), REWARD_CONTRACT, objectiveEvents, evidence, next.taskMemory());
         before = null; beforeBody = null; chosen = null;
         return transition;
     }
