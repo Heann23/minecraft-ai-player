@@ -55,6 +55,9 @@ class TrainingEpisodeTest {
         assertEquals(20, completed.appliedTick());
         assertEquals(5, completed.elapsedTicks());
         assertEquals(-0.0995, completed.reward(), 1e-9);
+        assertEquals(12, completed.rewardEvidence().healthBefore());
+        assertEquals(10, completed.rewardEvidence().healthAfter());
+        assertEquals(completed.reward(), completed.rewardEvidence().total(5, false), 1e-9);
         assertFalse(episode.active());
     }
 

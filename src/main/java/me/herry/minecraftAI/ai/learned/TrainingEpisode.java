@@ -40,11 +40,12 @@ public final class TrainingEpisode {
         int discoveries = 0;
         for (var entry : stock.entrySet()) if (entry.getValue() > 0 && observedItems.add(entry.getKey())) discoveries++;
         // Explicit auxiliary reward, not a promised optimal survival strategy. Novel items are rewarded once per episode.
-        double reward = elapsed * 0.0001 + (body.health() - beforeBody.health()) * 0.05
-                + discoveries * 0.2 + actualObjectiveReward - (terminated ? 10 : 0);
-        reward = Math.clamp(reward, -100, 100);
+        var evidence = new PpoBridge.RewardEvidence("actual-reward-evidence/v1", beforeBody.health(), body.health(),
+                beforeBody.foodLevel(), body.foodLevel(), beforeBody.saturation(), body.saturation(),
+                beforeBody.remainingAir(), body.remainingAir(), discoveries, actualObjectiveReward);
+        double reward = evidence.total((int) elapsed, terminated);
         var transition = new PpoBridge.Transition(session, sequence++, before, chosen.index(), chosen.logProbability(),
-                chosen.value(), chosen.modelVersion(), reward, (int) elapsed, terminated, truncated, appliedTick, next.world().toString(), next.state(), REWARD_CONTRACT, objectiveEvents);
+                chosen.value(), chosen.modelVersion(), reward, (int) elapsed, terminated, truncated, appliedTick, next.world().toString(), next.state(), REWARD_CONTRACT, objectiveEvents, evidence);
         before = null; beforeBody = null; chosen = null;
         return transition;
     }

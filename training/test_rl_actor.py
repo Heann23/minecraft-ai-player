@@ -37,6 +37,21 @@ def row(model, session="a", sequence=0, reward=1, terminal=True):
 
 
 class ActorTests(unittest.TestCase):
+    def test_reward_evidence_uses_admission_state_and_rejects_tampered_reward(self):
+        sample = row(ActorCritic(7, hidden=4), session=str(uuid.uuid4()), reward=-0.0995, terminal=False)
+        sample.pop("nextValue")
+        sample.update(rewardContract="survival-progress/v2", rewardEvidence={
+            "schema": "actual-reward-evidence/v1", "healthBefore": 12, "healthAfter": 10,
+            "foodBefore": 20, "foodAfter": 19, "saturationBefore": 0, "saturationAfter": 0,
+            "airBefore": 300, "airAfter": 299, "discoveries": 0, "objectiveReward": 0})
+        validate_transition(sample)
+        with self.assertRaises(ValueError):
+            validate_transition(dict(sample, reward=0))
+        with self.assertRaises(ValueError):
+            validate_transition(dict(sample, rewardEvidence=dict(sample["rewardEvidence"], discoveries=True)))
+        legacy = {key: value for key, value in sample.items() if key != "rewardEvidence"}
+        validate_transition(legacy)
+
     def test_reward_versions_preserve_legacy_rows_and_validate_actual_progress_event_metadata(self):
         model = ActorCritic(7, hidden=4)
         sample = row(model, session=str(uuid.uuid4()))

@@ -37,7 +37,14 @@ public final class PpoBridge implements AutoCloseable {
     public record Transition(String session, long sequence, PolicyFrame frame, int index,
                              double logProbability, double value, long modelVersion, double reward,
                              int elapsedTicks, boolean terminated, boolean truncated, long appliedTick, String nextWorld, double[] nextState,
-                             String rewardContract, java.util.List<String> objectiveEvents) {
+                             String rewardContract, java.util.List<String> objectiveEvents, RewardEvidence rewardEvidence) {
+        public Transition(String session, long sequence, PolicyFrame frame, int index,
+                          double logProbability, double value, long modelVersion, double reward,
+                          int elapsedTicks, boolean terminated, boolean truncated, long appliedTick, String nextWorld, double[] nextState,
+                          String rewardContract, java.util.List<String> objectiveEvents) {
+            this(session, sequence, frame, index, logProbability, value, modelVersion, reward, elapsedTicks,
+                    terminated, truncated, appliedTick, nextWorld, nextState, rewardContract, objectiveEvents, null);
+        }
         public Transition(String session, long sequence, PolicyFrame frame, int index,
                           double logProbability, double value, long modelVersion, double reward,
                           int elapsedTicks, boolean terminated, boolean truncated, long appliedTick, String nextWorld, double[] nextState) {
@@ -45,6 +52,9 @@ public final class PpoBridge implements AutoCloseable {
                     terminated, truncated, appliedTick, nextWorld, nextState, "survival-progress/v1", java.util.List.of());
         }
         public Transition {
+            if (rewardEvidence != null && (!"survival-progress/v2".equals(rewardContract)
+                    || Math.abs(rewardEvidence.total(elapsedTicks, terminated) - reward) > 1e-9))
+                throw new IllegalArgumentException("actual reward evidence mismatch");
             if (!java.util.Set.of("survival-progress/v1", "survival-progress/v2").contains(rewardContract))
                 throw new IllegalArgumentException("unsupported actual reward contract");
             objectiveEvents = java.util.List.copyOf(objectiveEvents);
@@ -64,6 +74,23 @@ public final class PpoBridge implements AutoCloseable {
                 throw new IllegalArgumentException("invalid actual PPO transition");
         }
         @Override public double[] nextState() { return nextState.clone(); }
+    }
+    /** Admission-time observations, independent of the earlier policy request snapshot. No policy features. */
+    public record RewardEvidence(String schema, double healthBefore, double healthAfter,
+                                 int foodBefore, int foodAfter, double saturationBefore, double saturationAfter,
+                                 int airBefore, int airAfter, int discoveries, double objectiveReward) {
+        public RewardEvidence {
+            if (!"actual-reward-evidence/v1".equals(schema) || discoveries < 0
+                    || foodBefore < 0 || foodBefore > 20 || foodAfter < 0 || foodAfter > 20
+                    || healthBefore < 0 || healthAfter < 0 || saturationBefore < 0 || saturationAfter < 0)
+                throw new IllegalArgumentException("invalid reward observations");
+            for (double scalar : new double[]{healthBefore, healthAfter, saturationBefore, saturationAfter, objectiveReward})
+                if (!Double.isFinite(scalar)) throw new IllegalArgumentException("nonfinite reward evidence");
+        }
+        public double total(int elapsedTicks, boolean terminated) {
+            return Math.clamp(elapsedTicks * 0.0001 + (healthAfter - healthBefore) * 0.05
+                    + discoveries * 0.2 + objectiveReward - (terminated ? 10 : 0), -100, 100);
+        }
     }
     public record Query(String schema, String environment, String id, PolicyFrame frame, java.util.List<Transition> transitions, String brainId, String controlEpoch) {
         public Query(String schema, String environment, String id, PolicyFrame frame, java.util.List<Transition> transitions) {

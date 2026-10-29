@@ -42,7 +42,7 @@ def write_atomic(path: Path, value: dict):
 def validate_transition(row: dict):
     required = {"session", "sequence", "frame", "index", "logProbability", "value", "modelVersion", "reward",
                 "elapsedTicks", "terminated", "truncated", "appliedTick", "nextWorld", "nextState"}
-    if set(row) - {"rewardContract", "objectiveEvents"} != required:
+    if set(row) - {"rewardContract", "objectiveEvents", "rewardEvidence"} != required:
         raise ValueError("transition schema mismatch; Teacher labels are not accepted")
     if row.get("rewardContract", "survival-progress/v1") not in ("survival-progress/v1", "survival-progress/v2"):
         raise ValueError("unsupported observed reward contract")
@@ -69,6 +69,27 @@ def validate_transition(row: dict):
             raise ValueError("invalid transition scalar")
     if row["logProbability"] > 0 or abs(row["reward"]) > 100 or not isinstance(row["terminated"], bool) or not isinstance(row["truncated"], bool):
         raise ValueError("invalid transition conditions")
+    if "rewardEvidence" in row:
+        evidence = row["rewardEvidence"]
+        fields = {"schema", "healthBefore", "healthAfter", "foodBefore", "foodAfter", "saturationBefore",
+                  "saturationAfter", "airBefore", "airAfter", "discoveries", "objectiveReward"}
+        if not isinstance(evidence, dict) or set(evidence) != fields \
+                or evidence["schema"] != "actual-reward-evidence/v1" or row.get("rewardContract") != "survival-progress/v2":
+            raise ValueError("invalid reward evidence schema")
+        for key in fields - {"schema"}:
+            if type(evidence[key]) not in (int, float) or not math.isfinite(evidence[key]):
+                raise ValueError("invalid reward evidence scalar")
+        for key in ("foodBefore", "foodAfter", "airBefore", "airAfter", "discoveries"):
+            if type(evidence[key]) is not int:
+                raise ValueError("invalid reward evidence integer")
+        if any(evidence[key] < 0 for key in ("healthBefore", "healthAfter", "saturationBefore", "saturationAfter", "discoveries")) \
+                or any(not 0 <= evidence[key] <= 20 for key in ("foodBefore", "foodAfter")):
+            raise ValueError("invalid reward evidence range")
+        expected = max(-100, min(100, row["elapsedTicks"] * 0.0001
+                       + (evidence["healthAfter"] - evidence["healthBefore"]) * 0.05
+                       + evidence["discoveries"] * 0.2 + evidence["objectiveReward"] - (10 if row["terminated"] else 0)))
+        if not math.isclose(expected, row["reward"], rel_tol=0, abs_tol=1e-9):
+            raise ValueError("actual reward evidence mismatch")
 
 
 def resume_checkpoint(path: Path, *, upgrade_context=False, allow_initial=False):
