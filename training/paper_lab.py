@@ -18,6 +18,7 @@ import subprocess
 import sys
 import threading
 import time
+import uuid
 
 
 def sha256(path: Path):
@@ -281,7 +282,32 @@ def named_session(revision):
     return dict(revision["session"], modelName=model_name(revision["name"]))
 
 
+def requested_objective(args):
+    item, count = getattr(args, "objective_item", None), getattr(args, "objective_count", None)
+    if item is None and count is None:
+        return None
+    if not isinstance(item, str) or not re.fullmatch(r"[A-Z][A-Z0-9_]{0,127}", item) \
+            or item in {"AIR", "CAVE_AIR", "VOID_AIR"} or type(count) is not int or not 1 <= count <= 4096:
+        raise ValueError("objective requires an exact canonical item and count 1..4096")
+    return {"item": item, "count": count}
+
+
+def objective_acknowledgement(line, requested):
+    if requested is None:
+        return None
+    match = re.search(r"\[AIObjective\] name=RLLearner item=([A-Z][A-Z0-9_]*) count=([0-9]+) "
+                      r"id=([0-9a-f-]{36}) world=([0-9a-f-]{36})(?:\s|$)", line)
+    if not match or match[1] != requested["item"] or int(match[2]) != requested["count"]:
+        return None
+    try:
+        identity, world = str(uuid.UUID(match[3])), str(uuid.UUID(match[4]))
+    except ValueError:
+        return None
+    return {**requested, "id": identity, "world": world}
+
+
 def run(args):
+    objective = requested_objective(args)
     random_seed = getattr(args, "random_world_seed", False)
     if random_seed:
         if args.world_seed is not None or args.seed_campaign is None:
@@ -373,6 +399,8 @@ def run(args):
                 "tools": {name: sha256(source / "training" / name) for name in ("paper_lab.py", "rl_actor.py", "train_paper_ppo.py", "checkpoint_store.py", "brain_session.py", "model_catalog.py")},
                 "teacherLabels": False, "grantedItems": False, "teleportDuringEpisode": False,
                 "allWorldAutonomyProven": False}
+    manifest["requestedObjective"] = objective
+    manifest["objectiveAdmission"] = None
     manifest["backendOwner"] = "plugin" if args.managed_backend else "external-lab"
     manifest["seedSelection"] = "random-per-world-run" if random_seed else "explicit-frozen-plan"
     manifest["playerPersistence"] = args.player_persistence
@@ -419,6 +447,7 @@ def run(args):
     trainer = process = reader = None
     started, gameplay_start, reason = time.monotonic(), None, "startup-failed"
     server_ready, managed_ready = False, False
+    spawn_dispatched = False
     events = queue.Queue()
     with (output / "trainer.log").open("w", encoding="utf-8") as trainer_log, \
             (output / "server-console.log").open("w", encoding="utf-8") as log:
@@ -510,11 +539,25 @@ def run(args):
                         managed_ready = True
                     if args.managed_backend and "Managed brain unavailable;" in line:
                         reason = "managed-startup-failed"; break
-                    if server_ready and (not args.managed_backend or managed_ready) and gameplay_start is None:
-                        gameplay_start = time.monotonic()
-                        for text in ("seed", "time set " + str(args.start_time), "ai spawn RLLearner", "ai start RLLearner", "ai debug on"):
+                    if server_ready and (not args.managed_backend or managed_ready) and not spawn_dispatched:
+                        spawn_dispatched = True
+                        for text in ("seed", "time set " + str(args.start_time), "ai spawn RLLearner"):
                             send(text)
-                        print("Paper ready; actual survival episode admitted", flush=True)
+                        if objective is not None:
+                            send("ai stop RLLearner")
+                            send("ai objective RLLearner acquire " + objective["item"] + " " + str(objective["count"]))
+                        else:
+                            gameplay_start = time.monotonic()
+                            send("ai start RLLearner"); send("ai debug on")
+                            print("Paper ready; actual survival episode admitted", flush=True)
+                    if spawn_dispatched and objective is not None and gameplay_start is None:
+                        admission = objective_acknowledgement(line, objective)
+                        if admission is not None:
+                            manifest["objectiveAdmission"] = admission
+                            write_json(output / "manifest.json", manifest)
+                            gameplay_start = time.monotonic()
+                            send("ai start RLLearner"); send("ai debug on")
+                            print("Paper objective acknowledged; actual survival episode admitted", flush=True)
                 except queue.Empty:
                     pass
                 if now >= next_report:
@@ -619,6 +662,8 @@ def main():
     parser.add_argument("--seconds", type=int, required=True)
     parser.add_argument("--steps", type=int, default=512)
     parser.add_argument("--policy-seed", type=int, default=777)
+    parser.add_argument("--objective-item", help="exact canonical item; server acknowledgement is required before play")
+    parser.add_argument("--objective-count", type=int, help="current ownership target 1..4096; requires --objective-item")
     parser.add_argument("--start-time", type=int, default=0, help="explicit world time prepared before spawning; no time changes during play")
     parser.add_argument("--model", type=Path)
     parser.add_argument("--resume", type=Path)

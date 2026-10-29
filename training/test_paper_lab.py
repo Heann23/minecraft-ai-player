@@ -7,10 +7,25 @@ import tempfile
 import unittest
 from unittest import mock
 
-from paper_lab import read_plan, validate_options, summarize_game_log, validate_plan_extension, read_scenario, confirm_model_save, confirm_model_command, reserve_random_seed
+from paper_lab import read_plan, validate_options, summarize_game_log, validate_plan_extension, read_scenario, confirm_model_save, confirm_model_command, reserve_random_seed, requested_objective, objective_acknowledgement
 
 
 class SeedPlanTests(unittest.TestCase):
+    def test_objective_requires_both_exact_fields_and_matching_server_admission(self):
+        args = argparse.Namespace(objective_item="OAK_LOG", objective_count=4)
+        goal = requested_objective(args)
+        self.assertEqual(goal, {"item": "OAK_LOG", "count": 4})
+        identity = "00000000-0000-0000-0000-000000000001"
+        line = "[INFO] [AIObjective] name=RLLearner item=OAK_LOG count=4 id=" + identity + " world=" + identity
+        self.assertEqual(objective_acknowledgement(line, goal)["id"], identity)
+        for invalid in (line.replace("OAK_LOG", "OAK_PLANKS"), line.replace("count=4", "count=5"),
+                        line.replace("RLLearner", "Other"), "작업 목표 기록을 변경했습니다."):
+            self.assertIsNone(objective_acknowledgement(invalid, goal))
+        for item, count in (("OAK_LOG", None), (None, 4), ("#WOOD", 4), ("OAK_LOG", 0), ("OAK_LOG;stop", 4)):
+            with self.assertRaises(ValueError):
+                requested_objective(argparse.Namespace(objective_item=item, objective_count=count))
+        self.assertIsNone(requested_objective(argparse.Namespace()))
+
     def test_random_campaign_rejects_reuse_across_runs_and_partitions_and_preserves_base(self):
         base = {"schema": "minecraft-paper-seed-plan/v1", "trainSeeds": ["1"], "evaluationSeeds": ["2"]}
         with tempfile.TemporaryDirectory() as directory:
