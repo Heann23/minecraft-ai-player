@@ -19,6 +19,9 @@ public final class PolicyTaskMemory {
                        boolean currentlyAchieved, List<Outcome> recentOutcomes) {
         public View { recentOutcomes = List.copyOf(recentOutcomes); }
     }
+    /** Completion accounting is independent of action selection and of the reward amount. */
+    public record Completion(UUID objectiveId, UUID world, String item, int required, int beforeOwned, int afterOwned) {}
+    private boolean completionSettled;
     private Objective objective;
     private final Deque<Outcome> outcomes = new ArrayDeque<>();
 
@@ -29,8 +32,29 @@ public final class PolicyTaskMemory {
                 || count < 1 || count > 4096 || tick < 0)
             throw new IllegalArgumentException("exact item, count 1..4096 and valid tick required");
         objective = new Objective(UUID.randomUUID(), Objects.requireNonNull(world), new AcquireGoal(exact, count), tick);
+        completionSettled = false;
     }
-    public void clearObjective() { objective = null; }
+    public void clearObjective() { objective = null; completionSettled = false; }
+
+    /** Use actual admission and result inventories, never the older policy request inventory.
+     * A pre-owned or inference-only completion is settled without a learning credit.
+     * Callers must also settle non-learning observations to prevent retroactive credit.
+     */
+    public Optional<Completion> settleCompletion(View admission, View result, boolean learning) {
+        if (objective == null || completionSettled || admission == null || result == null
+                || admission.objective() == null || result.objective() == null
+                || !objective.equals(admission.objective()) || !objective.equals(result.objective())
+                || !admission.worldMatches() || !result.worldMatches()) return Optional.empty();
+        int required = objective.goal().count();
+        if (admission.owned() >= required) {
+            completionSettled = true;
+            return Optional.empty();
+        }
+        if (result.owned() < required) return Optional.empty();
+        completionSettled = true;
+        return learning ? Optional.of(new Completion(objective.id(), objective.world(), objective.goal().item(),
+                required, admission.owned(), result.owned())) : Optional.empty();
+    }
     public View observe(UUID world, Map<String, Integer> stock) {
         boolean matches = objective != null && objective.world().equals(world);
         int owned = matches ? Math.max(0, stock.getOrDefault(objective.goal().item(), 0)) : 0;
@@ -46,6 +70,7 @@ public final class PolicyTaskMemory {
     public Map<String, Object> exportState() {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("schema", "policy-task-memory/v1");
+        result.put("completionSettled", completionSettled);
         if (objective != null) result.put("objective", Map.of("id", objective.id().toString(), "world", objective.world().toString(),
                 "item", objective.goal().item(), "count", objective.goal().count(), "startedTick", objective.startedTick()));
         result.put("outcomes", outcomes.stream().map(o -> Map.<String, Object>of("world", o.world().toString(), "tick", o.tick(),
@@ -73,7 +98,10 @@ public final class PolicyTaskMemory {
                     String.valueOf(row.get("objectiveId")), String.valueOf(row.get("action")),
                     String.valueOf(row.get("status")), String.valueOf(row.get("reason"))));
         }
-        objective = restored; outcomes.clear(); outcomes.addAll(restoredOutcomes);
+        Object settled = state.getOrDefault("completionSettled", false);
+        if (!(settled instanceof Boolean)) throw new IllegalArgumentException("invalid saved completion settlement");
+        objective = restored; completionSettled = (Boolean) settled;
+        outcomes.clear(); outcomes.addAll(restoredOutcomes);
     }
     private static long integer(Object value) {
         if (!(value instanceof Number number) || !Double.isFinite(number.doubleValue()) || number.doubleValue() != number.longValue()
