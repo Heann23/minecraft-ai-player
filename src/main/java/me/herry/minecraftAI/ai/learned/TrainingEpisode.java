@@ -31,6 +31,12 @@ public final class TrainingEpisode {
 
     public PpoBridge.Transition finish(PolicyFrame next, SurvivalObservation.Body body, Map<String, Integer> stock,
                                        boolean terminated, boolean truncated, double actualObjectiveReward, java.util.List<String> objectiveEvents) {
+        return finish(next, body, stock, terminated, truncated, actualObjectiveReward, objectiveEvents, null);
+    }
+
+    public PpoBridge.Transition finish(PolicyFrame next, SurvivalObservation.Body body, Map<String, Integer> stock,
+                                       boolean terminated, boolean truncated, double actualObjectiveReward,
+                                       java.util.List<String> objectiveEvents, PolicyTaskMemory.Completion completion) {
         if (before == null) return null;
         long elapsed = next.serverTick() - appliedTick;
         if (elapsed < 0 || elapsed > 2400) {
@@ -43,9 +49,9 @@ public final class TrainingEpisode {
         var evidence = new PpoBridge.RewardEvidence("actual-reward-evidence/v1", beforeBody.health(), body.health(),
                 beforeBody.foodLevel(), body.foodLevel(), beforeBody.saturation(), body.saturation(),
                 beforeBody.remainingAir(), body.remainingAir(), discoveries, actualObjectiveReward);
-        double reward = evidence.total((int) elapsed, terminated);
+        double reward = Math.clamp(evidence.total((int) elapsed, terminated) + (completion == null ? 0 : 1), -100, 100);
         var transition = new PpoBridge.Transition(session, sequence++, before, chosen.index(), chosen.logProbability(),
-                chosen.value(), chosen.modelVersion(), reward, (int) elapsed, terminated, truncated, appliedTick, next.world().toString(), next.state(), REWARD_CONTRACT, objectiveEvents, evidence, next.taskMemory());
+                chosen.value(), chosen.modelVersion(), reward, (int) elapsed, terminated, truncated, appliedTick, next.world().toString(), next.state(), completion == null ? REWARD_CONTRACT : "survival-progress/v3", objectiveEvents, evidence, next.taskMemory(), completion);
         before = null; beforeBody = null; chosen = null;
         return transition;
     }

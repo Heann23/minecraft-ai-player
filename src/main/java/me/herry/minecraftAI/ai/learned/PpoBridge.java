@@ -38,7 +38,15 @@ public final class PpoBridge implements AutoCloseable {
                              double logProbability, double value, long modelVersion, double reward,
                              int elapsedTicks, boolean terminated, boolean truncated, long appliedTick, String nextWorld, double[] nextState,
                              String rewardContract, java.util.List<String> objectiveEvents, RewardEvidence rewardEvidence,
-                             PolicyTaskMemory.View nextTaskMemory) {
+                             PolicyTaskMemory.View nextTaskMemory, PolicyTaskMemory.Completion taskCompletion) {
+        public Transition(String session, long sequence, PolicyFrame frame, int index,
+                          double logProbability, double value, long modelVersion, double reward,
+                          int elapsedTicks, boolean terminated, boolean truncated, long appliedTick, String nextWorld, double[] nextState,
+                          String rewardContract, java.util.List<String> objectiveEvents, RewardEvidence rewardEvidence,
+                          PolicyTaskMemory.View nextTaskMemory) {
+            this(session, sequence, frame, index, logProbability, value, modelVersion, reward, elapsedTicks,
+                    terminated, truncated, appliedTick, nextWorld, nextState, rewardContract, objectiveEvents, rewardEvidence, nextTaskMemory, null);
+        }
         public Transition(String session, long sequence, PolicyFrame frame, int index,
                           double logProbability, double value, long modelVersion, double reward,
                           int elapsedTicks, boolean terminated, boolean truncated, long appliedTick, String nextWorld, double[] nextState,
@@ -60,16 +68,30 @@ public final class PpoBridge implements AutoCloseable {
                     terminated, truncated, appliedTick, nextWorld, nextState, "survival-progress/v1", java.util.List.of());
         }
         public Transition {
-            if (rewardEvidence != null && (!"survival-progress/v2".equals(rewardContract)
-                    || Math.abs(rewardEvidence.total(elapsedTicks, terminated) - reward) > 1e-9))
+            if (rewardEvidence != null && (!java.util.Set.of("survival-progress/v2", "survival-progress/v3").contains(rewardContract)
+                    || Math.abs(Math.clamp(rewardEvidence.total(elapsedTicks, terminated) + (taskCompletion == null ? 0 : 1), -100, 100) - reward) > 1e-9))
                 throw new IllegalArgumentException("actual reward evidence mismatch");
-            if (!java.util.Set.of("survival-progress/v1", "survival-progress/v2").contains(rewardContract))
+            if (!java.util.Set.of("survival-progress/v1", "survival-progress/v2", "survival-progress/v3").contains(rewardContract))
                 throw new IllegalArgumentException("unsupported actual reward contract");
             objectiveEvents = java.util.List.copyOf(objectiveEvents);
             if (objectiveEvents.size() > 32 || objectiveEvents.stream().distinct().count() != objectiveEvents.size()
                     || objectiveEvents.stream().anyMatch(key -> key.length() > 268 || !key.matches("advancement:[a-z0-9_.-]+:[a-z0-9_./-]+"))
-                    || !objectiveEvents.isEmpty() && !rewardContract.equals("survival-progress/v2"))
+                    || !objectiveEvents.isEmpty() && !java.util.Set.of("survival-progress/v2", "survival-progress/v3").contains(rewardContract))
                 throw new IllegalArgumentException("invalid observed objective events");
+            if (taskCompletion != null && (!"survival-progress/v3".equals(rewardContract) || rewardEvidence == null
+                    || frame.taskMemory() == null || frame.taskMemory().objective() == null
+                    || nextTaskMemory == null || nextTaskMemory.objective() == null || !nextTaskMemory.worldMatches()
+                    || !frame.taskMemory().objective().equals(nextTaskMemory.objective())
+                    || !taskCompletion.objectiveId().equals(nextTaskMemory.objective().id())
+                    || !taskCompletion.world().equals(frame.world())
+                    || !taskCompletion.world().equals(nextTaskMemory.objective().world())
+                    || !taskCompletion.world().toString().equals(nextWorld)
+                    || !taskCompletion.item().equals(nextTaskMemory.objective().goal().item())
+                    || taskCompletion.required() != nextTaskMemory.objective().goal().count()
+                    || taskCompletion.beforeOwned() < 0 || taskCompletion.beforeOwned() >= taskCompletion.required()
+                    || taskCompletion.afterOwned() != nextTaskMemory.owned()
+                    || taskCompletion.afterOwned() < taskCompletion.required()))
+                throw new IllegalArgumentException("invalid actual goal completion");
             UUID.fromString(session); UUID.fromString(nextWorld);
             if (appliedTick < frame.serverTick() || appliedTick > 0xffff_ffffL || nextState.length != PolicyFrame.STATE_SIZE)
                 throw new IllegalArgumentException("invalid applied tick/next state");

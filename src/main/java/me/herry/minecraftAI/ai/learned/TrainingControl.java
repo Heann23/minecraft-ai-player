@@ -11,7 +11,7 @@ import java.util.function.Consumer;
 /** Chooses only; AIBrain retains sole ownership of Action/Plan/input execution. */
 public final class TrainingControl {
     public record Decision(PolicyCandidates.Capture requested, PolicyCandidates.Candidate selected,
-                           PpoBridge.Response response, PolicyCandidates.Observed appliedState, long appliedTick) {}
+                           PpoBridge.Response response, PolicyCandidates.Observed appliedState, long appliedTick, PolicyTaskMemory.View admittedTask) {}
     private final PpoBridge bridge;
     private final Consumer<String> warn;
     private final PolicyCandidates catalog = new PolicyCandidates();
@@ -21,6 +21,7 @@ public final class TrainingControl {
     private PolicyCandidates.Capture requested;
     private CompletableFuture<PpoBridge.Response> pending;
     private double objectiveReward;
+    private PolicyTaskMemory.View admittedTask;
     private final AdvancementRewards advancementRewards = new AdvancementRewards();
     private final List<String> objectiveEvents = new ArrayList<>();
     private long warnAfter;
@@ -43,12 +44,14 @@ public final class TrainingControl {
                     PolicyFrame after = new PolicyFrame(ai.getWorldId(), now, actual.features(), requested.frame().options(), false,
                             null, ai.getPolicyTaskMemory().observe(ai.getWorldId(), actual.stock()));
                     boolean learning = response.metadata() == null || response.metadata().learningEnabled();
-                    var previous = episode.finish(after, actual.body(), actual.stock(), false, !learning, objectiveReward, objectiveEvents);
+                    var completion = ai.getPolicyTaskMemory().settleCompletion(admittedTask == null ? after.taskMemory() : admittedTask,
+                            after.taskMemory(), episode.active() && learning).orElse(null);
+                    var previous = episode.finish(after, actual.body(), actual.stock(), false, !learning, objectiveReward, objectiveEvents, completion);
                     if (previous != null) outbox.add(previous);
                     // Invalidated clocks do not transfer old progress credit to a later action.
                     objectiveReward = 0; objectiveEvents.clear();
                     if (!learning) episode = new TrainingEpisode();
-                    return new Decision(requested, requested.candidates().get(response.index()), response, actual, now);
+                    return new Decision(requested, requested.candidates().get(response.index()), response, actual, now, after.taskMemory());
                 }
             } catch (RuntimeException failure) {
                 if (now >= warnAfter) { warn.accept("PPO trainer unavailable; retaining only already admitted input, no Teacher fallback"); warnAfter = now + 200; }
@@ -68,6 +71,7 @@ public final class TrainingControl {
     }
 
     public void applied(Decision decision) {
+        admittedTask = decision.admittedTask();
         if (decision.response().metadata() != null && !decision.response().metadata().learningEnabled()) return;
         episode.begin(decision.requested(), decision.response(), decision.appliedState(), decision.appliedTick());
     }
@@ -123,7 +127,10 @@ public final class TrainingControl {
                 var actual = PolicyCandidates.observe(ai, active, activeTicks);
                 PolicyFrame after = new PolicyFrame(ai.getWorldId(), now, actual.features(), episode.before().options(), false,
                         null, ai.getPolicyTaskMemory().observe(ai.getWorldId(), actual.stock()));
-                var ended = episode.finish(after, actual.body(), actual.stock(), ai.getPlayer().isDead(), true, objectiveReward, objectiveEvents);
+                boolean learning = !bridge.isTransitioning() && latestStatus != null && latestStatus.metadata() != null
+                        && latestStatus.metadata().learningEnabled();
+                var completion = ai.getPolicyTaskMemory().settleCompletion(admittedTask, after.taskMemory(), learning).orElse(null);
+                var ended = episode.finish(after, actual.body(), actual.stock(), ai.getPlayer().isDead(), true, objectiveReward, objectiveEvents, completion);
                 if (ended != null) outbox.add(ended);
             }
             if (!outbox.isEmpty()) {
@@ -136,7 +143,7 @@ public final class TrainingControl {
             warn.accept("Could not capture final RL state; missing transition is not converted into success");
             result = CompletableFuture.failedFuture(failure);
         } finally {
-            outbox.clear(); sent = List.of(); requested = null; objectiveReward = 0; objectiveEvents.clear(); episode = new TrainingEpisode();
+            outbox.clear(); sent = List.of(); requested = null; admittedTask = null; objectiveReward = 0; objectiveEvents.clear(); episode = new TrainingEpisode();
         }
         return result;
     }

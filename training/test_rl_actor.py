@@ -78,6 +78,30 @@ class ActorTests(unittest.TestCase):
         legacy = {key: value for key, value in sample.items() if key != "rewardEvidence"}
         validate_transition(legacy)
 
+    def test_task_completion_requires_matching_endpoints_and_separate_reward(self):
+        import copy
+        sample = row(ActorCritic(7, hidden=4), session=str(uuid.uuid4()), reward=1.0005, terminal=False)
+        sample.pop("nextValue")
+        world = sample["nextWorld"]; identity = str(uuid.uuid4())
+        objective = {"id": identity, "world": world, "goal": {"item": "OAK_LOG", "count": 4, "metadata": {}}, "startedTick": 1}
+        sample["frame"]["taskMemory"] = {"objective": objective, "owned": 0}
+        sample.update(rewardContract="survival-progress/v3", nextTaskMemory={"objective": objective,
+            "worldMatches": True, "owned": 4, "currentlyAchieved": True},
+            taskCompletion={"objectiveId": identity, "world": world, "item": "OAK_LOG", "required": 4,
+                            "beforeOwned": 3, "afterOwned": 4}, rewardEvidence={
+            "schema": "actual-reward-evidence/v1", "healthBefore": 20, "healthAfter": 20,
+            "foodBefore": 20, "foodAfter": 20, "saturationBefore": 0, "saturationAfter": 0,
+            "airBefore": 300, "airAfter": 300, "discoveries": 0, "objectiveReward": 0})
+        validate_transition(sample)
+        for field, value in (("beforeOwned", 4), ("afterOwned", 3), ("objectiveId", str(uuid.uuid4()))):
+            invalid = copy.deepcopy(sample); invalid["taskCompletion"][field] = value
+            with self.assertRaises(ValueError):
+                validate_transition(invalid)
+        with self.assertRaises(ValueError):
+            validate_transition(dict(sample, reward=0.0005))
+        with self.assertRaises(ValueError):
+            validate_transition(dict(sample, rewardContract="survival-progress/v2"))
+
     def test_reward_versions_preserve_legacy_rows_and_validate_actual_progress_event_metadata(self):
         model = ActorCritic(7, hidden=4)
         sample = row(model, session=str(uuid.uuid4()))

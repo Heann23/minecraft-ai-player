@@ -42,14 +42,14 @@ def write_atomic(path: Path, value: dict):
 def validate_transition(row: dict):
     required = {"session", "sequence", "frame", "index", "logProbability", "value", "modelVersion", "reward",
                 "elapsedTicks", "terminated", "truncated", "appliedTick", "nextWorld", "nextState"}
-    if set(row) - {"rewardContract", "objectiveEvents", "rewardEvidence", "nextTaskMemory"} != required:
+    if set(row) - {"rewardContract", "objectiveEvents", "rewardEvidence", "nextTaskMemory", "taskCompletion"} != required:
         raise ValueError("transition schema mismatch; Teacher labels are not accepted")
-    if row.get("rewardContract", "survival-progress/v1") not in ("survival-progress/v1", "survival-progress/v2"):
+    if row.get("rewardContract", "survival-progress/v1") not in ("survival-progress/v1", "survival-progress/v2", "survival-progress/v3"):
         raise ValueError("unsupported observed reward contract")
     events = row.get("objectiveEvents", [])
     if not isinstance(events, list) or len(events) > 32 or any(not isinstance(key, str) or len(key) > 268
             or not re.fullmatch(r"advancement:[a-z0-9_.-]+:[a-z0-9_./-]+", key) for key in events) \
-            or len(set(events)) != len(events) or events and row.get("rewardContract") != "survival-progress/v2":
+            or len(set(events)) != len(events) or events and row.get("rewardContract") not in ("survival-progress/v2", "survival-progress/v3"):
         raise ValueError("invalid observed progress events")
     uuid.UUID(row["session"])
     uuid.UUID(row["nextWorld"])
@@ -69,12 +69,34 @@ def validate_transition(row: dict):
             raise ValueError("invalid transition scalar")
     if row["logProbability"] > 0 or abs(row["reward"]) > 100 or not isinstance(row["terminated"], bool) or not isinstance(row["truncated"], bool):
         raise ValueError("invalid transition conditions")
+    completion = row.get("taskCompletion")
+    if completion is not None:
+        fields = {"objectiveId", "world", "item", "required", "beforeOwned", "afterOwned"}
+        if not isinstance(completion, dict) or set(completion) != fields or row.get("rewardContract") != "survival-progress/v3" \
+                or "rewardEvidence" not in row:
+            raise ValueError("invalid task completion schema")
+        uuid.UUID(completion["objectiveId"]); uuid.UUID(completion["world"])
+        if any(type(completion[key]) is not int for key in ("required", "beforeOwned", "afterOwned")) \
+                or not 1 <= completion["required"] <= 4096 \
+                or not 0 <= completion["beforeOwned"] < completion["required"] <= completion["afterOwned"]:
+            raise ValueError("invalid task completion ownership")
+        before = row["frame"].get("taskMemory")
+        after = row.get("nextTaskMemory")
+        if not isinstance(before, dict) or not isinstance(after, dict):
+            raise ValueError("missing task completion endpoints")
+        goal = after.get("objective")
+        if not isinstance(goal, dict) or before.get("objective") != goal or after.get("worldMatches") is not True \
+                or goal.get("id") != completion["objectiveId"] or goal.get("world") != completion["world"] \
+                or completion["world"] != row["nextWorld"] or completion["world"] != row["frame"]["world"] \
+                or (not isinstance(goal.get("goal"), dict) or goal["goal"].get("item") != completion["item"] or goal["goal"].get("count") != completion["required"]) \
+                or after.get("owned") != completion["afterOwned"] or after.get("currentlyAchieved") is not True:
+            raise ValueError("task completion endpoint mismatch")
     if "rewardEvidence" in row:
         evidence = row["rewardEvidence"]
         fields = {"schema", "healthBefore", "healthAfter", "foodBefore", "foodAfter", "saturationBefore",
                   "saturationAfter", "airBefore", "airAfter", "discoveries", "objectiveReward"}
         if not isinstance(evidence, dict) or set(evidence) != fields \
-                or evidence["schema"] != "actual-reward-evidence/v1" or row.get("rewardContract") != "survival-progress/v2":
+                or evidence["schema"] != "actual-reward-evidence/v1" or row.get("rewardContract") not in ("survival-progress/v2", "survival-progress/v3"):
             raise ValueError("invalid reward evidence schema")
         for key in fields - {"schema"}:
             if type(evidence[key]) not in (int, float) or not math.isfinite(evidence[key]):
@@ -88,6 +110,7 @@ def validate_transition(row: dict):
         expected = max(-100, min(100, row["elapsedTicks"] * 0.0001
                        + (evidence["healthAfter"] - evidence["healthBefore"]) * 0.05
                        + evidence["discoveries"] * 0.2 + evidence["objectiveReward"] - (10 if row["terminated"] else 0)))
+        expected = max(-100, min(100, expected + (1 if completion is not None else 0)))
         if not math.isclose(expected, row["reward"], rel_tol=0, abs_tol=1e-9):
             raise ValueError("actual reward evidence mismatch")
 

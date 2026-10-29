@@ -24,7 +24,26 @@ class TrainingEpisodeTest {
         var result = episode.finish(next, body(20), Map.of("OAK_LOG", 4), false, false, 0);
         assertEquals(requested.taskMemory().objective().id(), result.nextTaskMemory().objective().id());
         assertTrue(result.nextTaskMemory().currentlyAchieved());
-        assertEquals(0.2005, result.reward(), 1e-9); // Existing item discovery only; goal reward is not implemented yet.
+        assertEquals(0.2005, result.reward(), 1e-9); // Completion is never inferred from the result view alone.
+    }
+    @Test void explicitCompletionAddsOneWithSeparateAttributionAndActualAdmissionQuantity() {
+        var memory = new PolicyTaskMemory(); memory.acquire(WORLD, "OAK_LOG", 4, 1);
+        var requested = new PolicyFrame(WORLD, 1, new double[PolicyFrame.STATE_SIZE], OPTIONS, false,
+                null, memory.observe(WORLD, Map.of()));
+        var admission = memory.observe(WORLD, Map.of("OAK_LOG", 3));
+        var next = new PolicyFrame(WORLD, 6, new double[PolicyFrame.STATE_SIZE], OPTIONS, false,
+                null, memory.observe(WORLD, Map.of("OAK_LOG", 4)));
+        var completion = memory.settleCompletion(admission, next.taskMemory(), true).orElseThrow();
+        var episode = new TrainingEpisode();
+        episode.begin(new PolicyCandidates.Capture(requested, List.of(), body(20), Map.of()), response(),
+                actual(20, Map.of("OAK_LOG", 3)), 2);
+        var result = episode.finish(next, body(20), Map.of("OAK_LOG", 4), false, false, 0, List.of(), completion);
+        assertEquals("survival-progress/v3", result.rewardContract());
+        assertEquals(1.0004, result.reward(), 1e-9);
+        assertEquals(0, result.rewardEvidence().objectiveReward());
+        assertEquals(3, result.taskCompletion().beforeOwned());
+        assertEquals(0, result.frame().taskMemory().owned());
+        assertTrue(result.objectiveEvents().isEmpty());
     }
     @Test void onlyConfirmedDisplayedProgressEarnsOnceAndInferenceIsNotRetroactivelyCredited() {
         var rewards = new AdvancementRewards();
