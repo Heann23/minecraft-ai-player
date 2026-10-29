@@ -114,6 +114,7 @@ public final class PolicyCandidates {
             var item = p.getInventory().getItem(slot);
             if (item != null && !item.isEmpty()) counts.merge(item.getType().name(), item.getAmount(), Integer::sum);
         }
+        TaskPolicyContext.encode(body, ai.getPolicyTaskMemory().observe(ai.getWorldId(), counts), ai.getTicks());
         return new Observed(state, survival, counts, body);
     }
 
