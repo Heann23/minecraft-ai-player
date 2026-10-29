@@ -30,6 +30,7 @@ public final class VanillaCraftAction extends AbstractAction {
     private AbstractCraftingMenu menu;
     private RecipeChoice[] layout;
     private ItemStack[] expected;
+    private ItemStack[] inventorySnapshot;
     private int[] sources;
     private int cell, phase, searchBudget;
     private boolean taken;
@@ -62,19 +63,21 @@ public final class VanillaCraftAction extends AbstractAction {
         if (layout == null) { fail("unsupported recipe layout"); return; }
         sources = new int[layout.length]; expected = new ItemStack[layout.length];
         int[] remaining = new int[36];
+        inventorySnapshot = new ItemStack[36];
         for (int slot = 0; slot < 36; slot++) {
             var stack = ai.getPlayer().getInventory().getItem(slot);
             remaining[slot] = stack == null ? 0 : stack.getAmount();
+            inventorySnapshot[slot] = stack == null ? null : stack.clone();
         }
         searchBudget = 4096;
         if (!assign(ai, 0, remaining)) fail("ingredient allocation unavailable or search budget exhausted");
     }
     private boolean assign(AIPlayer ai, int at, int[] remaining) {
-        if (--searchBudget < 0) return false;
+        if (--searchBudget < 0 || ai.getWorkBudget().isExhausted()) return false;
         if (at == layout.length) return true;
         if (layout[at] == null) return assign(ai, at + 1, remaining);
         for (int slot = 0; slot < 36 && searchBudget >= 0; slot++) {
-            var stack = ai.getPlayer().getInventory().getItem(slot);
+            var stack = inventorySnapshot[slot];
             if (remaining[slot] <= 0 || stack == null || !layout[at].test(stack)) continue;
             remaining[slot]--; sources[at] = slot; expected[at] = stack.clone(); expected[at].setAmount(1);
             if (assign(ai, at + 1, remaining)) return true;
