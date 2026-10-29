@@ -5,7 +5,7 @@ final class TaskPolicyContext {
     private TaskPolicyContext() {}
     static void encode(double[] state, PolicyTaskMemory.View view, long tick, java.util.UUID world) {
         if (state.length != PolicyFrame.STATE_SIZE || tick < 0) throw new IllegalArgumentException("invalid task context");
-        java.util.Arrays.fill(state, 208, PolicyFrame.STATE_SIZE, 0);
+        java.util.Arrays.fill(state, 208, 240, 0);
         if (view.objective() != null) {
             state[208] = 1; state[209] = view.worldMatches() ? 1 : 0;
             state[210] = Math.min(16, view.objective().goal().count() / 64.0);

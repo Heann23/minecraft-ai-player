@@ -5,8 +5,8 @@ import math
 import copy
 import numpy as np
 
-CONTRACT = "minecraft-primitive-candidates/v5"
-STATE_SIZE, ACTION_SIZE, MAX_OPTIONS = 240, 256, 128
+CONTRACT = "minecraft-primitive-candidates/v6"
+STATE_SIZE, ACTION_SIZE, MAX_OPTIONS = 400, 256, 128
 INPUT_SIZE = STATE_SIZE + ACTION_SIZE
 
 
@@ -154,11 +154,11 @@ class ActorCritic:
 
     @classmethod
     def upgrade_legacy_context(cls, state: dict):
-        """Explicit legacy->v5 migration. New context has zero influence; no invented learning."""
+        """Explicit legacy->v6 migration. New context has zero influence; no invented learning."""
         old_size = {"minecraft-primitive-candidates/v1": 64, "minecraft-primitive-candidates/v2": 128,
-                    "minecraft-primitive-candidates/v3": 192, "minecraft-primitive-candidates/v4": 208}.get(state.get("contract"))
+                    "minecraft-primitive-candidates/v3": 192, "minecraft-primitive-candidates/v4": 208, "minecraft-primitive-candidates/v5": 240}.get(state.get("contract"))
         if state.get("schema") != "minecraft-ppo-optimizer/v1" or old_size is None:
-            raise ValueError("context upgrade requires a v1, v2, v3 or v4 optimizer checkpoint")
+            raise ValueError("context upgrade requires a v1, v2, v3, v4 or v5 optimizer checkpoint")
         upgraded = copy.deepcopy(state)
         for group in ("params", "first", "second"):
             for key, old_columns in (("actor_w", old_size + ACTION_SIZE), ("value_w", old_size)):
