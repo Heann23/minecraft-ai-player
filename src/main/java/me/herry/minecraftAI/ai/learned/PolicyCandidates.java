@@ -76,7 +76,11 @@ public final class PolicyCandidates {
     private static final List<BlockPoint> MOVE_OFFSETS = movementOffsets();
 
     public record Observed(me.herry.minecraftAI.ai.primitive.control.PrimitiveSnapshot snapshot,
-                           SurvivalObservation.Body body, Map<String, Integer> stock, double[] features) {
+                           SurvivalObservation.Body body, Map<String, Integer> stock, double[] features, PolicyFrame.SightObservation sight) {
+        public Observed(me.herry.minecraftAI.ai.primitive.control.PrimitiveSnapshot snapshot,
+                        SurvivalObservation.Body body, Map<String, Integer> stock, double[] features) {
+            this(snapshot, body, stock, features, null);
+        }
         public Observed { stock = Map.copyOf(stock); features = features.clone(); }
         @Override public double[] features() { return features.clone(); }
     }
@@ -115,8 +119,8 @@ public final class PolicyCandidates {
             if (item != null && !item.isEmpty()) counts.merge(item.getType().name(), item.getAmount(), Integer::sum);
         }
         TaskPolicyContext.encode(body, ai.getPolicyTaskMemory().observe(ai.getWorldId(), counts), ai.getTicks(), ai.getWorldId());
-        DirectionalPolicyContext.capture(ai, body);
-        return new Observed(state, survival, counts, body);
+        var sight = DirectionalPolicyContext.capture(ai, body);
+        return new Observed(state, survival, counts, body, sight);
     }
 
     public Capture capture(AIPlayer ai, Candidate active, int activeTicks) {
@@ -163,7 +167,7 @@ public final class PolicyCandidates {
         // Direct keys and budgeted registries are partial observations, even after every source was visited.
         return new Capture(new PolicyFrame(ai.getWorldId(), Integer.toUnsignedLong(Bukkit.getCurrentTick()), body,
                 candidates.stream().map(Candidate::encoded).toList(), false, evidence,
-                ai.getPolicyTaskMemory().observe(ai.getWorldId(), observed.stock())), candidates, observed.body(), observed.stock());
+                ai.getPolicyTaskMemory().observe(ai.getWorldId(), observed.stock()), observed.sight()), candidates, observed.body(), observed.stock());
     }
 
     private void movementTargets(AIPlayer ai, Map<String, Candidate> found) {

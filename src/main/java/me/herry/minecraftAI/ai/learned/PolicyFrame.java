@@ -7,7 +7,11 @@ import java.util.UUID;
 
 /** Value-only inputs captured before selection. No Teacher label, score, future result or live world reference. */
 public record PolicyFrame(UUID world, long serverTick, double[] state, List<Option> options, boolean complete, Discovery discovery,
-                          PolicyTaskMemory.View taskMemory) {
+                          PolicyTaskMemory.View taskMemory, SightObservation sight) {
+    public PolicyFrame(UUID world, long serverTick, double[] state, List<Option> options, boolean complete, Discovery discovery,
+                       PolicyTaskMemory.View taskMemory) {
+        this(world, serverTick, state, options, complete, discovery, taskMemory, null);
+    }
     public PolicyFrame(UUID world, long serverTick, double[] state, List<Option> options, boolean complete, Discovery discovery) {
         this(world, serverTick, state, options, complete, discovery, null);
     }
@@ -63,6 +67,40 @@ public record PolicyFrame(UUID world, long serverTick, double[] state, List<Opti
             throw new IllegalArgumentException("invalid candidate set");
     }
     @Override public double[] state() { return state.clone(); }
+
+    /** Exact provenance of the existing hashed sight input; never an extra neural-network input. */
+    public record SightObservation(UUID world, long observedTick, double eyeX, double eyeY, double eyeZ,
+                                   double yaw, double pitch, List<SightRay> rays) {
+        public SightObservation {
+            Objects.requireNonNull(world);
+            if (observedTick < 0 || observedTick > 0xffff_ffffL)
+                throw new IllegalArgumentException("invalid sight tick");
+            for (double value : new double[]{eyeX, eyeY, eyeZ, yaw, pitch})
+                if (!Double.isFinite(value)) throw new IllegalArgumentException("invalid sight origin");
+            rays = List.copyOf(rays);
+            if (rays.size() != 8) throw new IllegalArgumentException("invalid sight coverage");
+            for (int i = 0; i < rays.size(); i++) {
+                var ray = rays.get(i);
+                if (ray.index() != i || ray.block() != null
+                        && (!world.equals(ray.block().world()) || observedTick != ray.block().observedTick()))
+                    throw new IllegalArgumentException("invalid sight provenance");
+            }
+        }
+    }
+
+    public record SightRay(int index, String status, double distance, BlockEvidence block) {
+        public SightRay {
+            if (index < 0 || index >= 8 || status == null || !Double.isFinite(distance))
+                throw new IllegalArgumentException("invalid sight ray");
+            boolean valid = switch (status) {
+                case "HIT" -> block != null && distance >= 0 && distance <= 16;
+                case "CLEAR" -> block == null && distance == 16;
+                case "BUDGET_UNKNOWN", "UNLOADED_UNKNOWN" -> block == null && distance == -1;
+                default -> false;
+            };
+            if (!valid) throw new IllegalArgumentException("invalid sight result");
+        }
+    }
 
     /** Exact capture evidence, never a policy score or a claim about later world state. */
     public record BlockEvidence(String material, UUID world, int x, int y, int z, long observedTick) {
