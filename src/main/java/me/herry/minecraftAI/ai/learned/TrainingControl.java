@@ -133,6 +133,12 @@ public final class TrainingControl {
                 var ended = episode.finish(after, actual.body(), actual.stock(), ai.getPlayer().isDead(), true, objectiveReward, objectiveEvents, completion);
                 if (ended != null) outbox.add(ended);
             }
+            if (!episode.active() && admittedTask != null) {
+                // Inference has no training episode, but stopping it must still consume an observed completion.
+                var actual = PolicyCandidates.observe(ai, active, activeTicks);
+                ai.getPolicyTaskMemory().settleCompletion(admittedTask,
+                        ai.getPolicyTaskMemory().observe(ai.getWorldId(), actual.stock()), false);
+            }
             if (!outbox.isEmpty()) {
                 var last = outbox.getLast();
                 PolicyFrame terminal = new PolicyFrame(ai.getWorldId(), Integer.toUnsignedLong(Bukkit.getCurrentTick()),
