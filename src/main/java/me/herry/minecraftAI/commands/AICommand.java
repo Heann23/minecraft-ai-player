@@ -97,7 +97,7 @@ public class AICommand implements TabExecutor {
             info(sender, task.objective() == null ? "설정된 작업 목표가 없습니다."
                     : task.objective().goal().describe() + " / 보유 " + task.owned() + " / 남음 " + task.remaining()
                     + " / 같은 월드 " + task.worldMatches());
-            info(sender, "최근 완료 행동 " + task.recentOutcomes().size() + "개. 현재 목표 기록은 가중치 판단 입력 연결 전 단계입니다.");
+            info(sender, "최근 완료 행동 " + task.recentOutcomes().size() + "개. 목표와 작업 기억은 정책 입력에 연결돼 있으며, 실제 활용 능력은 별도 평가가 필요합니다.");
             return;
         }
         if (ai.getState() != me.herry.minecraftAI.ai.AIState.STOPPED) { error(sender, "목표를 바꾸려면 AI를 먼저 정지해 주세요."); return; }
