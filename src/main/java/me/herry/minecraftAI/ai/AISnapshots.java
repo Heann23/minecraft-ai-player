@@ -80,6 +80,12 @@ final class AISnapshots {
         ai.restoreTicks(snapshot.ticks);
         ai.getMemory().importState(snapshot.section(MEMORY));
         ai.getPolicyTaskMemory().importState(snapshot.section("policyTaskMemory"));
+        var restoredTask = ai.getPolicyTaskMemory().observe(ai.getWorldId(), Map.of()).objective();
+        if (restoredTask != null) {
+            var item = org.bukkit.Material.matchMaterial(restoredTask.goal().item());
+            if (item == null || item.isAir() || !item.isItem())
+                throw new IllegalArgumentException("saved policy objective item is not registered");
+        }
         ai.getWorldModel().importState(snapshot.section(WORLD_MODEL));
         BodyState.apply(ai.getPlayer(), snapshot.section(BODY), logger);
         Map<String, Object> build = snapshot.section(BUILD);
