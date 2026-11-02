@@ -11,6 +11,26 @@ from paper_lab import read_plan, validate_options, summarize_game_log, validate_
 
 
 class SeedPlanTests(unittest.TestCase):
+    def test_actual_cancellation_progress_distinguishes_missing_trace_from_zero(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "console.log"
+            prefix = "[AI:RLLearner] "
+            trace = prefix + "Model mining cancelled: choice=mine:1,2,3:0@20 target=1,2,3 material=OAK_LOG current=1,2,3 currentMaterial=OAK_LOG "
+            path.write_text("\n".join([
+                prefix + "Model action ended: BreakBlock SUCCESS ",
+                *([prefix + "Model action cancelled: BreakBlock choice=mine:1,2,3:0@20 next=wait:5@5 tick=20 reason=cancelled"] * 3),
+                trace + "progress=0.0 aimTicks=10 actionTicks=10 tick=20",
+                trace + "progress=6.666667E-2 aimTicks=15 actionTicks=20 tick=40",
+                trace + "progress=NaN aimTicks=15 actionTicks=20 tick=60"]))
+            observed = summarize_game_log(path)
+            self.assertEqual(observed["inputOutcomeCounts"], {"BreakBlock:SUCCESS": 1})
+            self.assertEqual(observed["inputCancellationCounts"], {"BreakBlock": 3})
+            self.assertEqual(observed["miningCancellationsWithoutProgressTrace"], 1)
+            mining = observed["miningCancellationProgress"][0]
+            self.assertEqual((mining["beforeAnyProgress"], mining["partialProgress"]), (1, 1))
+            self.assertEqual(mining["maxActionTicks"], 20)
+            self.assertAlmostEqual(mining["maxProgress"], 0.06666667)
+
     def test_wrong_source_is_rejected_before_seed_reservation_or_runtime_work(self):
         from paper_lab import run
         with mock.patch("paper_lab.subprocess.check_output", return_value="actual-head\n"), \

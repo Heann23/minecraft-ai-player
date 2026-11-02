@@ -527,12 +527,17 @@ final class AIBrain {
         Action interrupted = plan.current();
         boolean wasRunning = interrupted != null && interrupted.getStatus() == ActionStatus.RUNNING;
         String choice = activeLearned == null ? (interrupted == null ? "" : interrupted.getName()) : activeLearned.id();
+        var mining = interrupted instanceof me.herry.minecraftAI.ai.action.BreakBlockAction block ? block.miningProgress() : null;
         plan.cancel(ai);
         // Record the actual cancellation result, not a failure invented from the next policy choice.
         if (wasRunning && interrupted.getStatus() == ActionStatus.FAILED && "cancelled".equals(interrupted.getFailReason())) {
             ai.getPolicyTaskMemory().ended(ai.getWorldId(), ai.getTicks(), choice, "FAILED", "cancelled");
             ai.debug("Model action cancelled: " + interrupted.getName() + " choice=" + choice + " next=" + replacement
                     + " tick=" + Integer.toUnsignedLong(org.bukkit.Bukkit.getCurrentTick()) + " reason=cancelled");
+            if (mining != null) ai.debug("Model mining cancelled: choice=" + choice + " target=" + mining.target()
+                    + " material=" + mining.material() + " current=" + mining.current() + " currentMaterial=" + mining.currentMaterial()
+                    + " progress=" + mining.progress() + " aimTicks=" + mining.aimTicks() + " actionTicks=" + mining.actionTicks()
+                    + " tick=" + Integer.toUnsignedLong(org.bukkit.Bukkit.getCurrentTick()));
         }
     }
 

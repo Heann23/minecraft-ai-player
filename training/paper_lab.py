@@ -251,7 +251,8 @@ def confirm_model_command(process, events, send, operation, name, *, timeout=8):
 
 def summarize_game_log(path: Path):
     """Observed diagnostics, never an inferred task success or an invented missing sample."""
-    choices, endings = Counter(), Counter()
+    choices, endings, cancellations = Counter(), Counter(), Counter()
+    mining_progress = {}
     positions, health, food = [], [], []
     deaths = respawns = rejected = 0
     inventory = None
@@ -300,6 +301,22 @@ def summarize_game_log(path: Path):
             ended = re.search(r"Model action ended: (\S+) (SUCCESS|FAILED)", line)
             if ended:
                 endings[ended[1] + ":" + ended[2]] += 1
+            cancelled = re.search(r"\[AI:RLLearner\] Model action cancelled: (\S+) ", line)
+            if cancelled:
+                cancellations[cancelled[1]] += 1
+            mining = re.search(r"\[AI:RLLearner\] Model mining cancelled: choice=\S+ target=\S+ material=([A-Z_]+) current=\S+ currentMaterial=[A-Z_]+ progress=([0-9.eE+-]+) aimTicks=(\d+) actionTicks=(\d+) tick=(\d+)(?:\s|$)", line)
+            if mining:
+                progress = float(mining[2])
+                if 0 <= progress < 1:
+                    facts = mining_progress.setdefault(mining[1], {"material": mining[1], "samples": 0,
+                        "beforeAnyProgress": 0, "partialProgress": 0, "maxProgress": 0.0,
+                        "maxAimTicks": 0, "maxActionTicks": 0})
+                    facts["samples"] += 1
+                    facts["beforeAnyProgress"] += progress == 0
+                    facts["partialProgress"] += progress > 0
+                    facts["maxProgress"] = max(facts["maxProgress"], progress)
+                    facts["maxAimTicks"] = max(facts["maxAimTicks"], int(mining[3]))
+                    facts["maxActionTicks"] = max(facts["maxActionTicks"], int(mining[4]))
             at = re.search(r"위치: (-?\d+), (-?\d+), (-?\d+) \(([^)]+)\)", line)
             if at:
                 positions.append({"x": int(at[1]), "y": int(at[2]), "z": int(at[3]), "world": at[4]})
@@ -313,6 +330,8 @@ def summarize_game_log(path: Path):
             if "RLLearner has the following entity data: [" in line:
                 inventory = line.split("following entity data: ", 1)[1].strip()
     return {"available": True, "modelChoiceCounts": dict(choices), "inputOutcomeCounts": dict(endings),
+            "inputCancellationCounts": dict(cancellations), "miningCancellationProgress": list(mining_progress.values()),
+            "miningCancellationsWithoutProgressTrace": max(0, cancellations["BreakBlock"] - sum(x["samples"] for x in mining_progress.values())),
             "sampledPositions": positions, "sampledHealthCeilings": health, "sampledFood": food,
             "recordedDeaths": deaths, "recordedRespawns": respawns, "deferredRequests": rejected,
             "finalInventoryNbt": inventory, "allWorldAutonomyProven": False,

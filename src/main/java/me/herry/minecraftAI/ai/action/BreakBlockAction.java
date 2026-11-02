@@ -66,6 +66,16 @@ public final class BreakBlockAction extends AbstractAction implements PrimitiveA
     private int settleTicks = -1;
     private int refills;
 
+    /** Cached execution facts only. Reading this does not inspect the world or advance mining. */
+    public record MiningProgress(String target, String material, String current, String currentMaterial,
+                                 float progress, int aimTicks, int actionTicks) {}
+
+    public MiningProgress miningProgress() {
+        return new MiningProgress(target.encode(), expected == null ? "UNKNOWN" : expected.name(),
+                current == null ? "UNKNOWN" : current.encode(), currentType == null ? "UNKNOWN" : currentType.name(),
+                progress, aimTicks, getElapsed());
+    }
+
     public BreakBlockAction(BlockPoint target) {
         this(target, false);
     }
