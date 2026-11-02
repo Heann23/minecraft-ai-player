@@ -520,7 +520,7 @@ final class AIBrain {
         if (wasRunning && interrupted.getStatus() == ActionStatus.FAILED && "cancelled".equals(interrupted.getFailReason())) {
             ai.getPolicyTaskMemory().ended(ai.getWorldId(), ai.getTicks(), choice, "FAILED", "cancelled");
             ai.debug("Model action cancelled: " + interrupted.getName() + " choice=" + choice + " next=" + replacement
-                    + " tick=" + Integer.toUnsignedLong(Bukkit.getCurrentTick()) + " reason=cancelled");
+                    + " tick=" + Integer.toUnsignedLong(org.bukkit.Bukkit.getCurrentTick()) + " reason=cancelled");
         }
     }
 
