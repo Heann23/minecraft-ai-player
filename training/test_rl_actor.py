@@ -37,6 +37,31 @@ def row(model, session="a", sequence=0, reward=1, terminal=True):
 
 
 class ActorTests(unittest.TestCase):
+    def test_zero_goal_residual_preserves_original_state_and_has_correct_ppo_gradient(self):
+        import copy
+        model=ActorCritic(31,hidden=4);model.fit([row(model)])
+        observed=frame();observed['state'][216]=1
+        before=copy.deepcopy(model.optimizer_state());probabilities,value,_=model.evaluate(observed)
+        model.enable_goal_interaction();ActorCritic.verify_zero_goal_extension(before,model.optimizer_state())
+        np.testing.assert_array_equal(model.evaluate(observed)[0],probabilities)
+        self.assertEqual(model.value(observed['state'])[0],value)
+        sample=dict(row(model),frame=observed,logProbability=math.log(float(probabilities[1])),value=value)
+        advantages=np.array([.7]);targets=np.array([value+1])
+        gradients,_=model.gradients([sample],advantages,targets,entropy_weight=.03)
+        key=(8,0);original=model.params['goal_action_w'][key];eps=1e-5
+        model.params['goal_action_w'][key]=original+eps
+        plus=model.gradients([sample],advantages,targets,entropy_weight=.03)[1]['loss']
+        model.params['goal_action_w'][key]=original-eps
+        minus=model.gradients([sample],advantages,targets,entropy_weight=.03)[1]['loss']
+        model.params['goal_action_w'][key]=original
+        self.assertAlmostEqual(gradients['goal_action_w'][key],(plus-minus)/(2*eps),places=6)
+        self.assertNotEqual(gradients['goal_action_w'][key],0)
+        model.fit([sample]);restored=ActorCritic.from_optimizer_state(model.optimizer_state())
+        self.assertEqual(restored.interaction,'goal-action-bilinear/v1')
+        np.testing.assert_array_equal(restored.evaluate(observed)[0],model.evaluate(observed)[0])
+        self.assertEqual(model.artifact(environment_steps=1,training_run='numerical-fixture',rollout_sha256='0'*64)['schema'],'minecraft-rl-actor/v3')
+        with self.assertRaises(ValueError):ActorCritic.verify_zero_goal_extension(before,model.optimizer_state())
+
     def test_temporal_ppo_gradient_matches_changed_sampling_law(self):
         import copy
         from continuation_policy import SELECTION

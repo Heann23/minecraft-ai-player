@@ -374,7 +374,7 @@ def resume_parent_directory(selected_resume: Path, *, allow_conversion=True):
         raise ValueError("conversion ancestry requires one exact checkpoint")
     from model_catalog import verify_state
     evidence = json.loads(evidence_path.read_bytes())
-    if evidence.get("schema") != "minecraft-temporal-policy-conversion/v1":
+    if evidence.get("schema") not in ("minecraft-temporal-policy-conversion/v1", "minecraft-goal-interaction-conversion/v1"):
         raise ValueError("invalid conversion ancestry")
     before, after = evidence["sourceSession"], evidence["convertedSession"]
     if Path(after["checkpoint"]).resolve() != selected_resume or sha256(selected_resume) != after["checkpointSha256"]:
@@ -385,8 +385,12 @@ def resume_parent_directory(selected_resume: Path, *, allow_conversion=True):
     original = json.loads(Path(before["checkpoint"]).read_bytes())
     converted = json.loads(selected_resume.read_bytes())
     optimizer = dict(converted["optimizer"])
-    if optimizer.pop("selection", None) not in ("continue-switch-mean/v1", "continue-switch-mean/v2") or optimizer != original["optimizer"] \
-            or converted["rolloutSha256"] != original["rolloutSha256"]:
+    if evidence['schema'] == 'minecraft-goal-interaction-conversion/v1':
+        from rl_actor import ActorCritic
+        ActorCritic.verify_zero_goal_extension(original['optimizer'], optimizer)
+    elif optimizer.pop("selection", None) not in ("continue-switch-mean/v1", "continue-switch-mean/v2") or optimizer != original["optimizer"]:
+        raise ValueError("conversion changed tensors or trained prefix")
+    if converted["rolloutSha256"] != original["rolloutSha256"]:
         raise ValueError("conversion changed tensors or trained prefix")
     return resume_parent_directory(Path(before["checkpoint"]), allow_conversion=False)
 

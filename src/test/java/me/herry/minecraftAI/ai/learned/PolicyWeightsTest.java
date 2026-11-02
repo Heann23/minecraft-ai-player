@@ -12,6 +12,18 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.*;
 
 class PolicyWeightsTest {
+    @Test void goalActionResidualUsesLearnedCrossTermsAndRejectsOldSchema() throws Exception {
+        double[][] cross=new double[24][PolicyFrame.ACTION_SIZE];cross[8][0]=2;
+        var artifact=new PolicyWeights.Artifact("minecraft-rl-actor/v3",PolicyFrame.CONTRACT,"ppo","minecraft-paper",1,"numerical-fixture","0".repeat(64),new double[1][PolicyFrame.INPUT_SIZE],new double[]{0},new double[]{0},0,null,null,null,null,null,"goal-action-bilinear/v1",cross);
+        Path file=directory.resolve("goal-cross.json");Files.writeString(file,new Gson().toJson(artifact));
+        double[] state=new double[PolicyFrame.STATE_SIZE];state[216]=1;
+        double[] left=new double[PolicyFrame.ACTION_SIZE],right=new double[PolicyFrame.ACTION_SIZE];left[0]=-.5;right[0]=.5;
+        var observed=new PolicyFrame(UUID.randomUUID(),5,state,java.util.List.of(new PolicyFrame.Option("left",left),new PolicyFrame.Option("right",right)),false);
+        var prediction=PolicyWeights.load(file).predict(observed);
+        assertEquals(1,prediction.index());assertEquals(-Math.log1p(Math.exp(-2)),prediction.logProbability(),1e-12);
+        String oldSchema=new Gson().toJson(artifact).replace("minecraft-rl-actor/v3","minecraft-rl-actor/v1");Files.writeString(file,oldSchema);
+        assertThrows(java.io.IOException.class,()->PolicyWeights.load(file));
+    }
     @Test void activeMiningCanChangeReconsiderationWithoutInventingFreshEvidence() {
         var point=new me.herry.minecraftAI.ai.util.BlockPoint(1,64,2);
         var tool=new me.herry.minecraftAI.ai.primitive.control.ToolChoice(0,"AIR",java.util.Map.of());

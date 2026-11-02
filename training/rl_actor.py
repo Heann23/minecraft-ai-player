@@ -30,6 +30,7 @@ def inputs(frame: dict) -> tuple[np.ndarray, np.ndarray]:
 class ActorCritic:
     def __init__(self, seed: int, hidden: int = 64):
         self.selection = "flat"
+        self.interaction = None
         if not 1 <= hidden <= 256:
             raise ValueError("hidden size must be 1..256")
         self.rng = np.random.default_rng(seed)
@@ -48,11 +49,33 @@ class ActorCritic:
         self.updates = 0
         self.version = 0
 
+    def enable_goal_interaction(self):
+        """Explicit zero-residual architecture extension; no semantic action advice."""
+        if self.interaction is not None:
+            raise ValueError("goal interaction already enabled")
+        self.interaction = "goal-action-bilinear/v1"
+        for group in (self.params, self.first, self.second):
+            group['goal_action_w'] = np.zeros((24, ACTION_SIZE))
+
+    @staticmethod
+    def verify_zero_goal_extension(before, after):
+        restored = copy.deepcopy(after)
+        if 'interaction' in before or restored.pop('interaction', None) != 'goal-action-bilinear/v1':
+            raise ValueError('invalid explicit goal extension')
+        for group in ('params', 'first', 'second'):
+            value = np.asarray(restored[group].pop('goal_action_w', None), dtype=np.float64)
+            if value.shape != (24, ACTION_SIZE) or not np.isfinite(value).all() or np.any(value != 0):
+                raise ValueError('goal extension must add only zero tensors and Adam')
+        if restored != before:
+            raise ValueError('goal extension changed original optimizer state')
+
     def evaluate(self, frame: dict):
         state, x = inputs(frame)
         p = self.params
         hidden = np.tanh(x @ p["actor_w"].T + p["actor_b"])
         logits = hidden @ p["actor_out"] + p["actor_bias"][0]
+        if self.interaction is not None:
+            logits += x[:, STATE_SIZE:] @ (state[208:232] @ p['goal_action_w'])
         if self.selection in continuation_policy.SUPPORTED:
             logits = continuation_policy.scores(frame, logits, self.selection)
         logits -= logits.max()
@@ -97,6 +120,8 @@ class ActorCritic:
             scores_gradient = -coefficient * probabilities
             scores_gradient[chosen] += coefficient
             scores_gradient += entropy_weight * probabilities * (logs + entropy)
+            if self.interaction is not None:
+                gradients['goal_action_w'] += np.outer(state[208:232], scores_gradient @ x[:, STATE_SIZE:])
             gradients["actor_out"] += hidden.T @ scores_gradient
             gradients["actor_bias"][0] += scores_gradient.sum()
             hidden_gradient = scores_gradient[:, None] * self.params["actor_out"][None, :] * (1 - hidden ** 2)
@@ -151,6 +176,7 @@ class ActorCritic:
             raise ValueError("initialization is not a trained checkpoint")
         return {"schema": "minecraft-ppo-optimizer/v1", "contract": CONTRACT,
                 **({"selection": self.selection} if self.selection != "flat" else {}),
+                **({"interaction": self.interaction} if self.interaction is not None else {}),
                 "updates": self.updates, "version": self.version,
                 "params": {key: value.tolist() for key, value in self.params.items()},
                 "first": {key: value.tolist() for key, value in self.first.items()},
@@ -178,7 +204,7 @@ class ActorCritic:
 
     @classmethod
     def from_optimizer_state(cls, state: dict, *, allow_initial=False):
-        if set(state) - {"selection"} != {"schema", "contract", "updates", "version", "params", "first", "second", "rng"} \
+        if set(state) - {"selection", "interaction"} != {"schema", "contract", "updates", "version", "params", "first", "second", "rng"} \
                 or state["schema"] != "minecraft-ppo-optimizer/v1" or state["contract"] != CONTRACT:
             raise ValueError("incompatible optimizer checkpoint")
         for name in ("updates", "version"):
@@ -188,6 +214,10 @@ class ActorCritic:
             raise ValueError("initialization counters must both be zero")
         hidden = len(state["params"]["actor_b"])
         model = cls(0, hidden)
+        if 'interaction' in state:
+            if state['interaction'] != 'goal-action-bilinear/v1':
+                raise ValueError('unsupported goal interaction')
+            model.enable_goal_interaction()
         model.selection = state.get("selection", "flat")
         if model.selection not in ("flat", *continuation_policy.SUPPORTED):
             raise ValueError("unsupported temporal selection law")
@@ -210,8 +240,9 @@ class ActorCritic:
         if environment_steps <= 0 or self.updates == 0:
             raise ValueError("initialization is not a trained model")
         p = self.params
-        return {"schema": "minecraft-rl-actor/v1" if self.selection == "flat" else "minecraft-rl-actor/v2",
+        return {"schema": "minecraft-rl-actor/v3" if self.interaction is not None else "minecraft-rl-actor/v1" if self.selection == "flat" else "minecraft-rl-actor/v2",
                 **({"selection": self.selection} if self.selection != "flat" else {}),
+                **({"interaction": self.interaction, "goalActionWeights": p['goal_action_w'].tolist()} if self.interaction is not None else {}),
                 "contract": CONTRACT, "algorithm": "ppo",
                 "environment": "minecraft-paper", "environmentSteps": environment_steps,
                 "trainingRun": training_run, "rolloutSha256": rollout_sha256,
@@ -219,7 +250,7 @@ class ActorCritic:
                 "outputWeights": p["actor_out"].tolist(), "outputBias": float(p["actor_bias"][0])}
 
     def initial_artifact(self, *, brain_id: str, training_run: str) -> dict:
-        if self.selection != "flat":
+        if self.selection != "flat" or self.interaction is not None:
             raise ValueError("temporal architecture requires explicit trained-model conversion")
         if self.updates != 0 or self.version != 0:
             raise ValueError("only an actual untrained initial state may use the initial-actor schema")
