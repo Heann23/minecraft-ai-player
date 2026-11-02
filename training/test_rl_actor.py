@@ -37,6 +37,27 @@ def row(model, session="a", sequence=0, reward=1, terminal=True):
 
 
 class ActorTests(unittest.TestCase):
+    def test_relative_exploration_ppo_gradient_and_optimizer_restore(self):
+        import copy
+        from continuation_policy import SELECTION
+        model=ActorCritic(31,hidden=4);model.selection=SELECTION;model.exploration='continue-switch-relative/v1'
+        observed=frame();observed['state'][400]=observed['state'][401]=1;observed['options'][0]['features'][55]=1
+        for index in range(3):
+            option=copy.deepcopy(observed['options'][1]);option['id']='extra'+str(index);option['features'][0]=index+1.;observed['options'].append(option)
+        for option in observed['options']:option['inputId']=option['id']
+        probabilities,value,_=model.evaluate(observed)
+        sample=dict(row(model),frame=observed,index=0,logProbability=math.log(float(probabilities[0])),value=value)
+        advantages=np.array([.7]);targets=np.array([value+1]);gradients,_=model.gradients([sample],advantages,targets,entropy_weight=.03)
+        for name,index in [('actor_w',(0,400)),('actor_w',(0,STATE_SIZE+55)),('actor_out',(0,))]:
+            original=model.params[name][index];eps=1e-5;model.params[name][index]=original+eps
+            plus=model.gradients([sample],advantages,targets,entropy_weight=.03)[1]['loss'];model.params[name][index]=original-eps
+            minus=model.gradients([sample],advantages,targets,entropy_weight=.03)[1]['loss'];model.params[name][index]=original
+            self.assertAlmostEqual(gradients[name][index],(plus-minus)/(2*eps),places=6)
+        model.fit([sample]);saved=model.optimizer_state();restored=ActorCritic.from_optimizer_state(saved)
+        self.assertEqual(restored.exploration,'continue-switch-relative/v1');np.testing.assert_array_equal(restored.evaluate(observed)[0],model.evaluate(observed)[0])
+        bad=copy.deepcopy(saved);bad['exploration']='unknown'
+        with self.assertRaises(ValueError):ActorCritic.from_optimizer_state(bad)
+
     def test_zero_goal_residual_preserves_original_state_and_has_correct_ppo_gradient(self):
         import copy
         model=ActorCritic(31,hidden=4);model.fit([row(model)])

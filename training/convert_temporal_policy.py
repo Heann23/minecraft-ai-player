@@ -12,21 +12,26 @@ from train_paper_ppo import resume_checkpoint
 from continuation_policy import SELECTION
 from rl_actor import ActorCritic
 
-def convert(source: Path, output: Path, name: str, *, goal_interaction=False):
+def convert(source: Path, output: Path, name: str, *, goal_interaction=False, relative_entropy=False):
+    if goal_interaction and relative_entropy:raise ValueError('one explicit conversion at a time')
     state=brain_session.load(source);verify_state(state)
     if state['contract']!='minecraft-primitive-candidates/v7' or state.get('contextUpgrade') or state['initializationOnly'] or state['pendingRolloutTransitions']:
         raise ValueError('conversion requires trained native v7 with no pending; originals preserved')
     if output.exists():raise ValueError('conversion output must be new')
     cp=Path(state['checkpoint']);model,parent=resume_checkpoint(cp)
-    if not goal_interaction and model.selection!='flat':raise ValueError('source must use flat selection')
-    if goal_interaction and (cp.parent.parent.parent/'conversion-evidence.json').exists():
+    if not goal_interaction and not relative_entropy and model.selection!='flat':raise ValueError('source must use flat selection')
+    if (goal_interaction or relative_entropy) and (cp.parent.parent.parent/'conversion-evidence.json').exists():
         raise ValueError('materialized native training checkpoint required; conversion chains are not implicit resumes')
     checkpoint=json.loads(cp.read_bytes());report=json.loads((cp.parent/'training-report.json').read_bytes())
     before=copy.deepcopy(model.optimizer_state())
-    if goal_interaction:model.enable_goal_interaction()
+    if relative_entropy:
+        if model.selection!=SELECTION or model.exploration!='categorical':raise ValueError('requires native temporal v2 with categorical entropy')
+        model.exploration='continue-switch-relative/v1'
+    elif goal_interaction:model.enable_goal_interaction()
     else:model.selection=SELECTION
     after=model.optimizer_state()
-    if goal_interaction:ActorCritic.verify_zero_goal_extension(before,after)
+    if relative_entropy:assert {k:v for k,v in after.items() if k!='exploration'}==before
+    elif goal_interaction:ActorCritic.verify_zero_goal_extension(before,after)
     else:assert {k:v for k,v in after.items() if k!='selection'}==before
     raw=cp.parent.parent.parent/'paper-rollouts.jsonl' if report.get('rolloutFile') else cp.parent/'paper-rollouts.jsonl'
     payload=raw.read_bytes()[:report['rolloutBytesUsed']]
@@ -44,6 +49,7 @@ def convert(source: Path, output: Path, name: str, *, goal_interaction=False):
     revision=ModelCatalog(output/'catalog').save(name,migrated)
     evidence={'schema':'minecraft-temporal-policy-conversion/v1','sourceSession':state,'convertedSession':migrated,'selection':SELECTION,'allTensorsAdamCheckpointRngAndCountersPreserved':True,'sessionRngPreserved':state['rng']==migrated['rng'],'initialProbabilitiesPreserved':False,'architecturePriorChanged':True,'newLearning':False,'abilityProven':False,'sourcePrefixSha256':hashlib.sha256(payload).hexdigest()}
     if goal_interaction:evidence.update(schema='minecraft-goal-interaction-conversion/v1',selection=model.selection,interaction=model.interaction,initialProbabilitiesPreserved=True,architecturePriorChanged=False,newZeroGoalActionTensorShape=[24,256])
+    if relative_entropy:evidence.update(schema='minecraft-ppo-exploration-conversion/v1',selection=model.selection,exploration=model.exploration,initialProbabilitiesPreserved=True,architecturePriorChanged=False,trainingObjectiveChanged=True)
     checkpoint_store.durable_replace(output/'conversion-evidence.json',checkpoint_store.encoded(evidence))
     return revision
 
@@ -51,4 +57,5 @@ if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--session',type=Path,required=True);parser.add_argument('--output',type=Path,required=True);parser.add_argument('--name',type=model_name,required=True)
     parser.add_argument('--goal-interaction',action='store_true',help='zero-influence goal/action residual; preserve existing selection law')
-    args=parser.parse_args();print(json.dumps(convert(args.session,args.output,args.name,goal_interaction=args.goal_interaction)))
+    parser.add_argument('--relative-entropy',action='store_true',help='change only PPO exploration regularization; preserve actor probabilities and all learning state')
+    args=parser.parse_args();print(json.dumps(convert(args.session,args.output,args.name,goal_interaction=args.goal_interaction,relative_entropy=args.relative_entropy)))

@@ -1,9 +1,30 @@
 """Probability-law fixtures only; no game, training or ability evidence."""
 import unittest
 import numpy as np
-from continuation_policy import scores
+from continuation_policy import scores, relative_entropy
 
 class ContinuationTests(unittest.TestCase):
+    def test_relative_entropy_does_not_reward_switch_option_multiplicity(self):
+        for n in (2,8,128):
+            frame=self.frame(n);logits=scores(frame,np.zeros(n));p=np.exp(logits-logits.max());p/=p.sum()
+            value,gradient=relative_entropy(frame,p)
+            self.assertAlmostEqual(value,np.log(2))
+            np.testing.assert_allclose(gradient,0,atol=1e-14)
+            categorical=p*(np.log(p)-float(p@np.log(p)))
+            if n>2:self.assertGreater(categorical[0],0)
+
+    def test_relative_entropy_gradient_and_inactive_flat_equivalence(self):
+        frame=self.frame(7);frame['options'][1]['inputId']='0';logits=scores(frame,np.arange(7)*.13)
+        def calculate(z):
+            p=np.exp(z-z.max());p/=p.sum();return relative_entropy(frame,p)
+        value,gradient=calculate(logits)
+        for index in range(7):
+            plus=logits.copy();minus=logits.copy();plus[index]+=1e-5;minus[index]-=1e-5
+            self.assertAlmostEqual(gradient[index],-(calculate(plus)[0]-calculate(minus)[0])/2e-5,places=8)
+        frame['state'][400]=0;p=np.exp(logits-logits.max());p/=p.sum();value,gradient=relative_entropy(frame,p)
+        entropy=-float(p@np.log(p));self.assertAlmostEqual(value,entropy)
+        np.testing.assert_allclose(gradient,p*(np.log(p)+entropy))
+
     def frame(self, count, running=True):
         state=[0.0]*432;state[400]=state[401]=int(running)
         options=[]

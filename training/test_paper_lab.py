@@ -11,6 +11,21 @@ from paper_lab import read_plan, validate_options, summarize_game_log, validate_
 
 
 class SeedPlanTests(unittest.TestCase):
+    def test_exploration_conversion_preserves_all_prior_optimizer_fields(self):
+        from paper_lab import resume_parent_directory,sha256
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);original=root/'original/training/checkpoints/version-one/model.json';original.parent.mkdir(parents=True)
+            old={'optimizer':{'params':{'w':[1]},'selection':'continue-switch-mean/v2','rng':{'state':1}},'rolloutSha256':'0'*64};original.write_text(json.dumps(old))
+            converted=root/'converted/checkpoints/version-two/model.json';converted.parent.mkdir(parents=True)
+            new=dict(old,optimizer=dict(old['optimizer'],exploration='continue-switch-relative/v1'));converted.write_text(json.dumps(new))
+            before={'checkpoint':str(original),'brainId':'brain','policyVersion':1,'gradientUpdates':4,'trainedEnvironmentSteps':32,'collectedEnvironmentSteps':32,'rng':{'state':1}}
+            after=dict(before,checkpoint=str(converted),checkpointSha256=sha256(converted))
+            evidence={'schema':'minecraft-ppo-exploration-conversion/v1','sourceSession':before,'convertedSession':after};path=root/'converted/conversion-evidence.json';path.write_text(json.dumps(evidence))
+            with mock.patch('model_catalog.verify_state'):
+                self.assertEqual(resume_parent_directory(converted),root/'original')
+                new['optimizer']['rng']={'state':2};converted.write_text(json.dumps(new));after['checkpointSha256']=sha256(converted);path.write_text(json.dumps(evidence))
+                with self.assertRaisesRegex(ValueError,'original optimizer'):resume_parent_directory(converted)
+
     def test_goal_extension_ancestry_rejects_nonzero_new_weights(self):
         import copy
         from paper_lab import resume_parent_directory,sha256

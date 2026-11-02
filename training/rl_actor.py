@@ -31,6 +31,7 @@ class ActorCritic:
     def __init__(self, seed: int, hidden: int = 64):
         self.selection = "flat"
         self.interaction = None
+        self.exploration = 'categorical'
         if not 1 <= hidden <= 256:
             raise ValueError("hidden size must be 1..256")
         self.rng = np.random.default_rng(seed)
@@ -103,7 +104,7 @@ class ActorCritic:
         if len(rows) != len(advantages) or len(rows) != len(returns) or not rows:
             raise ValueError("minibatch mismatch")
         gradients = {key: np.zeros_like(value) for key, value in self.params.items()}
-        loss = entropy_sum = 0.0
+        loss = entropy_sum = regularizer_sum = 0.0
         for row, advantage, target in zip(rows, advantages, returns):
             probabilities, value, (state, x, hidden, value_hidden) = self.evaluate(row["frame"])
             chosen = row["index"]
@@ -111,15 +112,19 @@ class ActorCritic:
                 raise ValueError("chosen index outside captured candidate set")
             logs = np.log(np.maximum(probabilities, 1e-300))
             entropy = -float(probabilities @ logs)
+            regularizer, entropy_gradient = entropy, probabilities * (logs + entropy)
+            if self.exploration == 'continue-switch-relative/v1':
+                regularizer, entropy_gradient = continuation_policy.relative_entropy(row['frame'], probabilities, self.selection)
             ratio = math.exp(float(np.clip(logs[chosen] - row["logProbability"], -60, 60)))
             unclipped = ratio * advantage
             clipped = np.clip(ratio, 1 - clip, 1 + clip) * advantage
-            loss += -min(unclipped, clipped) + value_weight * 0.5 * (value - target) ** 2 - entropy_weight * entropy
+            loss += -min(unclipped, clipped) + value_weight * 0.5 * (value - target) ** 2 - entropy_weight * regularizer
             entropy_sum += entropy
+            regularizer_sum += regularizer
             coefficient = -advantage * ratio if (advantage >= 0 and ratio <= 1 + clip) or (advantage < 0 and ratio >= 1 - clip) else 0
             scores_gradient = -coefficient * probabilities
             scores_gradient[chosen] += coefficient
-            scores_gradient += entropy_weight * probabilities * (logs + entropy)
+            scores_gradient += entropy_weight * entropy_gradient
             if self.interaction is not None:
                 gradients['goal_action_w'] += np.outer(state[208:232], scores_gradient @ x[:, STATE_SIZE:])
             gradients["actor_out"] += hidden.T @ scores_gradient
@@ -135,7 +140,7 @@ class ActorCritic:
             gradients["value_b"] += vh_gradient
         for key in gradients:
             gradients[key] /= len(rows)
-        return gradients, {"loss": float(loss / len(rows)), "entropy": float(entropy_sum / len(rows))}
+        return gradients, {"loss": float(loss / len(rows)), "entropy": float(entropy_sum / len(rows)), "explorationRegularizer": float(regularizer_sum / len(rows))}
 
     def apply(self, gradients: dict, rate: float = 3e-4, max_norm: float = 0.5):
         if not all(np.isfinite(g).all() for g in gradients.values()):
@@ -168,7 +173,7 @@ class ActorCritic:
                 self.apply(gradient)
                 stats.append(report)
         self.version += 1
-        return {key: float(np.mean([report[key] for report in stats])) for key in ("loss", "entropy")}
+        return {key: float(np.mean([report[key] for report in stats])) for key in ("loss", "entropy", "explorationRegularizer")}
 
     def optimizer_state(self, *, allow_initial=False) -> dict:
         """Development checkpoint, including critic/Adam; the deployment actor alone cannot resume PPO."""
@@ -177,6 +182,7 @@ class ActorCritic:
         return {"schema": "minecraft-ppo-optimizer/v1", "contract": CONTRACT,
                 **({"selection": self.selection} if self.selection != "flat" else {}),
                 **({"interaction": self.interaction} if self.interaction is not None else {}),
+                **({"exploration": self.exploration} if self.exploration != 'categorical' else {}),
                 "updates": self.updates, "version": self.version,
                 "params": {key: value.tolist() for key, value in self.params.items()},
                 "first": {key: value.tolist() for key, value in self.first.items()},
@@ -204,7 +210,7 @@ class ActorCritic:
 
     @classmethod
     def from_optimizer_state(cls, state: dict, *, allow_initial=False):
-        if set(state) - {"selection", "interaction"} != {"schema", "contract", "updates", "version", "params", "first", "second", "rng"} \
+        if set(state) - {"selection", "interaction", "exploration"} != {"schema", "contract", "updates", "version", "params", "first", "second", "rng"} \
                 or state["schema"] != "minecraft-ppo-optimizer/v1" or state["contract"] != CONTRACT:
             raise ValueError("incompatible optimizer checkpoint")
         for name in ("updates", "version"):
@@ -221,6 +227,9 @@ class ActorCritic:
         model.selection = state.get("selection", "flat")
         if model.selection not in ("flat", *continuation_policy.SUPPORTED):
             raise ValueError("unsupported temporal selection law")
+        model.exploration = state.get('exploration', 'categorical')
+        if model.exploration not in ('categorical', 'continue-switch-relative/v1') or model.exploration != 'categorical' and model.selection != continuation_policy.SELECTION:
+            raise ValueError('unsupported exploration objective/selection combination')
         for group in ("params", "first", "second"):
             if set(state[group]) != set(model.params):
                 raise ValueError("optimizer parameter names mismatch")
@@ -250,7 +259,7 @@ class ActorCritic:
                 "outputWeights": p["actor_out"].tolist(), "outputBias": float(p["actor_bias"][0])}
 
     def initial_artifact(self, *, brain_id: str, training_run: str) -> dict:
-        if self.selection != "flat" or self.interaction is not None:
+        if self.selection != "flat" or self.interaction is not None or self.exploration != 'categorical':
             raise ValueError("temporal architecture requires explicit trained-model conversion")
         if self.updates != 0 or self.version != 0:
             raise ValueError("only an actual untrained initial state may use the initial-actor schema")
