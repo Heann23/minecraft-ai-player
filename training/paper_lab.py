@@ -348,6 +348,35 @@ def summarize_game_log(path: Path):
             "limitations": "Periodic diagnostics are partial; input success is not task completion or proof of learned competence."}
 
 
+def resume_parent_directory(selected_resume: Path, *, allow_conversion=True):
+    """Resolve conversion ancestry only after verifying its exact checkpoint binding."""
+    selected_resume = selected_resume.resolve()
+    training = selected_resume if selected_resume.is_dir() else selected_resume.parent.parent.parent \
+        if selected_resume.parent.parent.name == "checkpoints" else selected_resume.parent
+    evidence_path = training / "conversion-evidence.json"
+    if not evidence_path.exists():
+        return training.parent
+    if not allow_conversion or selected_resume.is_dir():
+        raise ValueError("conversion ancestry requires one exact checkpoint")
+    from model_catalog import verify_state
+    evidence = json.loads(evidence_path.read_bytes())
+    if evidence.get("schema") != "minecraft-temporal-policy-conversion/v1":
+        raise ValueError("invalid conversion ancestry")
+    before, after = evidence["sourceSession"], evidence["convertedSession"]
+    if Path(after["checkpoint"]).resolve() != selected_resume or sha256(selected_resume) != after["checkpointSha256"]:
+        raise ValueError("conversion checkpoint binding mismatch")
+    verify_state(before); verify_state(after)
+    for key in ("brainId", "policyVersion", "gradientUpdates", "trainedEnvironmentSteps", "collectedEnvironmentSteps", "rng"):
+        if before[key] != after[key]:raise ValueError("conversion changed parent state")
+    original = json.loads(Path(before["checkpoint"]).read_bytes())
+    converted = json.loads(selected_resume.read_bytes())
+    optimizer = dict(converted["optimizer"])
+    if optimizer.pop("selection", None) != "continue-switch-mean/v1" or optimizer != original["optimizer"] \
+            or converted["rolloutSha256"] != original["rolloutSha256"]:
+        raise ValueError("conversion changed tensors or trained prefix")
+    return resume_parent_directory(Path(before["checkpoint"]), allow_conversion=False)
+
+
 def named_session(revision):
     from model_catalog import model_name
     return dict(revision["session"], modelName=model_name(revision["name"]))
@@ -559,13 +588,7 @@ def run(args):
     if args.resume:
         # The parent lab manifest must belong to the same frozen training partition.
         selected_resume = args.resume.resolve()
-        if selected_resume.is_dir():
-            training_directory = selected_resume
-        elif selected_resume.parent.parent.name == "checkpoints":
-            training_directory = selected_resume.parent.parent.parent
-        else:
-            training_directory = selected_resume.parent
-        parent_directory = training_directory.parent
+        parent_directory = resume_parent_directory(selected_resume)
         parent = json.loads((parent_directory / "manifest.json").read_text(encoding="utf-8"))
         if parent.get("mode") != "train" or parent.get("worldSeed") not in plan["trainSeeds"]:
             raise ValueError("parent checkpoint does not belong to the same training campaign")
