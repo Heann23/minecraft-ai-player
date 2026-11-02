@@ -410,6 +410,11 @@ def objective_acknowledgement(line, requested):
 
 
 def run(args):
+    source = Path(__file__).resolve().parents[1]
+    actual_commit = subprocess.check_output(["git", "-c", "safe.directory=" + source.as_posix(),
+                                              "rev-parse", "HEAD"], cwd=source, text=True).strip()
+    if actual_commit != args.source_commit:
+        raise ValueError("source commit does not match this tool checkout")
     objective = requested_objective(args)
     random_seed = getattr(args, "random_world_seed", False)
     if random_seed:
@@ -423,11 +428,6 @@ def run(args):
         plan = validate_options(args)
     require_runtime_space(args.output, args.runtime_cache, args.paper, args.plugin)
     scenario = read_scenario(args.scenario) if args.scenario else []
-    source = Path(__file__).resolve().parents[1]
-    actual_commit = subprocess.check_output(["git", "-c", "safe.directory=" + source.as_posix(),
-                                              "rev-parse", "HEAD"], cwd=source, text=True).strip()
-    if actual_commit != args.source_commit:
-        raise ValueError("source commit does not match this tool checkout")
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=False)
     catalog_state = None

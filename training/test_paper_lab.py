@@ -11,6 +11,16 @@ from paper_lab import read_plan, validate_options, summarize_game_log, validate_
 
 
 class SeedPlanTests(unittest.TestCase):
+    def test_wrong_source_is_rejected_before_seed_reservation_or_runtime_work(self):
+        from paper_lab import run
+        with mock.patch("paper_lab.subprocess.check_output", return_value="actual-head\n"), \
+                mock.patch("paper_lab.reserve_random_seed") as reserve, \
+                mock.patch("paper_lab.require_runtime_space") as runtime:
+            with self.assertRaisesRegex(ValueError, "source commit"):
+                run(argparse.Namespace(source_commit="different-head"))
+            reserve.assert_not_called()
+            runtime.assert_not_called()
+
     def test_completion_watcher_ignores_old_goal_and_waits_for_a_complete_accepted_row(self):
         from paper_lab import ObjectiveCompletionWatcher
         goal = {"id": "new-goal", "world": "current-world", "item": "DIRT", "count": 1}
