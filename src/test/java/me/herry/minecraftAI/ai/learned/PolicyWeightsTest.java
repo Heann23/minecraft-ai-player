@@ -12,6 +12,19 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.*;
 
 class PolicyWeightsTest {
+    @Test void partialMiningInspectionResumesWithoutSkippingUnprocessedCells() {
+        var feet=new me.herry.minecraftAI.ai.util.BlockPoint(0,64,0);
+        int cursor=0;var covered=new java.util.HashSet<me.herry.minecraftAI.ai.util.BlockPoint>();
+        for(int visit=0;visit<75;visit++) {
+            var targets=PolicyCandidates.miningObservationTargets(feet,null,cursor);
+            var processed=targets.subList(0,1);covered.addAll(processed);
+            cursor=PolicyCandidates.nextMiningObservationCursor(feet,cursor,processed);
+        }
+        assertEquals(75,covered.size());assertEquals(0,cursor);
+        assertEquals(17,PolicyCandidates.nextMiningObservationCursor(feet,17,java.util.List.of()));
+        var crosshair=feet.offset(0,1,4);
+        assertEquals(17,PolicyCandidates.nextMiningObservationCursor(feet,17,java.util.List.of(crosshair)));
+    }
     @Test void stationaryMiningObservationCoversTheLocalVolumeWithoutMaterialAdvice() {
         var feet=new me.herry.minecraftAI.ai.util.BlockPoint(0,64,0);
         var distant=feet.offset(1,1,2);

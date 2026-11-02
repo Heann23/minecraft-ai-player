@@ -451,6 +451,8 @@ public final class AIPlayer {
         services.debugger().log(name, message);
     }
 
+    public boolean isDebugEnabled() { return services.debugger().isEnabled(); }
+
     public String getName() {
         return name;
     }

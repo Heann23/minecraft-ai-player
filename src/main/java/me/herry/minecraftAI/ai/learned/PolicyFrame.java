@@ -28,7 +28,12 @@ public record PolicyFrame(UUID world, long serverTick, double[] state, List<Opti
     /** Optional evidence only; not concatenated into the actor or critic input. Negative counts mean not visited. */
     public record Discovery(String schema, List<String> visitedSources, Map<String, Integer> generatedBySource,
                             boolean budgetExhausted, int recipeOptions, int recipesChecked, boolean recipeScanComplete,
-                            ConsumptionScan consumption) {
+                            ConsumptionScan consumption, MiningScan mining) {
+        public Discovery(String schema, List<String> visitedSources, Map<String, Integer> generatedBySource,
+                         boolean budgetExhausted, int recipeOptions, int recipesChecked, boolean recipeScanComplete,
+                         ConsumptionScan consumption) {
+            this(schema, visitedSources, generatedBySource, budgetExhausted, recipeOptions, recipesChecked, recipeScanComplete, consumption, null);
+        }
         public Discovery(String schema, List<String> visitedSources, Map<String, Integer> generatedBySource,
                          boolean budgetExhausted, int recipeOptions, int recipesChecked, boolean recipeScanComplete) {
             this(schema, visitedSources, generatedBySource, budgetExhausted, recipeOptions, recipesChecked, recipeScanComplete, null);
@@ -38,6 +43,18 @@ public record PolicyFrame(UUID world, long serverTick, double[] state, List<Opti
                 throw new IllegalArgumentException("invalid discovery evidence");
             visitedSources = List.copyOf(visitedSources);
             generatedBySource = Map.copyOf(generatedBySource);
+        }
+    }
+
+    /** Attempted inspection coverage only. Hidden/unloaded cells are still UNKNOWN. Not an actor input. */
+    public record MiningScan(String schema, int cursorBefore, int cursorAfter, int requestedCells,
+                             int inspectedCells, int visibleLoadedCells, boolean processedAllRequests) {
+        public MiningScan {
+            if (!"mining-window-scan/v1".equals(schema) || cursorBefore < 0 || cursorBefore >= 75
+                    || cursorAfter < 0 || cursorAfter >= 75 || requestedCells < 1 || requestedCells > 24
+                    || inspectedCells < 0 || inspectedCells > requestedCells || visibleLoadedCells < 0
+                    || visibleLoadedCells > inspectedCells || processedAllRequests != (inspectedCells == requestedCells))
+                throw new IllegalArgumentException("invalid mining inspection evidence");
         }
     }
 

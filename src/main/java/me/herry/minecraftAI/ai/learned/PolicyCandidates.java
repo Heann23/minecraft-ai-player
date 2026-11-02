@@ -68,6 +68,7 @@ public final class PolicyCandidates {
     private boolean recipeScanComplete;
     private int miningCursor;
     private int miningObservationCursor;
+    private PolicyFrame.MiningScan miningScan;
     private int equipmentCursor;
     private int consumableCursor;
     private PolicyFrame.ConsumptionScan consumptionScan;
@@ -138,6 +139,7 @@ public final class PolicyCandidates {
         recipeOptions = recipesChecked = -1;
         recipeScanComplete = false;
         consumptionScan = null;
+        miningScan = null;
         Map<String, Integer> generated = new LinkedHashMap<>();
         var visit = discovery.visit(ai.getWorkBudget()::isExhausted, source -> {
             int before = found.size();
@@ -168,7 +170,7 @@ public final class PolicyCandidates {
         }
         var candidates = selectFair(expanded, active == null ? "" : active.id());
         var evidence = new PolicyFrame.Discovery("candidate-discovery/v1", visit.sources().stream().map(Enum::name).toList(),
-                generated, visit.budgetExhausted(), recipeOptions, recipesChecked, recipeScanComplete, consumptionScan);
+                generated, visit.budgetExhausted(), recipeOptions, recipesChecked, recipeScanComplete, consumptionScan, miningScan);
         // Direct keys and budgeted registries are partial observations, even after every source was visited.
         return new Capture(new PolicyFrame(ai.getWorldId(), Integer.toUnsignedLong(Bukkit.getCurrentTick()), body,
                 candidates.stream().map(candidate -> new PolicyFrame.Option(candidate.id(), candidate.encoded().features(),
@@ -207,9 +209,14 @@ public final class PolicyCandidates {
         // Keep the actual crosshair, then rotate geometric observation coverage. A static nearest
         // prefix otherwise never inspects many reachable cells while standing at the same location.
         var targets = miningObservationTargets(feet, ray == null ? null : Positions.of(ray), miningObservationCursor);
-        miningObservationCursor = Math.floorMod(miningObservationCursor + (ray == null ? 24 : 23), 75);
+        int previousCursor = miningObservationCursor;
         // Inspect only local visible cells. Unloaded/hidden cells never become material observations.
         var inspected = PrimitiveAdapter.inspect(ai, targets);
+        miningObservationCursor = nextMiningObservationCursor(feet, previousCursor,
+                inspected.blocks().stream().map(block -> block.point()).toList());
+        miningScan = new PolicyFrame.MiningScan("mining-window-scan/v1", previousCursor, miningObservationCursor,
+                targets.size(), inspected.blocks().size(), (int) inspected.blocks().stream().filter(block -> block.visible() && block.loaded()).count(),
+                inspected.blocks().size() == targets.size());
         var tools = miningSlots(inventory);
         var blocks = inspected.blocks().stream().filter(block -> block.visible() && block.loaded()).toList();
         int mined = 0, attempted = 0, pairs = tools.size() * blocks.size();
@@ -393,6 +400,14 @@ public final class PolicyCandidates {
         for (int offset = 0; offset < nearby.size() && targets.size() < 24; offset++)
             targets.add(nearby.get(Math.floorMod(cursor + offset, nearby.size())));
         return List.copyOf(targets);
+    }
+
+    static int nextMiningObservationCursor(BlockPoint feet, int cursor, List<BlockPoint> inspected) {
+        var nearby = nearbyTargets(feet);
+        var processed = new HashSet<>(inspected);
+        int advanced = 0;
+        while (advanced < nearby.size() && processed.contains(nearby.get(Math.floorMod(cursor + advanced, nearby.size())))) advanced++;
+        return Math.floorMod(cursor + advanced, nearby.size());
     }
 
     static List<me.herry.minecraftAI.ai.primitive.control.PrimitiveSnapshot.ItemSlot> miningSlots(

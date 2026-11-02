@@ -448,7 +448,7 @@ final class AIBrain {
                             ? java.util.concurrent.ThreadLocalRandom.current() : inferenceRandom);
                     var selected = captured.candidates().get(predicted.index());
                     var task = captured.frame().taskMemory();
-                    if (ai.getConfig().debugEnabled && task != null && task.objective() != null
+                    if (ai.isDebugEnabled() && task != null && task.objective() != null
                             && !task.objective().id().equals(lastFingerprintedObjective)) {
                         var fingerprints = me.herry.minecraftAI.ai.learned.PolicyInputFingerprint.of(captured.frame());
                         ai.debug("PolicyInputFirst goal=" + task.objective().id() + " tick=" + captured.frame().serverTick()
