@@ -2,7 +2,9 @@
 
 Preserves all tensors/Adam/RNG/counters but changes probabilities for running
 actions for temporal conversion. --goal-interaction instead adds zero cross
-weights and preserves probabilities. Neither is new learning or learned ability.
+weights and preserves probabilities. --relative-entropy changes only the PPO
+exploration objective while preserving inference and every saved tensor/RNG.
+None of these conversions is new learning or learned ability.
 """
 import argparse,copy,hashlib,json
 from pathlib import Path
