@@ -94,6 +94,8 @@ public class AICommand implements TabExecutor {
         if (args[2].equalsIgnoreCase("info") && args.length == 3) {
             var actual = me.herry.minecraftAI.ai.learned.PolicyCandidates.observe(ai, null, 0);
             var task = ai.getPolicyTaskMemory().observe(ai.getWorldId(), actual.stock());
+            if (ai.getConfig().learnedControl && !ai.getConfig().trainingControl)
+                ai.getPolicyTaskMemory().settleCompletion(task, task, false);
             info(sender, task.objective() == null ? "설정된 작업 목표가 없습니다."
                     : task.objective().goal().describe() + " / 보유 " + task.owned() + " / 남음 " + task.remaining()
                     + " / 같은 월드 " + task.worldMatches());

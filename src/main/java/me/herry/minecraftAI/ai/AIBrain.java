@@ -179,6 +179,12 @@ final class AIBrain {
     // 진행 중인 행동과 계획을 모두 버리고 처음 상태로 돌아간다.
     void reset() {
         if (trainingControl != null) trainingControl.end(ai, activeLearned, (int) Math.min(2400, ai.getTicks() - learnedStartedAt));
+        else if (learnedLane && learnedPolicy != null && ai.getBody().isUsable()) {
+            var observed = me.herry.minecraftAI.ai.learned.PolicyCandidates.observe(ai, activeLearned,
+                    (int) Math.min(2400, ai.getTicks() - learnedStartedAt));
+            var task = ai.getPolicyTaskMemory().observe(ai.getWorldId(), observed.stock());
+            ai.getPolicyTaskMemory().settleCompletion(task, task, false);
+        }
         cancelPrimitiveProgram("lifecycle reset", false);
         if (plan != null) plan.cancel(ai);
         plan = null;
@@ -442,6 +448,9 @@ final class AIBrain {
                     var selected = captured.candidates().get(predicted.index());
                     var task = captured.frame().taskMemory();
                     if (task != null && task.objective() != null) {
+                        // Native Java inference has no TrainingControl episode. Consume observed achievement
+                        // without a learning credit, including a goal already held at the first observation.
+                        ai.getPolicyTaskMemory().settleCompletion(task, task, false);
                         String item = task.objective().goal().item();
                         var frame = captured.frame();
                         long visibleRays = frame.sight() == null ? -1 : frame.sight().rays().stream()
