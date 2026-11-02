@@ -11,6 +11,18 @@ from paper_lab import read_plan, validate_options, summarize_game_log, validate_
 
 
 class SeedPlanTests(unittest.TestCase):
+    def test_execution_events_distinguish_actual_start_progress_and_terminal_outcome(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/'console.log'
+            path.write_text('\n'.join('[AI:RLLearner] MiningExecution '+line for line in (
+                'start target=1,2,3','end target=1,2,3 status=FAILED cancelled=false progress=0',
+                'start target=2,2,3','progress-start target=2,2,3 material=OAK_LOG',
+                'end target=2,2,3 status=FAILED cancelled=true progress=0.42',
+                'start target=3,2,3','progress-start target=3,2,3 material=OAK_LOG',
+                'end target=3,2,3 status=SUCCESS cancelled=false progress=1')))
+            self.assertEqual(summarize_game_log(path)['miningExecutionEvents'],
+                {'actionStarts':3,'progressStarts':2,'otherFailure':1,'cancelled':1,'success':1})
+
     def test_actual_cancellation_progress_distinguishes_missing_trace_from_zero(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "console.log"

@@ -253,6 +253,7 @@ def summarize_game_log(path: Path):
     """Observed diagnostics, never an inferred task success or an invented missing sample."""
     choices, endings, cancellations = Counter(), Counter(), Counter()
     mining_progress = {}
+    mining_executions = Counter()
     positions, health, food = [], [], []
     deaths = respawns = rejected = 0
     inventory = None
@@ -301,6 +302,13 @@ def summarize_game_log(path: Path):
             ended = re.search(r"Model action ended: (\S+) (SUCCESS|FAILED)", line)
             if ended:
                 endings[ended[1] + ":" + ended[2]] += 1
+            if "[AI:RLLearner] MiningExecution start target=" in line:
+                mining_executions["actionStarts"] += 1
+            if "[AI:RLLearner] MiningExecution progress-start target=" in line:
+                mining_executions["progressStarts"] += 1
+            execution_end = re.search(r"\[AI:RLLearner\] MiningExecution end target=\S+ status=(SUCCESS|FAILED) cancelled=(true|false)", line)
+            if execution_end:
+                mining_executions["success" if execution_end[1] == "SUCCESS" else "cancelled" if execution_end[2] == "true" else "otherFailure"] += 1
             cancelled = re.search(r"\[AI:RLLearner\] Model action cancelled: (\S+) ", line)
             if cancelled:
                 cancellations[cancelled[1]] += 1
@@ -331,6 +339,7 @@ def summarize_game_log(path: Path):
                 inventory = line.split("following entity data: ", 1)[1].strip()
     return {"available": True, "modelChoiceCounts": dict(choices), "inputOutcomeCounts": dict(endings),
             "inputCancellationCounts": dict(cancellations), "miningCancellationProgress": list(mining_progress.values()),
+            "miningExecutionEvents": dict(mining_executions),
             "miningCancellationsWithoutProgressTrace": max(0, cancellations["BreakBlock"] - sum(x["samples"] for x in mining_progress.values())),
             "sampledPositions": positions, "sampledHealthCeilings": health, "sampledFood": food,
             "recordedDeaths": deaths, "recordedRespawns": respawns, "deferredRequests": rejected,
