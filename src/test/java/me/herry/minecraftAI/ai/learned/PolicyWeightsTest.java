@@ -12,6 +12,17 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.*;
 
 class PolicyWeightsTest {
+    @Test void activeMiningCanChangeReconsiderationWithoutInventingFreshEvidence() {
+        var point=new me.herry.minecraftAI.ai.util.BlockPoint(1,64,2);
+        var tool=new me.herry.minecraftAI.ai.primitive.control.ToolChoice(0,"AIR",java.util.Map.of());
+        var command=new me.herry.minecraftAI.ai.primitive.control.PrimitiveCommand.BreakBlock(point,tool);
+        var evidence=new PolicyFrame.BlockEvidence("OAK_LOG",UUID.randomUUID(),1,64,2,100);
+        double[] features=new double[PolicyFrame.ACTION_SIZE];features[55]=1;
+        var current=new PolicyCandidates.Candidate("mine:1,64,2:0",command,null,null,new PolicyFrame.Option("mine:1,64,2:0",features,evidence)).committed(5);
+        var variants=PolicyCandidates.compatibleReconsiderations(current);
+        assertEquals(3,variants.size());
+        for(var variant:variants){assertEquals(current.inputId(),variant.inputId());assertNotEquals(current.id(),variant.id());assertEquals(0,variant.encoded().features()[55]);assertSame(evidence,variant.encoded().blockEvidence());assertEquals(20,variant.reconsiderAfterTicks());}
+    }
     @Test void compatibleExecutionVariantsShareTheContinueGroup() throws Exception {
         var artifact=new PolicyWeights.Artifact("minecraft-rl-actor/v2",PolicyFrame.CONTRACT,"ppo","minecraft-paper",1,"numerical-fixture","0".repeat(64),new double[1][PolicyFrame.INPUT_SIZE],new double[]{0},new double[]{0},0,null,null,null,null,"continue-switch-mean/v2");
         Path file=directory.resolve("temporal-group.json");Files.writeString(file,new Gson().toJson(artifact));

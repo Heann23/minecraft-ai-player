@@ -37,7 +37,7 @@ public final class PolicyCandidates {
             return movement != null ? PrimitiveType.MOVE_INPUT : equipment != null ? PrimitiveType.EQUIP_ITEM : recipe != null ? PrimitiveType.CRAFT_ITEM
                     : consumable != null ? PrimitiveType.USE_ITEM : command.type();
         }
-        /** A hold is an upper execution bound, not permission to hide the world from the policy for that long. */
+        /** Reconsider within20 ticks; finite movement uses its hold, other executors keep their own timeout. */
         public int reconsiderAfterTicks() {
             return Math.max(1, Math.min(20, commitmentTicks));
         }
@@ -161,6 +161,7 @@ public final class PolicyCandidates {
                 double[] retained = candidate.encoded().features(); retained[55] = 1;
                 expanded.add(new Candidate(candidate.id(), candidate.command(), candidate.recipe(), candidate.consumable(),
                         new PolicyFrame.Option(candidate.id(), retained, candidate.encoded().blockEvidence()), candidate.commitmentTicks(), candidate.inputId(), candidate.equipment(), candidate.movement()));
+                expanded.addAll(compatibleReconsiderations(candidate));
             } else if (candidate.equipment() != null) expanded.add(candidate.committed(5));
             else for (int ticks : new int[]{5, 20, 80, 600}) expanded.add(candidate.committed(ticks));
         }
@@ -461,4 +462,19 @@ public final class PolicyCandidates {
     }
 
     private static int bucket(String text, int size) { return Math.floorMod(text.hashCode(), size); }
+
+    /** Keep execution identity and observation age; finite movement/equipment retain their existing bound. */
+    static List<Candidate> compatibleReconsiderations(Candidate active) {
+        if (active.movement() != null || active.equipment() != null) return List.of();
+        List<Candidate> result = new ArrayList<>();
+        for (int ticks : new int[]{5, 20, 80, 600}) {
+            var variant = active.committed(ticks);
+            if (variant.id().equals(active.id())) continue;
+            double[] features = variant.encoded().features();features[55] = 0;
+            result.add(new Candidate(variant.id(), variant.command(), variant.recipe(), variant.consumable(),
+                    new PolicyFrame.Option(variant.id(), features, variant.encoded().blockEvidence()), variant.commitmentTicks(),
+                    variant.inputId(), variant.equipment(), variant.movement()));
+        }
+        return List.copyOf(result);
+    }
 }
