@@ -457,7 +457,7 @@ final class AIBrain {
                                 + " candidates=" + candidates + " freshCandidates=" + freshCandidates + " chosenTarget=" + chosenTarget);
                     }
                     if (activeLearned == null || !selected.inputId().equals(activeLearned.inputId()) || plan == null || plan.isFinished()) {
-                        if (plan != null) plan.cancel(ai);
+                        cancelLearnedForReplacement(ai, selected.id());
                         plan = null; activeLearned = null;
                         var action = selected.create(ai);
                         plan = new Plan(GoalType.IDLE, List.of(action));
@@ -480,7 +480,7 @@ final class AIBrain {
                 try {
                     var selected = decision.selected();
                     if (activeLearned == null || !selected.inputId().equals(activeLearned.inputId()) || plan == null || plan.isFinished()) {
-                        if (plan != null) plan.cancel(ai);
+                        cancelLearnedForReplacement(ai, selected.id());
                         plan = null; activeLearned = null;
                         plan = new Plan(GoalType.IDLE, List.of(selected.create(ai)));
                         activeLearned = selected; learnedStartedAt = now;
@@ -510,6 +510,20 @@ final class AIBrain {
      * 이번에 할 단기 목표를 정한다. 관리자가 고정한 목표가 가장 먼저이고, 그다음이 긴급 목표,
      * 그다음이 사람이 부탁한 일, 마지막이 스스로 고른 목표다.
      */
+    private void cancelLearnedForReplacement(AIPlayer ai, String replacement) {
+        if (plan == null) return;
+        Action interrupted = plan.current();
+        boolean wasRunning = interrupted != null && interrupted.getStatus() == ActionStatus.RUNNING;
+        String choice = activeLearned == null ? (interrupted == null ? "" : interrupted.getName()) : activeLearned.id();
+        plan.cancel(ai);
+        // Record the actual cancellation result, not a failure invented from the next policy choice.
+        if (wasRunning && interrupted.getStatus() == ActionStatus.FAILED && "cancelled".equals(interrupted.getFailReason())) {
+            ai.getPolicyTaskMemory().ended(ai.getWorldId(), ai.getTicks(), choice, "FAILED", "cancelled");
+            ai.debug("Model action cancelled: " + interrupted.getName() + " choice=" + choice + " next=" + replacement
+                    + " tick=" + Integer.toUnsignedLong(Bukkit.getCurrentTick()) + " reason=cancelled");
+        }
+    }
+
     void recordLearningObjective(double actualReward) {
         if (learnedLane && trainingControl != null) trainingControl.objective(actualReward);
     }
