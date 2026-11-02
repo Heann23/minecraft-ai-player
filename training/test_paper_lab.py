@@ -11,6 +11,22 @@ from paper_lab import read_plan, validate_options, summarize_game_log, validate_
 
 
 class SeedPlanTests(unittest.TestCase):
+    def test_goal_opportunity_distinguishes_distant_sight_retained_candidate_and_missing_evidence(self):
+        prefix = "[AI:RLLearner] GoalSample world=00000000-0000-0000-0000-000000000001 goal=00000000-0000-0000-0000-000000000002"
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "console.log"
+            path.write_text("\n".join(prefix + f" tick={tick} item=OAK_LOG required=1 owned=0 matched=true" + evidence
+                for tick, evidence in ((10, ""),
+                    (20, " visibleRays=1 candidates=0 freshCandidates=0 chosenTarget=false"),
+                    (40, " visibleRays=0 candidates=1 freshCandidates=0 chosenTarget=true"))))
+            summary = summarize_game_log(path)["goalObservationSummaries"][0]
+            self.assertEqual(summary["samples"], 3)
+            self.assertEqual(summary["opportunitySamples"], 2)
+            self.assertEqual(summary["firstObservedTargetTick"], 20)
+            self.assertEqual(summary["firstTargetCandidateTick"], 40)
+            self.assertEqual(summary["freshTargetCandidateFrames"], 0)
+            self.assertEqual(summary["chosenTargetFrames"], 1)
+
     def test_goal_samples_preserve_brief_achievement_after_inventory_loss_and_world_mismatch(self):
         world = "00000000-0000-0000-0000-000000000001"
         goal = "00000000-0000-0000-0000-000000000002"
