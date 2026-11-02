@@ -28,6 +28,9 @@
 !/training/requirements-onnx.txt
 !/training/README.md
 !/training/rl_actor.py
+!/training/continuation_policy.py
+!/training/test_continuation_policy.py
+!/training/convert_temporal_policy.py
 !/training/train_paper_ppo.py
 !/training/test_rl_actor.py
 !/training/requirements-rl.txt
