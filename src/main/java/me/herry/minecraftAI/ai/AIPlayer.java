@@ -80,6 +80,10 @@ public final class AIPlayer {
     private final NavigationSystem navigation;
     private final InventorySystem inventory;
     private final AIBrain brain;
+
+    public me.herry.minecraftAI.ai.learned.ExecutionPolicyContext.Execution getLearnedExecution() {
+        return brain.learnedExecution();
+    }
     // 계속 실패해서 한동안 미뤄 둔 중기 목표와, 다시 시도할 시각(AI 틱)
     private final Map<Milestone, Long> deferredUntil = new EnumMap<>(Milestone.class);
 

@@ -121,7 +121,7 @@ public final class PolicyCandidates {
         TaskPolicyContext.encode(body, ai.getPolicyTaskMemory().observe(ai.getWorldId(), counts), ai.getTicks(), ai.getWorldId());
         if (ai.getConfig().maskObjectiveInput) TaskPolicyContext.maskObjective(body);
         var sight = DirectionalPolicyContext.capture(ai, body);
-        ExecutionPolicyContext.encode(body, ai.getBrain().learnedExecution(),
+        ExecutionPolicyContext.encode(body, ai.getLearnedExecution(),
                 ai.getPolicyTaskMemory().observe(ai.getWorldId(), counts), ai.getWorldId());
         return new Observed(state, survival, counts, body, sight);
     }
