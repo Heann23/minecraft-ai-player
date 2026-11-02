@@ -4,6 +4,7 @@ from __future__ import annotations
 import math
 import copy
 import numpy as np
+import continuation_policy
 
 CONTRACT = "minecraft-primitive-candidates/v7"
 STATE_SIZE, ACTION_SIZE, MAX_OPTIONS = 432, 256, 128
@@ -28,6 +29,7 @@ def inputs(frame: dict) -> tuple[np.ndarray, np.ndarray]:
 
 class ActorCritic:
     def __init__(self, seed: int, hidden: int = 64):
+        self.selection = "flat"
         if not 1 <= hidden <= 256:
             raise ValueError("hidden size must be 1..256")
         self.rng = np.random.default_rng(seed)
@@ -51,6 +53,8 @@ class ActorCritic:
         p = self.params
         hidden = np.tanh(x @ p["actor_w"].T + p["actor_b"])
         logits = hidden @ p["actor_out"] + p["actor_bias"][0]
+        if self.selection == continuation_policy.SELECTION:
+            logits = continuation_policy.scores(frame, logits)
         logits -= logits.max()
         probabilities = np.exp(logits)
         probabilities /= probabilities.sum()
@@ -146,6 +150,7 @@ class ActorCritic:
         if (self.updates <= 0 or self.version <= 0) and not (allow_initial and self.updates == 0 and self.version == 0):
             raise ValueError("initialization is not a trained checkpoint")
         return {"schema": "minecraft-ppo-optimizer/v1", "contract": CONTRACT,
+                **({"selection": self.selection} if self.selection != "flat" else {}),
                 "updates": self.updates, "version": self.version,
                 "params": {key: value.tolist() for key, value in self.params.items()},
                 "first": {key: value.tolist() for key, value in self.first.items()},
@@ -173,7 +178,7 @@ class ActorCritic:
 
     @classmethod
     def from_optimizer_state(cls, state: dict, *, allow_initial=False):
-        if set(state) != {"schema", "contract", "updates", "version", "params", "first", "second", "rng"} \
+        if set(state) - {"selection"} != {"schema", "contract", "updates", "version", "params", "first", "second", "rng"} \
                 or state["schema"] != "minecraft-ppo-optimizer/v1" or state["contract"] != CONTRACT:
             raise ValueError("incompatible optimizer checkpoint")
         for name in ("updates", "version"):
@@ -183,6 +188,9 @@ class ActorCritic:
             raise ValueError("initialization counters must both be zero")
         hidden = len(state["params"]["actor_b"])
         model = cls(0, hidden)
+        model.selection = state.get("selection", "flat")
+        if model.selection not in ("flat", continuation_policy.SELECTION):
+            raise ValueError("unsupported temporal selection law")
         for group in ("params", "first", "second"):
             if set(state[group]) != set(model.params):
                 raise ValueError("optimizer parameter names mismatch")
@@ -202,13 +210,17 @@ class ActorCritic:
         if environment_steps <= 0 or self.updates == 0:
             raise ValueError("initialization is not a trained model")
         p = self.params
-        return {"schema": "minecraft-rl-actor/v1", "contract": CONTRACT, "algorithm": "ppo",
+        return {"schema": "minecraft-rl-actor/v1" if self.selection == "flat" else "minecraft-rl-actor/v2",
+                **({"selection": self.selection} if self.selection != "flat" else {}),
+                "contract": CONTRACT, "algorithm": "ppo",
                 "environment": "minecraft-paper", "environmentSteps": environment_steps,
                 "trainingRun": training_run, "rolloutSha256": rollout_sha256,
                 "hiddenWeights": p["actor_w"].tolist(), "hiddenBias": p["actor_b"].tolist(),
                 "outputWeights": p["actor_out"].tolist(), "outputBias": float(p["actor_bias"][0])}
 
     def initial_artifact(self, *, brain_id: str, training_run: str) -> dict:
+        if self.selection != "flat":
+            raise ValueError("temporal architecture requires explicit trained-model conversion")
         if self.updates != 0 or self.version != 0:
             raise ValueError("only an actual untrained initial state may use the initial-actor schema")
         p = self.params

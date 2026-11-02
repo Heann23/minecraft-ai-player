@@ -520,7 +520,7 @@ def run(args):
                 "backendLearningEnabled": learning_enabled, "requestedLearningOverride": getattr(args, "learning", None),
                 "requestedStartState": args.start_state, "maxDecisions": args.max_decisions,
                 "preEpisodeWorldTime": args.start_time,
-                "tools": {name: sha256(source / "training" / name) for name in ("paper_lab.py", "rl_actor.py", "train_paper_ppo.py", "checkpoint_store.py", "brain_session.py", "model_catalog.py")},
+                "tools": {name: sha256(source / "training" / name) for name in ("paper_lab.py", "rl_actor.py", "continuation_policy.py", "train_paper_ppo.py", "checkpoint_store.py", "brain_session.py", "model_catalog.py")},
                 "teacherLabels": False, "grantedItems": False, "teleportDuringEpisode": False,
                 "allWorldAutonomyProven": False}
     manifest["requestedObjective"] = objective

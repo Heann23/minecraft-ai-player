@@ -37,6 +37,31 @@ def row(model, session="a", sequence=0, reward=1, terminal=True):
 
 
 class ActorTests(unittest.TestCase):
+    def test_temporal_ppo_gradient_matches_changed_sampling_law(self):
+        import copy
+        from continuation_policy import SELECTION
+        model=ActorCritic(31,hidden=4);model.selection=SELECTION
+        observed=frame();observed['state'][400]=observed['state'][401]=1
+        observed['options'][0]['features'][55]=1
+        for i in range(2):
+            option=copy.deepcopy(observed['options'][1]);option['id']='extra'+str(i)
+            option['features'][0]=i+1.;observed['options'].append(option)
+        probs,value,_=model.evaluate(observed)
+        sample=dict(row(model),frame=observed,index=0,logProbability=math.log(float(probs[0])),value=value)
+        advantage=np.array([0.7]);target=np.array([value+1])
+        gradients,_=model.gradients([sample],advantage,target,entropy_weight=0.03)
+        for name,index in [('actor_w',(0,400)),('actor_w',(0,STATE_SIZE+55)),('actor_out',(0,)),('value_out',(0,))]:
+            original=model.params[name][index];eps=1e-5
+            model.params[name][index]=original+eps
+            plus=model.gradients([sample],advantage,target,entropy_weight=0.03)[1]['loss']
+            model.params[name][index]=original-eps
+            minus=model.gradients([sample],advantage,target,entropy_weight=0.03)[1]['loss']
+            model.params[name][index]=original
+            self.assertAlmostEqual(gradients[name][index],(plus-minus)/(2*eps),places=6)
+        model.fit([sample]);restored=ActorCritic.from_optimizer_state(model.optimizer_state())
+        self.assertEqual(restored.selection,SELECTION)
+        self.assertEqual(restored.artifact(environment_steps=1,training_run='numerical-fixture',rollout_sha256='0'*64)['schema'],'minecraft-rl-actor/v2')
+
     def test_v6_execution_upgrade_preserves_optimizer_rng_and_old_outputs(self):
         import copy
         model = ActorCritic(31, hidden=4)

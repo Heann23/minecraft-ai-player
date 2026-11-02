@@ -12,6 +12,19 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.*;
 
 class PolicyWeightsTest {
+    @Test void temporalActorUsesSameTwoStageProbabilitiesAndAllowsSwitching() throws Exception {
+        var artifact=new PolicyWeights.Artifact("minecraft-rl-actor/v2",PolicyFrame.CONTRACT,"ppo","minecraft-paper",1,"numerical-fixture","0".repeat(64),new double[1][PolicyFrame.INPUT_SIZE],new double[]{0},new double[]{0},0,null,null,null,null,"continue-switch-mean/v1");
+        Path file=directory.resolve("temporal.json");Files.writeString(file,new Gson().toJson(artifact));
+        double[] state=new double[PolicyFrame.STATE_SIZE];state[400]=state[401]=1;
+        var options=new java.util.ArrayList<PolicyFrame.Option>();
+        for(int i=0;i<4;i++){double[] features=new double[PolicyFrame.ACTION_SIZE];features[55]=i==0?1:0;options.add(new PolicyFrame.Option("choice"+i,features));}
+        var observed=new PolicyFrame(UUID.randomUUID(),5,state,options,false);
+        var weights=PolicyWeights.load(file);
+        var continued=weights.sample(observed,new java.util.Random(){@Override public double nextDouble(){return 0.1;}});
+        assertEquals(0,continued.index());assertEquals(Math.log(0.5),continued.logProbability(),1e-12);
+        var switched=weights.sample(observed,new java.util.Random(){@Override public double nextDouble(){return 0.9;}});
+        assertNotEquals(0,switched.index());assertEquals(Math.log(1./6),switched.logProbability(),1e-12);
+    }
     @TempDir Path directory;
 
     /** Synthetic numerical fixture only; never a model trained or deployed in Minecraft. */

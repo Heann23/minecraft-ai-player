@@ -15,12 +15,12 @@ public final class PolicyWeights {
     public record Artifact(String schema, String contract, String algorithm, String environment,
                            long environmentSteps, String trainingRun, String rolloutSha256,
                            double[][] hiddenWeights, double[] hiddenBias, double[] outputWeights, double outputBias,
-                           String brainId, String trainingStartState, Long modelVersion, Long gradientUpdates) {
+                           String brainId, String trainingStartState, Long modelVersion, Long gradientUpdates, String selection) {
         public Artifact(String schema, String contract, String algorithm, String environment,
                         long environmentSteps, String trainingRun, String rolloutSha256,
                         double[][] hiddenWeights, double[] hiddenBias, double[] outputWeights, double outputBias) {
             this(schema, contract, algorithm, environment, environmentSteps, trainingRun, rolloutSha256,
-                    hiddenWeights, hiddenBias, outputWeights, outputBias, null, null, null, null);
+                    hiddenWeights, hiddenBias, outputWeights, outputBias, null, null, null, null, null);
         }
     }
     public record Prediction(int index, String candidate, double logProbability, String modelSha256) {}
@@ -28,11 +28,14 @@ public final class PolicyWeights {
     private final String sha256;
 
     private PolicyWeights(Artifact artifact, String sha256) {
-        if (artifact == null || !SCHEMA.equals(artifact.schema()) || !PolicyFrame.CONTRACT.equals(artifact.contract())
+        if (artifact == null || !(SCHEMA.equals(artifact.schema()) || "minecraft-rl-actor/v2".equals(artifact.schema())) || !PolicyFrame.CONTRACT.equals(artifact.contract())
                 || !"ppo".equals(artifact.algorithm()) || !"minecraft-paper".equals(artifact.environment())
                 || artifact.environmentSteps() <= 0 || artifact.trainingRun() == null || artifact.trainingRun().isBlank()
                 || artifact.rolloutSha256() == null || !artifact.rolloutSha256().matches("[0-9a-f]{64}"))
             throw new IllegalArgumentException("missing/incompatible trained Paper RL provenance");
+        boolean temporal = "minecraft-rl-actor/v2".equals(artifact.schema());
+        if (temporal ? !"continue-switch-mean/v1".equals(artifact.selection()) : artifact.selection() != null)
+            throw new IllegalArgumentException("actor selection law/schema mismatch");
         int hidden = artifact.hiddenBias() == null ? 0 : artifact.hiddenBias().length;
         if (hidden < 1 || hidden > 256 || artifact.hiddenWeights() == null || artifact.hiddenWeights().length != hidden
                 || artifact.outputWeights() == null || artifact.outputWeights().length != hidden)
@@ -90,6 +93,16 @@ public final class PolicyWeights {
             if (!Double.isFinite(score)) throw new IllegalStateException("non-finite actor output");
             scores[option] = score;
             if (scores[option] > scores[best]) best = option;
+        }
+        if ("continue-switch-mean/v1".equals(artifact.selection()) && frame.state()[400] == 1 && frame.state()[401] == 1) {
+            int retained = -1;
+            for (int i = 0; i < scores.length; i++) if (frame.options().get(i).features()[55] == 1) {
+                if (retained >= 0) throw new IllegalArgumentException("ambiguous active execution candidate");
+                retained = i;
+            }
+            if (retained >= 0 && scores.length > 1) scores[retained] += Math.log(scores.length - 1);
+            best = 0;
+            for (int i = 1; i < scores.length; i++) if (scores[i] > scores[best]) best = i;
         }
         double total = 0;
         for (double score : scores) total += Math.exp(score - scores[best]);
