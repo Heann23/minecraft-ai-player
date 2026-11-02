@@ -92,6 +92,7 @@ final class AIBrain {
     private final me.herry.minecraftAI.ai.learned.PolicyCandidates learnedCandidates = new me.herry.minecraftAI.ai.learned.PolicyCandidates();
     private final me.herry.minecraftAI.ai.learned.PolicyWeights learnedPolicy;
     private final java.util.Random inferenceRandom;
+    private java.util.UUID lastFingerprintedObjective;
     private final me.herry.minecraftAI.ai.learned.TrainingControl trainingControl;
     private me.herry.minecraftAI.ai.learned.PolicyCandidates.Candidate activeLearned;
     private java.util.UUID learnedWorld;
@@ -447,6 +448,16 @@ final class AIBrain {
                             ? java.util.concurrent.ThreadLocalRandom.current() : inferenceRandom);
                     var selected = captured.candidates().get(predicted.index());
                     var task = captured.frame().taskMemory();
+                    if (ai.getConfig().debugEnabled && task != null && task.objective() != null
+                            && !task.objective().id().equals(lastFingerprintedObjective)) {
+                        var fingerprints = me.herry.minecraftAI.ai.learned.PolicyInputFingerprint.of(captured.frame());
+                        ai.debug("PolicyInputFirst goal=" + task.objective().id() + " tick=" + captured.frame().serverTick()
+                                + " state=" + fingerprints.state() + " outsideGoal=" + fingerprints.stateOutsideObjective()
+                                + " candidates=" + fingerprints.orderedCandidates() + " count=" + captured.frame().options().size()
+                                + " model=" + predicted.modelSha256() + " index=" + predicted.index()
+                                + " logProbability=" + predicted.logProbability());
+                        lastFingerprintedObjective = task.objective().id();
+                    }
                     if (task != null && task.objective() != null) {
                         // Native Java inference has no TrainingControl episode. Consume observed achievement
                         // without a learning credit, including a goal already held at the first observation.

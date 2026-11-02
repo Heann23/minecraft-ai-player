@@ -259,10 +259,23 @@ def summarize_game_log(path: Path):
     inventory = None
     goal_samples = {}
     unaggregated_goal_samples = 0
+    first_policy_inputs = {}
+    unaggregated_policy_inputs = 0
     if not path.is_file():
         return {"available": False, "allWorldAutonomyProven": False}
     with path.open(encoding="utf-8", errors="replace") as stream:
         for line in stream:
+            fingerprint = re.search(r"\[AI:RLLearner\] PolicyInputFirst goal=([0-9a-f-]{36}) tick=(\d+) state=([0-9a-f]{64}) outsideGoal=([0-9a-f]{64}) candidates=([0-9a-f]{64}) count=(\d+) model=([0-9a-f]{64}) index=(\d+) logProbability=([0-9.eE+-]+)(?:\s|$)", line)
+            if fingerprint:
+                if fingerprint[1] not in first_policy_inputs and len(first_policy_inputs) >= 32:
+                    unaggregated_policy_inputs += 1
+                else:
+                    first_policy_inputs.setdefault(fingerprint[1], {"objectiveId": fingerprint[1],
+                        "serverTick": int(fingerprint[2]), "stateSha256": fingerprint[3],
+                        "stateOutsideObjectiveSha256": fingerprint[4], "orderedCandidatesSha256": fingerprint[5],
+                        "candidateCount": int(fingerprint[6]), "modelSha256": fingerprint[7],
+                        "chosenIndex": int(fingerprint[8]), "logProbability": float(fingerprint[9]),
+                        "scope": "Actual first native actor frame; hash equality is input identity, not goal-use or performance evidence."})
             goal = re.search(r"\[AI:RLLearner\] GoalSample world=([0-9a-f-]{36}) goal=([0-9a-f-]{36}) tick=(\d+) item=([A-Z][A-Z0-9_]*) required=(\d+) owned=(\d+) matched=(true|false)(?:\s|$)", line)
             if goal:
                 key = goal[1] + ":" + goal[2]
@@ -345,6 +358,7 @@ def summarize_game_log(path: Path):
             "recordedDeaths": deaths, "recordedRespawns": respawns, "deferredRequests": rejected,
             "finalInventoryNbt": inventory, "allWorldAutonomyProven": False,
             "goalObservationSummaries": list(goal_samples.values()), "unaggregatedGoalSamples": unaggregated_goal_samples,
+            "firstNativePolicyInputs": list(first_policy_inputs.values()), "unaggregatedFirstPolicyInputs": unaggregated_policy_inputs,
             "limitations": "Periodic diagnostics are partial; input success is not task completion or proof of learned competence."}
 
 

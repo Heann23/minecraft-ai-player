@@ -11,6 +11,16 @@ from paper_lab import read_plan, validate_options, summarize_game_log, validate_
 
 
 class SeedPlanTests(unittest.TestCase):
+    def test_native_first_input_preserves_goal_identity_and_does_not_invent_missing_evidence(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/'console.log';goal='12345678-1234-1234-1234-123456789abc'
+            path.write_text('[AI:RLLearner] PolicyInputFirst goal='+goal+' tick=10 state='+'a'*64+' outsideGoal='+'b'*64+' candidates='+'c'*64+' count=12 model='+'d'*64+' index=2 logProbability=-2.1E-1\n')
+            entries=summarize_game_log(path)['firstNativePolicyInputs']
+            self.assertEqual(len(entries),1);self.assertEqual(entries[0]['objectiveId'],goal)
+            self.assertEqual(entries[0]['candidateCount'],12);self.assertAlmostEqual(entries[0]['logProbability'],-.21)
+            path.write_text('no first actor frame recorded')
+            self.assertEqual(summarize_game_log(path)['firstNativePolicyInputs'],[])
+
     def test_conversion_parent_is_bound_to_exact_checkpoint_and_unchanged_optimizer(self):
         from paper_lab import resume_parent_directory,sha256
         with tempfile.TemporaryDirectory() as directory:
