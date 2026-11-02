@@ -11,6 +11,19 @@ from paper_lab import read_plan, validate_options, summarize_game_log, validate_
 
 
 class SeedPlanTests(unittest.TestCase):
+    def test_java_inference_seed_is_explicit_bounded_and_never_a_training_override(self):
+        from paper_lab import inference_seed_config
+        config = "policy:\n  inference-seed: null\n  mask-objective-input: false\n"
+        self.assertEqual(inference_seed_config(config, argparse.Namespace(mode="evaluate")), config)
+        for seed in (-(2**63), 0, 2**63-1):
+            changed = inference_seed_config(config, argparse.Namespace(mode="evaluate", inference_seed=seed))
+            self.assertEqual(changed, config.replace("inference-seed: null", "inference-seed: " + str(seed)))
+        for mode, seed in (("train", 0), ("evaluate", True), ("evaluate", 2**63), ("evaluate", -(2**63)-1)):
+            with self.assertRaises(ValueError):
+                inference_seed_config(config, argparse.Namespace(mode=mode, inference_seed=seed))
+        with self.assertRaises(ValueError):
+            inference_seed_config("policy:\n", argparse.Namespace(mode="evaluate", inference_seed=0))
+
     def test_goal_opportunity_distinguishes_distant_sight_retained_candidate_and_missing_evidence(self):
         prefix = "[AI:RLLearner] GoalSample world=00000000-0000-0000-0000-000000000001 goal=00000000-0000-0000-0000-000000000002"
         with tempfile.TemporaryDirectory() as directory:

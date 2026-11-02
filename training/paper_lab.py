@@ -159,6 +159,7 @@ def validate_plan_extension(parent: dict, current: dict):
 
 def validate_options(args, *, plan=None):
     plan = read_plan(args.plan) if plan is None else validate_plan(plan)
+    inference_seed(args)
     if getattr(args, "mask_objective_input", False) and requested_objective(args) is None:
         raise ValueError("objective-input ablation requires an explicit actual objective")
     learning = getattr(args, "learning", None)
@@ -328,6 +329,23 @@ def objective_input_config(config, masked):
     return changed
 
 
+def inference_seed(args):
+    seed = getattr(args, "inference_seed", None)
+    if seed is not None and (args.mode != "evaluate" or type(seed) is not int or not -(2**63) <= seed < 2**63):
+        raise ValueError("inference seed requires standalone evaluation and a signed 64-bit integer")
+    return seed
+
+
+def inference_seed_config(config, args):
+    seed = inference_seed(args)
+    if seed is None:
+        return config
+    changed, count = re.subn(r"(?m)^  inference-seed: null$", "  inference-seed: " + str(seed), config)
+    if count != 1:
+        raise ValueError("inference seed was not explicitly configured exactly once")
+    return changed
+
+
 def requested_objective(args):
     item, count = getattr(args, "objective_item", None), getattr(args, "objective_count", None)
     if item is None and count is None:
@@ -403,6 +421,7 @@ def run(args):
     # Disable persistence and chat in the new experiment only. No old AI state or credentials are loaded.
     config = config.replace("enabled: true", "enabled: false")
     config = objective_input_config(config, getattr(args, "mask_objective_input", False))
+    config = inference_seed_config(config, args)
     if args.player_persistence:
         config, replaced = re.subn(r"(?m)^(persistence:\n(?:  #[^\n]*\n)*  enabled:) false$", r"\1 true", config)
         if replaced != 1:
@@ -448,6 +467,7 @@ def run(args):
                 "allWorldAutonomyProven": False}
     manifest["requestedObjective"] = objective
     manifest["objectiveInputMode"] = "masked" if getattr(args, "mask_objective_input", False) else "visible"
+    manifest["inferenceSamplingSeed"] = inference_seed(args)
     manifest["objectiveAdmission"] = None
     manifest["backendOwner"] = "plugin" if args.managed_backend else "external-lab"
     manifest["seedSelection"] = "random-per-world-run" if random_seed else "explicit-frozen-plan"
@@ -710,6 +730,7 @@ def main():
     parser.add_argument("--seconds", type=int, required=True)
     parser.add_argument("--steps", type=int, default=512)
     parser.add_argument("--policy-seed", type=int, default=777)
+    parser.add_argument("--inference-seed", type=int, help="development Java evaluation sampling stream; independent of world/training RNG, resets on brain creation")
     parser.add_argument("--objective-item", help="exact canonical item; server acknowledgement is required before play")
     parser.add_argument("--objective-count", type=int, help="current ownership target 1..4096; requires --objective-item")
     parser.add_argument("--mask-objective-input", action="store_true", help="development control: zero only goal state columns 208..231 in actor/critic observations; actual reward accounting is unchanged")

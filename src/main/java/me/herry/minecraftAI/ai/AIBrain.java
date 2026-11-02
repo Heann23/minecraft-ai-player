@@ -91,6 +91,7 @@ final class AIBrain {
     private final OverworldAutonomy autonomy = new OverworldAutonomy();
     private final me.herry.minecraftAI.ai.learned.PolicyCandidates learnedCandidates = new me.herry.minecraftAI.ai.learned.PolicyCandidates();
     private final me.herry.minecraftAI.ai.learned.PolicyWeights learnedPolicy;
+    private final java.util.Random inferenceRandom;
     private final me.herry.minecraftAI.ai.learned.TrainingControl trainingControl;
     private me.herry.minecraftAI.ai.learned.PolicyCandidates.Candidate activeLearned;
     private java.util.UUID learnedWorld;
@@ -126,6 +127,7 @@ final class AIBrain {
         this.ai = ai;
         this.planner = services.planner();
         this.learnedPolicy = services.learnedPolicy();
+        this.inferenceRandom = ai.getConfig().inferenceSeed == null ? null : new java.util.Random(ai.getConfig().inferenceSeed);
         this.trainingControl = services.trainingBridge() == null ? null
                 : new me.herry.minecraftAI.ai.learned.TrainingControl(services.trainingBridge(), services.warn());
         this.journal = DecisionJournal.create(ai, services);
@@ -435,7 +437,8 @@ final class AIBrain {
                     && (plan == null || plan.isFinished() || now >= learnedNextChoiceAt)) {
                 try {
                     var captured = learnedCandidates.capture(ai, activeLearned, (int) Math.min(2400, now - learnedStartedAt));
-                    var predicted = learnedPolicy.sample(captured.frame(), java.util.concurrent.ThreadLocalRandom.current());
+                    var predicted = learnedPolicy.sample(captured.frame(), inferenceRandom == null
+                            ? java.util.concurrent.ThreadLocalRandom.current() : inferenceRandom);
                     var selected = captured.candidates().get(predicted.index());
                     var task = captured.frame().taskMemory();
                     if (task != null && task.objective() != null) {

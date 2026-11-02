@@ -88,6 +88,8 @@ policy:
   training-channel: training-session/channel
   # Development ablation only: hide goal fields from both actor and critic, retain actual goal rewards/history/sight.
   mask-objective-input: false
+  # Development paired evaluations only. Null preserves normal sampling; a new brain starts a new seeded stream.
+  inference-seed: null
   # Optional local development backend. Disabled users keep Java-only pretrained inference.
   # Enabling requires an existing named catalog and Python/NumPy plus these same training sources.
   # Missing/corrupt saved state never creates a new random model. allow-training remains an independent opt-in.
