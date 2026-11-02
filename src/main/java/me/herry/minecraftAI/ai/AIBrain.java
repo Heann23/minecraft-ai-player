@@ -435,15 +435,27 @@ final class AIBrain {
                     && (plan == null || plan.isFinished() || now >= learnedNextChoiceAt)) {
                 try {
                     var captured = learnedCandidates.capture(ai, activeLearned, (int) Math.min(2400, now - learnedStartedAt));
+                    var predicted = learnedPolicy.sample(captured.frame(), java.util.concurrent.ThreadLocalRandom.current());
+                    var selected = captured.candidates().get(predicted.index());
                     var task = captured.frame().taskMemory();
                     if (task != null && task.objective() != null) {
+                        String item = task.objective().goal().item();
+                        var frame = captured.frame();
+                        long visibleRays = frame.sight() == null ? -1 : frame.sight().rays().stream()
+                                .filter(ray -> ray.block() != null && item.equals(ray.block().material())).count();
+                        long candidates = frame.options().stream().filter(option -> option.id().startsWith("mine:")
+                                && option.blockEvidence() != null && item.equals(option.blockEvidence().material())).count();
+                        long freshCandidates = frame.options().stream().filter(option -> option.id().startsWith("mine:")
+                                && option.blockEvidence() != null && item.equals(option.blockEvidence().material())
+                                && option.blockEvidence().observedTick() == frame.serverTick()).count();
+                        var chosenBlock = selected.encoded().blockEvidence();
+                        boolean chosenTarget = selected.id().startsWith("mine:") && chosenBlock != null && item.equals(chosenBlock.material());
                         ai.debug("GoalSample world=" + captured.frame().world() + " goal=" + task.objective().id()
                                 + " tick=" + captured.frame().serverTick() + " item=" + task.objective().goal().item()
                                 + " required=" + task.objective().goal().count() + " owned=" + task.owned()
-                                + " matched=" + task.worldMatches());
+                                + " matched=" + task.worldMatches() + " visibleRays=" + visibleRays
+                                + " candidates=" + candidates + " freshCandidates=" + freshCandidates + " chosenTarget=" + chosenTarget);
                     }
-                    var predicted = learnedPolicy.sample(captured.frame(), java.util.concurrent.ThreadLocalRandom.current());
-                    var selected = captured.candidates().get(predicted.index());
                     if (activeLearned == null || !selected.inputId().equals(activeLearned.inputId()) || plan == null || plan.isFinished()) {
                         if (plan != null) plan.cancel(ai);
                         plan = null; activeLearned = null;

@@ -270,6 +270,18 @@ def summarize_game_log(path: Path):
                     summary["samples"] += 1
                     summary["maxObservationGapTicks"] = max(summary["maxObservationGapTicks"], tick-summary["lastTick"])
                     summary["lastTick"] = tick
+                    opportunity = re.search(r" visibleRays=(-?\d+) candidates=(\d+) freshCandidates=(\d+) chosenTarget=(true|false)(?:\s|$)", line)
+                    if opportunity:
+                        summary["opportunitySamples"] = summary.get("opportunitySamples", 0) + 1
+                        for name, present in (("visibleTargetFrames", int(opportunity[1]) > 0),
+                                              ("targetCandidateFrames", int(opportunity[2]) > 0),
+                                              ("freshTargetCandidateFrames", int(opportunity[3]) > 0),
+                                              ("chosenTargetFrames", opportunity[4] == "true")):
+                            summary[name] = summary.get(name, 0) + int(present)
+                        if int(opportunity[1]) > 0:
+                            summary.setdefault("firstObservedTargetTick", tick)
+                        if int(opportunity[2]) > 0:
+                            summary.setdefault("firstTargetCandidateTick", tick)
                     if goal[7] == "true":
                         summary["maxOwned"] = max(summary["maxOwned"], owned)
                         if owned >= required and summary["firstObservedAchievedTick"] is None:
