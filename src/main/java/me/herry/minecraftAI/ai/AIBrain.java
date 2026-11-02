@@ -522,6 +522,16 @@ final class AIBrain {
      * 이번에 할 단기 목표를 정한다. 관리자가 고정한 목표가 가장 먼저이고, 그다음이 긴급 목표,
      * 그다음이 사람이 부탁한 일, 마지막이 스스로 고른 목표다.
      */
+    public me.herry.minecraftAI.ai.learned.ExecutionPolicyContext.Execution learnedExecution() {
+        Action action = plan == null ? null : plan.current();
+        boolean active = learnedLane && activeLearned != null && action != null && !plan.isFinished();
+        var mining = active && action instanceof me.herry.minecraftAI.ai.action.BreakBlockAction block ? block.miningProgress() : null;
+        return new me.herry.minecraftAI.ai.learned.ExecutionPolicyContext.Execution(active,
+                active && action.getStatus() == ActionStatus.RUNNING, mining != null,
+                mining == null ? 0 : mining.progress(), mining == null ? 0 : mining.actionTicks(),
+                mining == null ? 0 : mining.aimTicks(), active ? activeLearned.inputId() : "");
+    }
+
     private void cancelLearnedForReplacement(AIPlayer ai, String replacement) {
         if (plan == null) return;
         Action interrupted = plan.current();

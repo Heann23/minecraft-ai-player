@@ -37,6 +37,27 @@ def row(model, session="a", sequence=0, reward=1, terminal=True):
 
 
 class ActorTests(unittest.TestCase):
+    def test_v6_execution_upgrade_preserves_optimizer_rng_and_old_outputs(self):
+        import copy
+        model = ActorCritic(31, hidden=4)
+        model.fit([row(model)])
+        legacy = copy.deepcopy(model.optimizer_state()); legacy["contract"] = "minecraft-primitive-candidates/v6"
+        for group in ("params", "first", "second"):
+            for key in ("actor_w", "value_w"):
+                tensor = np.asarray(legacy[group][key])
+                legacy[group][key] = np.concatenate((tensor[:, :400], tensor[:, STATE_SIZE:]), axis=1).tolist()
+        upgraded = ActorCritic.upgrade_legacy_context(legacy)
+        for group in ("params", "first", "second"):
+            for key in ("actor_w", "value_w"):
+                tensor = getattr(upgraded, group)[key]
+                np.testing.assert_array_equal(tensor[:, 400:432], 0)
+                np.testing.assert_array_equal(np.concatenate((tensor[:, :400], tensor[:, 432:]), axis=1), legacy[group][key])
+        self.assertEqual(upgraded.rng.bit_generator.state, legacy["rng"])
+        observed = frame(); before, value, _ = upgraded.evaluate(observed)
+        observed["state"][400:] = [0.42] * 32
+        after, next_value, _ = upgraded.evaluate(observed)
+        np.testing.assert_array_equal(before, after); self.assertEqual(value, next_value)
+
     def test_v4_task_upgrade_preserves_every_old_tensor_rng_and_zeroes_new_influence(self):
         import copy
         model = ActorCritic(31, hidden=4)
