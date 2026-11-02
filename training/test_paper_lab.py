@@ -11,6 +11,28 @@ from paper_lab import read_plan, validate_options, summarize_game_log, validate_
 
 
 class SeedPlanTests(unittest.TestCase):
+    def test_completion_watcher_ignores_old_goal_and_waits_for_a_complete_accepted_row(self):
+        from paper_lab import ObjectiveCompletionWatcher
+        goal = {"id": "new-goal", "world": "current-world", "item": "DIRT", "count": 1}
+        def row(identity, sequence):
+            return {"session": "session", "sequence": sequence, "taskCompletion": {
+                "objectiveId": identity, "world": goal["world"], "item": "DIRT", "required": 1,
+                "beforeOwned": 0, "afterOwned": 1}}
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "rows.jsonl"
+            watcher = ObjectiveCompletionWatcher()
+            self.assertFalse(watcher.poll(path, goal))
+            path.write_text(json.dumps(row("previous-world-goal", 0)) + "\n" + json.dumps(row(goal["id"], 1)))
+            self.assertFalse(watcher.poll(path, goal))
+            with path.open("a") as stream:
+                stream.write("\n")
+            self.assertTrue(watcher.poll(path, goal))
+            self.assertEqual(watcher.match["sequence"], 1)
+            self.assertEqual(watcher.match["completion"]["objectiveId"], goal["id"])
+            path.write_text("")
+            with self.assertRaises(ValueError):
+                watcher.poll(path, goal)
+
     def test_java_inference_seed_is_explicit_bounded_and_never_a_training_override(self):
         from paper_lab import inference_seed_config
         config = "policy:\n  inference-seed: null\n  mask-objective-input: false\n"

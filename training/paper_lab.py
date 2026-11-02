@@ -160,6 +160,10 @@ def validate_plan_extension(parent: dict, current: dict):
 def validate_options(args, *, plan=None):
     plan = read_plan(args.plan) if plan is None else validate_plan(plan)
     inference_seed(args)
+    if getattr(args, "stop_on_objective", False) and (args.mode != "train" or requested_objective(args) is None
+            or getattr(args, "inference_only", False) or getattr(args, "managed_backend", False)
+            or getattr(args, "learning", None) == "off"):
+        raise ValueError("stop-on-objective requires an actual objective and the external learning backend")
     if getattr(args, "mask_objective_input", False) and requested_objective(args) is None:
         raise ValueError("objective-input ablation requires an explicit actual objective")
     learning = getattr(args, "learning", None)
@@ -320,6 +324,40 @@ def named_session(revision):
     return dict(revision["session"], modelName=model_name(revision["name"]))
 
 
+class ObjectiveCompletionWatcher:
+    """Observe accepted real transitions only; never relabel them or manufacture a completion."""
+    def __init__(self):
+        self.offset = 0
+        self.buffer = b""
+        self.match = None
+
+    def poll(self, path, admission):
+        if admission is None or not path.is_file():
+            return False
+        if path.stat().st_size < self.offset:
+            raise ValueError("objective evidence file was truncated")
+        with path.open("rb") as stream:
+            stream.seek(self.offset)
+            chunk = stream.read(4*1024*1024)
+        self.offset += len(chunk)
+        lines = (self.buffer + chunk).split(b"\n")
+        self.buffer = lines.pop()
+        if len(self.buffer) > 4*1024*1024:
+            raise ValueError("oversized objective evidence row")
+        for line in lines:
+            if len(line) > 4*1024*1024:
+                raise ValueError("oversized objective evidence row")
+            row = json.loads(line)
+            completion = row.get("taskCompletion")
+            if completion is not None and completion.get("objectiveId") == admission["id"] \
+                    and completion.get("world") == admission["world"] and completion.get("item") == admission["item"] \
+                    and completion.get("required") == admission["count"] \
+                    and completion["beforeOwned"] < admission["count"] <= completion["afterOwned"]:
+                self.match = {"completion": completion, "session": row["session"], "sequence": row["sequence"]}
+                return True
+        return False
+
+
 def objective_input_config(config, masked):
     if not masked:
         return config
@@ -468,6 +506,7 @@ def run(args):
     manifest["requestedObjective"] = objective
     manifest["objectiveInputMode"] = "masked" if getattr(args, "mask_objective_input", False) else "visible"
     manifest["inferenceSamplingSeed"] = inference_seed(args)
+    manifest["stopOnObjective"] = getattr(args, "stop_on_objective", False)
     manifest["objectiveAdmission"] = None
     manifest["backendOwner"] = "plugin" if args.managed_backend else "external-lab"
     manifest["seedSelection"] = "random-per-world-run" if random_seed else "explicit-frozen-plan"
@@ -575,6 +614,7 @@ def run(args):
                     process.stdin.write(text + "\n"); process.stdin.flush()
             reason, next_report = "server-exited", started
             scenario_index = 0
+            completion_watcher = ObjectiveCompletionWatcher()
             while process.poll() is None:
                 now = time.monotonic()
                 while gameplay_start is not None and scenario_index < len(scenario) \
@@ -595,6 +635,10 @@ def run(args):
                     scenario_index += 1
                 if (output / "stop.request").is_file():
                     reason = "operator-stop-request"; break
+                if gameplay_start is not None and getattr(args, "stop_on_objective", False) \
+                        and completion_watcher.poll(output / "training/paper-rollouts.jsonl", manifest["objectiveAdmission"]):
+                    manifest["objectiveStopEvidence"] = completion_watcher.match
+                    reason = "observed-objective-complete"; break
                 if gameplay_start is None and now - started >= 180:
                     reason = "startup-time-budget"; break
                 if gameplay_start is not None and now - gameplay_start >= args.seconds:
@@ -733,6 +777,7 @@ def main():
     parser.add_argument("--inference-seed", type=int, help="development Java evaluation sampling stream; independent of world/training RNG, resets on brain creation")
     parser.add_argument("--objective-item", help="exact canonical item; server acknowledgement is required before play")
     parser.add_argument("--objective-count", type=int, help="current ownership target 1..4096; requires --objective-item")
+    parser.add_argument("--stop-on-objective", action="store_true", help="cooperatively finish a learning world run after its own real accepted completion; preserve pending experience normally")
     parser.add_argument("--mask-objective-input", action="store_true", help="development control: zero only goal state columns 208..231 in actor/critic observations; actual reward accounting is unchanged")
     parser.add_argument("--start-time", type=int, default=0, help="explicit world time prepared before spawning; no time changes during play")
     parser.add_argument("--model", type=Path)
