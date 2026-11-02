@@ -12,6 +12,23 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.*;
 
 class PolicyWeightsTest {
+    @Test void stationaryMiningObservationCoversTheLocalVolumeWithoutMaterialAdvice() {
+        var feet=new me.herry.minecraftAI.ai.util.BlockPoint(0,64,0);
+        var distant=feet.offset(1,1,2);
+        assertFalse(PolicyCandidates.nearbyTargets(feet).subList(0,24).contains(distant));
+        var covered=new java.util.HashSet<me.herry.minecraftAI.ai.util.BlockPoint>();
+        for(int cursor=0;cursor<96;cursor+=24){
+            var targets=PolicyCandidates.miningObservationTargets(feet,null,cursor);
+            assertEquals(24,targets.size());covered.addAll(targets);
+        }
+        assertEquals(new java.util.HashSet<>(PolicyCandidates.nearbyTargets(feet)),covered);
+        var crosshair=feet.offset(0,1,4);covered.clear();
+        for(int cursor=0;cursor<92;cursor+=23){
+            var targets=PolicyCandidates.miningObservationTargets(feet,crosshair,cursor);
+            assertEquals(crosshair,targets.getFirst());assertEquals(24,targets.size());covered.addAll(targets);
+        }
+        assertTrue(covered.containsAll(PolicyCandidates.nearbyTargets(feet)));
+    }
     @Test void goalActionResidualUsesLearnedCrossTermsAndRejectsOldSchema() throws Exception {
         double[][] cross=new double[24][PolicyFrame.ACTION_SIZE];cross[8][0]=2;
         var artifact=new PolicyWeights.Artifact("minecraft-rl-actor/v3",PolicyFrame.CONTRACT,"ppo","minecraft-paper",1,"numerical-fixture","0".repeat(64),new double[1][PolicyFrame.INPUT_SIZE],new double[]{0},new double[]{0},0,null,null,null,null,null,"goal-action-bilinear/v1",cross);

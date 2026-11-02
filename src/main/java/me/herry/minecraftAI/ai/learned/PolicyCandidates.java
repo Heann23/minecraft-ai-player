@@ -67,6 +67,7 @@ public final class PolicyCandidates {
     private int recipesChecked;
     private boolean recipeScanComplete;
     private int miningCursor;
+    private int miningObservationCursor;
     private int equipmentCursor;
     private int consumableCursor;
     private PolicyFrame.ConsumptionScan consumptionScan;
@@ -198,16 +199,17 @@ public final class PolicyCandidates {
     private void mining(AIPlayer ai, List<me.herry.minecraftAI.ai.primitive.control.PrimitiveSnapshot.ItemSlot> inventory,
                         Map<String, Candidate> found) {
         var p = ai.getPlayer();
-        List<BlockPoint> targets = new ArrayList<>();
         var feet = ai.getPosition();
         boolean rayLoaded = true;
         for (int dx : new int[]{-5, 5}) for (int dz : new int[]{-5, 5})
             rayLoaded &= p.getWorld().isChunkLoaded((feet.x() + dx) >> 4, (feet.z() + dz) >> 4);
         var ray = rayLoaded ? p.getTargetBlockExact(4) : null;
-        if (ray != null) targets.add(Positions.of(ray));
+        // Keep the actual crosshair, then rotate geometric observation coverage. A static nearest
+        // prefix otherwise never inspects many reachable cells while standing at the same location.
+        var targets = miningObservationTargets(feet, ray == null ? null : Positions.of(ray), miningObservationCursor);
+        miningObservationCursor = Math.floorMod(miningObservationCursor + (ray == null ? 24 : 23), 75);
         // Inspect only local visible cells. Unloaded/hidden cells never become material observations.
-        targets.addAll(nearbyTargets(feet));
-        var inspected = PrimitiveAdapter.inspect(ai, targets.stream().distinct().limit(24).toList());
+        var inspected = PrimitiveAdapter.inspect(ai, targets);
         var tools = miningSlots(inventory);
         var blocks = inspected.blocks().stream().filter(block -> block.visible() && block.loaded()).toList();
         int mined = 0, attempted = 0, pairs = tools.size() * blocks.size();
@@ -382,6 +384,15 @@ public final class PolicyCandidates {
             return dx * dx + dy * dy + dz * dz;
         }));
         return List.copyOf(points);
+    }
+
+    static List<BlockPoint> miningObservationTargets(BlockPoint feet, BlockPoint crosshair, int cursor) {
+        var nearby = nearbyTargets(feet);
+        var targets = new LinkedHashSet<BlockPoint>();
+        if (crosshair != null) targets.add(crosshair);
+        for (int offset = 0; offset < nearby.size() && targets.size() < 24; offset++)
+            targets.add(nearby.get(Math.floorMod(cursor + offset, nearby.size())));
+        return List.copyOf(targets);
     }
 
     static List<me.herry.minecraftAI.ai.primitive.control.PrimitiveSnapshot.ItemSlot> miningSlots(
