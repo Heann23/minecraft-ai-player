@@ -12,6 +12,16 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.*;
 
 class PolicyWeightsTest {
+    @Test void compatibleExecutionVariantsShareTheContinueGroup() throws Exception {
+        var artifact=new PolicyWeights.Artifact("minecraft-rl-actor/v2",PolicyFrame.CONTRACT,"ppo","minecraft-paper",1,"numerical-fixture","0".repeat(64),new double[1][PolicyFrame.INPUT_SIZE],new double[]{0},new double[]{0},0,null,null,null,null,"continue-switch-mean/v2");
+        Path file=directory.resolve("temporal-group.json");Files.writeString(file,new Gson().toJson(artifact));
+        double[] state=new double[PolicyFrame.STATE_SIZE];state[400]=state[401]=1;
+        var options=new java.util.ArrayList<PolicyFrame.Option>();
+        for(int i=0;i<6;i++){double[] f=new double[PolicyFrame.ACTION_SIZE];f[55]=i==0?1:0;options.add(new PolicyFrame.Option("choice"+i,f,null,i<2?"same-mining-input":"different"+i));}
+        var observed=new PolicyFrame(UUID.randomUUID(),5,state,options,false);
+        var predicted=PolicyWeights.load(file).sample(observed,new java.util.Random(){@Override public double nextDouble(){return 0.3;}});
+        assertEquals(1,predicted.index());assertEquals(Math.log(0.25),predicted.logProbability(),1e-12);
+    }
     @Test void temporalActorUsesSameTwoStageProbabilitiesAndAllowsSwitching() throws Exception {
         var artifact=new PolicyWeights.Artifact("minecraft-rl-actor/v2",PolicyFrame.CONTRACT,"ppo","minecraft-paper",1,"numerical-fixture","0".repeat(64),new double[1][PolicyFrame.INPUT_SIZE],new double[]{0},new double[]{0},0,null,null,null,null,"continue-switch-mean/v1");
         Path file=directory.resolve("temporal.json");Files.writeString(file,new Gson().toJson(artifact));

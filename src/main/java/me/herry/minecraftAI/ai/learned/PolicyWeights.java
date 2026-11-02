@@ -34,7 +34,7 @@ public final class PolicyWeights {
                 || artifact.rolloutSha256() == null || !artifact.rolloutSha256().matches("[0-9a-f]{64}"))
             throw new IllegalArgumentException("missing/incompatible trained Paper RL provenance");
         boolean temporal = "minecraft-rl-actor/v2".equals(artifact.schema());
-        if (temporal ? !"continue-switch-mean/v1".equals(artifact.selection()) : artifact.selection() != null)
+        if (temporal ? !java.util.Set.of("continue-switch-mean/v1", "continue-switch-mean/v2").contains(artifact.selection() == null ? "" : artifact.selection()) : artifact.selection() != null)
             throw new IllegalArgumentException("actor selection law/schema mismatch");
         int hidden = artifact.hiddenBias() == null ? 0 : artifact.hiddenBias().length;
         if (hidden < 1 || hidden > 256 || artifact.hiddenWeights() == null || artifact.hiddenWeights().length != hidden
@@ -94,13 +94,25 @@ public final class PolicyWeights {
             scores[option] = score;
             if (scores[option] > scores[best]) best = option;
         }
-        if ("continue-switch-mean/v1".equals(artifact.selection()) && frame.state()[400] == 1 && frame.state()[401] == 1) {
+        if (artifact.selection() != null && frame.state()[400] == 1 && frame.state()[401] == 1) {
             int retained = -1;
             for (int i = 0; i < scores.length; i++) if (frame.options().get(i).features()[55] == 1) {
                 if (retained >= 0) throw new IllegalArgumentException("ambiguous active execution candidate");
                 retained = i;
             }
-            if (retained >= 0 && scores.length > 1) scores[retained] += Math.log(scores.length - 1);
+            if (retained >= 0 && scores.length > 1) {
+                boolean[] compatible = new boolean[scores.length];compatible[retained] = true;int count = 1;
+                if ("continue-switch-mean/v2".equals(artifact.selection())) {
+                    String identity = frame.options().get(retained).inputId();
+                    count = 0;
+                    for (int i = 0; i < scores.length; i++) {
+                        if (frame.options().get(i).inputId() == null) throw new IllegalArgumentException("temporal v2 requires execution identities");
+                        compatible[i] = frame.options().get(i).inputId().equals(identity);
+                        if (compatible[i]) count++;
+                    }
+                }
+                if (count < scores.length) for (int i = 0; i < scores.length; i++) if (compatible[i]) scores[i] += Math.log((scores.length - count) / (double) count);
+            }
             best = 0;
             for (int i = 1; i < scores.length; i++) if (scores[i] > scores[best]) best = i;
         }

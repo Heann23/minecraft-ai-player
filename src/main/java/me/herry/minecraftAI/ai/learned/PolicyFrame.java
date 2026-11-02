@@ -112,11 +112,13 @@ public record PolicyFrame(UUID world, long serverTick, double[] state, List<Opti
         }
     }
 
-    public record Option(String id, double[] features, BlockEvidence blockEvidence) {
-        public Option(String id, double[] features) { this(id, features, null); }
+    public record Option(String id, double[] features, BlockEvidence blockEvidence, String inputId) {
+        public Option(String id, double[] features) { this(id, features, null, null); }
+        public Option(String id, double[] features, BlockEvidence blockEvidence) { this(id, features, blockEvidence, null); }
         public Option {
             Objects.requireNonNull(id);
             if (id.isBlank() || id.length() > 256) throw new IllegalArgumentException("invalid candidate identity");
+            if (inputId != null && (inputId.isBlank() || inputId.length() > 256)) throw new IllegalArgumentException("invalid execution identity");
             features = vector(features, ACTION_SIZE);
         }
         @Override public double[] features() { return features.clone(); }

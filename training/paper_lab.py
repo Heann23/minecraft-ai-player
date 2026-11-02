@@ -371,7 +371,7 @@ def resume_parent_directory(selected_resume: Path, *, allow_conversion=True):
     original = json.loads(Path(before["checkpoint"]).read_bytes())
     converted = json.loads(selected_resume.read_bytes())
     optimizer = dict(converted["optimizer"])
-    if optimizer.pop("selection", None) != "continue-switch-mean/v1" or optimizer != original["optimizer"] \
+    if optimizer.pop("selection", None) not in ("continue-switch-mean/v1", "continue-switch-mean/v2") or optimizer != original["optimizer"] \
             or converted["rolloutSha256"] != original["rolloutSha256"]:
         raise ValueError("conversion changed tensors or trained prefix")
     return resume_parent_directory(Path(before["checkpoint"]), allow_conversion=False)

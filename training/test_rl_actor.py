@@ -43,9 +43,11 @@ class ActorTests(unittest.TestCase):
         model=ActorCritic(31,hidden=4);model.selection=SELECTION
         observed=frame();observed['state'][400]=observed['state'][401]=1
         observed['options'][0]['features'][55]=1
-        for i in range(2):
+        for i in range(3):
             option=copy.deepcopy(observed['options'][1]);option['id']='extra'+str(i)
             option['features'][0]=i+1.;observed['options'].append(option)
+        for option in observed['options']:option['inputId']=option['id']
+        observed['options'][1]['inputId']=observed['options'][0]['inputId']
         probs,value,_=model.evaluate(observed)
         sample=dict(row(model),frame=observed,index=0,logProbability=math.log(float(probs[0])),value=value)
         advantage=np.array([0.7]);target=np.array([value+1])

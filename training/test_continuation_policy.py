@@ -8,7 +8,7 @@ class ContinuationTests(unittest.TestCase):
         state=[0.0]*432;state[400]=state[401]=int(running)
         options=[]
         for i in range(count):
-            f=[0.0]*256;f[55]=int(i==0);options.append({"features":f})
+            f=[0.0]*256;f[55]=int(i==0);options.append({"features":f,"inputId":str(i)})
         return {"state":state,"options":options}
 
     def test_neutral_continue_mass_is_independent_of_switch_multiplicity(self):
@@ -28,3 +28,11 @@ class ContinuationTests(unittest.TestCase):
         original=np.array([0.,1.,2.,3.]);adjusted=scores(self.frame(4),original)
         p=np.exp(adjusted-adjusted.max());q=np.exp(original-original.max())
         np.testing.assert_allclose(p[1:]/p[1:].sum(),q[1:]/q[1:].sum())
+
+    def test_compatible_duration_variants_share_continue_mass(self):
+        frame=self.frame(6);frame['options'][1]['inputId']='0'
+        logits=scores(frame,np.zeros(6));p=np.exp(logits-logits.max());p/=p.sum()
+        np.testing.assert_allclose(p[:2],[0.25,0.25])
+        np.testing.assert_allclose(p[2:],[0.125]*4)
+        del frame['options'][2]['inputId']
+        with self.assertRaisesRegex(ValueError,'identities'):scores(frame,np.zeros(6))

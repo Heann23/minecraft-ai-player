@@ -53,8 +53,8 @@ class ActorCritic:
         p = self.params
         hidden = np.tanh(x @ p["actor_w"].T + p["actor_b"])
         logits = hidden @ p["actor_out"] + p["actor_bias"][0]
-        if self.selection == continuation_policy.SELECTION:
-            logits = continuation_policy.scores(frame, logits)
+        if self.selection in continuation_policy.SUPPORTED:
+            logits = continuation_policy.scores(frame, logits, self.selection)
         logits -= logits.max()
         probabilities = np.exp(logits)
         probabilities /= probabilities.sum()
@@ -189,7 +189,7 @@ class ActorCritic:
         hidden = len(state["params"]["actor_b"])
         model = cls(0, hidden)
         model.selection = state.get("selection", "flat")
-        if model.selection not in ("flat", continuation_policy.SELECTION):
+        if model.selection not in ("flat", *continuation_policy.SUPPORTED):
             raise ValueError("unsupported temporal selection law")
         for group in ("params", "first", "second"):
             if set(state[group]) != set(model.params):
