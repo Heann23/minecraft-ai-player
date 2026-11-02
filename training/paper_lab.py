@@ -277,6 +277,7 @@ def summarize_game_log(path: Path):
                     summary["lastTick"] = tick
                     opportunity = re.search(r" visibleRays=(-?\d+) candidates=(\d+) freshCandidates=(\d+) chosenTarget=(true|false)(?:\s|$)", line)
                     if opportunity:
+                        summary["candidateMetricScope"] = "Exact block material equals requested inventory item; not drop/recipe producer coverage"
                         summary["opportunitySamples"] = summary.get("opportunitySamples", 0) + 1
                         for name, present in (("visibleTargetFrames", int(opportunity[1]) > 0),
                                               ("targetCandidateFrames", int(opportunity[2]) > 0),
