@@ -435,6 +435,13 @@ final class AIBrain {
                     && (plan == null || plan.isFinished() || now >= learnedNextChoiceAt)) {
                 try {
                     var captured = learnedCandidates.capture(ai, activeLearned, (int) Math.min(2400, now - learnedStartedAt));
+                    var task = captured.frame().taskMemory();
+                    if (task != null && task.objective() != null) {
+                        ai.debug("GoalSample world=" + captured.frame().world() + " goal=" + task.objective().id()
+                                + " tick=" + captured.frame().serverTick() + " item=" + task.objective().goal().item()
+                                + " required=" + task.objective().goal().count() + " owned=" + task.owned()
+                                + " matched=" + task.worldMatches());
+                    }
                     var predicted = learnedPolicy.sample(captured.frame(), java.util.concurrent.ThreadLocalRandom.current());
                     var selected = captured.candidates().get(predicted.index());
                     if (activeLearned == null || !selected.inputId().equals(activeLearned.inputId()) || plan == null || plan.isFinished()) {

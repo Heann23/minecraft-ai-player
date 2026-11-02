@@ -11,6 +11,20 @@ from paper_lab import read_plan, validate_options, summarize_game_log, validate_
 
 
 class SeedPlanTests(unittest.TestCase):
+    def test_goal_samples_preserve_brief_achievement_after_inventory_loss_and_world_mismatch(self):
+        world = "00000000-0000-0000-0000-000000000001"
+        goal = "00000000-0000-0000-0000-000000000002"
+        prefix = "[AI:RLLearner] GoalSample world=" + world + " goal=" + goal
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "console.log"
+            path.write_text("\n".join(prefix + f" tick={tick} item=OAK_LOG required=1 owned={owned} matched={matched}"
+                for tick, owned, matched in ((10, 99, "false"), (20, 0, "true"), (40, 1, "true"), (70, 0, "true"))))
+            summary = summarize_game_log(path)["goalObservationSummaries"][0]
+            self.assertEqual(summary["maxOwned"], 1)
+            self.assertEqual(summary["firstObservedAchievedTick"], 40)
+            self.assertEqual(summary["maxObservationGapTicks"], 30)
+            self.assertEqual(summary["worldMismatchSamples"], 1)
+
     def test_objective_masking_is_explicit_and_does_not_change_reward_or_backend_settings(self):
         from paper_lab import objective_input_config
         config = "policy:\n  mask-objective-input: false\n  allow-training: true\n  mode: training\n"

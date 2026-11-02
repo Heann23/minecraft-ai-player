@@ -250,10 +250,32 @@ def summarize_game_log(path: Path):
     positions, health, food = [], [], []
     deaths = respawns = rejected = 0
     inventory = None
+    goal_samples = {}
+    unaggregated_goal_samples = 0
     if not path.is_file():
         return {"available": False, "allWorldAutonomyProven": False}
     with path.open(encoding="utf-8", errors="replace") as stream:
         for line in stream:
+            goal = re.search(r"\[AI:RLLearner\] GoalSample world=([0-9a-f-]{36}) goal=([0-9a-f-]{36}) tick=(\d+) item=([A-Z][A-Z0-9_]*) required=(\d+) owned=(\d+) matched=(true|false)(?:\s|$)", line)
+            if goal:
+                key = goal[1] + ":" + goal[2]
+                tick, required, owned = int(goal[3]), int(goal[5]), int(goal[6])
+                if key not in goal_samples and len(goal_samples) >= 32:
+                    unaggregated_goal_samples += 1
+                else:
+                    summary = goal_samples.setdefault(key, {"world": goal[1], "objectiveId": goal[2],
+                        "item": goal[4], "required": required, "samples": 0, "firstTick": tick,
+                        "lastTick": tick, "maxObservationGapTicks": 0, "maxOwned": 0,
+                        "firstObservedAchievedTick": None, "worldMismatchSamples": 0})
+                    summary["samples"] += 1
+                    summary["maxObservationGapTicks"] = max(summary["maxObservationGapTicks"], tick-summary["lastTick"])
+                    summary["lastTick"] = tick
+                    if goal[7] == "true":
+                        summary["maxOwned"] = max(summary["maxOwned"], owned)
+                        if owned >= required and summary["firstObservedAchievedTick"] is None:
+                            summary["firstObservedAchievedTick"] = tick
+                    else:
+                        summary["worldMismatchSamples"] += 1
             selected = re.search(r"Model [0-9a-f]{64} selected ([^\s]+)", line)
             if selected:
                 choices[selected[1].split(":", 1)[0]] += 1
@@ -276,6 +298,7 @@ def summarize_game_log(path: Path):
             "sampledPositions": positions, "sampledHealthCeilings": health, "sampledFood": food,
             "recordedDeaths": deaths, "recordedRespawns": respawns, "deferredRequests": rejected,
             "finalInventoryNbt": inventory, "allWorldAutonomyProven": False,
+            "goalObservationSummaries": list(goal_samples.values()), "unaggregatedGoalSamples": unaggregated_goal_samples,
             "limitations": "Periodic diagnostics are partial; input success is not task completion or proof of learned competence."}
 
 
