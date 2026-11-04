@@ -393,13 +393,20 @@ class ActorTests(unittest.TestCase):
             model.fit([old], epochs=1)
 
     def test_interleaved_environments_and_gaps_do_not_leak_advantages(self):
-        base = {"value": 0, "nextValue": 0, "elapsedTicks": 1, "terminated": False, "truncated": False}
+        base = {"value": 0, "nextValue": 0, "elapsedTicks": 1, "terminated": False, "truncated": False,
+                "frame": {"world": "first-world"}, "nextWorld": "first-world", "appliedTick": 10}
         rows = [{**base, "session": "a", "sequence": 0, "reward": 1},
                 {**base, "session": "b", "sequence": 0, "reward": 10},
-                {**base, "session": "a", "sequence": 1, "reward": 2, "terminated": True}]
+                {**base, "session": "a", "sequence": 1, "reward": 2, "appliedTick": 11, "terminated": True}]
         advantages, _ = generalized_advantages(rows, gamma_tick=1, gae_lambda=0.95)
         np.testing.assert_allclose(advantages, [2.9, 10, 2])
         rows[-1]["sequence"] = 2
+        advantages, _ = generalized_advantages(rows, gamma_tick=1, gae_lambda=0.95)
+        np.testing.assert_allclose(advantages, [1, 10, 2])
+        rows[-1]["sequence"], rows[-1]["appliedTick"] = 1, 15
+        advantages, _ = generalized_advantages(rows, gamma_tick=1, gae_lambda=0.95)
+        np.testing.assert_allclose(advantages, [1, 10, 2])
+        rows[-1]["appliedTick"], rows[-1]["frame"] = 11, {"world": "other-world"}
         advantages, _ = generalized_advantages(rows, gamma_tick=1, gae_lambda=0.95)
         np.testing.assert_allclose(advantages, [1, 10, 2])
 

@@ -309,6 +309,7 @@ class PaperTrainer:
                      "initialWeights": "random" if parent is None else "verified-initial-state" if parent.get("initializationOnly") else "verified-ppo-checkpoint", "parents": self.parents,
                      "resumeRecovery": None if parent is None else parent.get("recoveredCheckpoint"),
                      "gammaPerServerTick": 0.99997, "gaeLambda": 0.95,
+                     "advantageTrace": "same-session-sequence-world-and-tick/v1",
                      "ppoClip": 0.2, "epochsPerUpdate": 4, "trained": False, "evaluationComplete": False})
         self.persist_session(sync_catalog=False)  # Construction can be a staged, not-yet-active model load.
 

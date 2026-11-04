@@ -282,12 +282,15 @@ def generalized_advantages(rows: list[dict], gamma_tick: float = 0.99997, gae_la
         discount = gamma_tick ** ticks
         terminal = row["terminated"]
         next_value = 0 if terminal else row["nextValue"]
-        next_sequence, following_advantage = tails.get(row["session"], (-1, 0.0))
-        contiguous = next_sequence == row["sequence"] + 1
+        following, following_advantage = tails.get(row["session"], (None, 0.0))
+        contiguous = (following is not None
+                      and following["sequence"] == row["sequence"] + 1
+                      and following["appliedTick"] == row["appliedTick"] + ticks
+                      and row["frame"]["world"] == row["nextWorld"] == following["frame"]["world"])
         delta = row["reward"] + discount * next_value - row["value"]
         carry = delta + (discount * gae_lambda * following_advantage if contiguous and not terminal and not row.get("truncated", False) else 0)
         advantages[index] = carry
-        tails[row["session"]] = (row["sequence"], carry)
+        tails[row["session"]] = (row, carry)
     returns = advantages + np.asarray([row["value"] for row in rows])
     if not np.isfinite(advantages).all() or not np.isfinite(returns).all():
         raise ValueError("non-finite rollout returns")
