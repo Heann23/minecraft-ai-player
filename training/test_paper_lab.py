@@ -341,6 +341,16 @@ class SeedPlanTests(unittest.TestCase):
                 validate_options(args)
             args.start_time = 18000
             self.assertIsNotNone(validate_options(args))
+            args.steps, args.rollout_size = 128, 64
+            self.assertIsNotNone(validate_options(args))
+            for invalid_size in (16, 48, 160, 4128):
+                args.rollout_size = invalid_size
+                with self.assertRaisesRegex(ValueError, "explicit rollout size"):
+                    validate_options(args)
+            args.rollout_size, args.inference_only = 64, True
+            with self.assertRaisesRegex(ValueError, "explicit rollout size"):
+                validate_options(args)
+            args.rollout_size, args.inference_only = None, False
             args.model = artifact
             with self.assertRaisesRegex(ValueError, "actors cannot resume"):
                 validate_options(args)

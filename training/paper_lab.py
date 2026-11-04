@@ -204,6 +204,12 @@ def validate_options(args, *, plan=None):
         raise ValueError("initial world time must be within one Minecraft day")
     if args.mode == "train" and (not 32 <= args.steps <= 10_000_000 or args.model is not None):
         raise ValueError("training requires a finite transition budget; deployment actors cannot resume PPO")
+    rollout_size = getattr(args, "rollout_size", None)
+    if rollout_size is not None and (
+            args.mode != "train" or getattr(args, "managed_backend", False)
+            or getattr(args, "inference_only", False) or getattr(args, "learning", None) == "off"
+            or not 32 <= rollout_size <= min(4096, args.steps) or rollout_size % 32):
+        raise ValueError("explicit rollout size requires external learning and a multiple of 32 within the transition budget")
     if args.mode == "evaluate" and (args.model is None or args.resume is not None):
         raise ValueError("evaluation requires a frozen actor and cannot resume/update an optimizer")
     if getattr(args, "upgrade_context", False) and (args.mode != "train" or args.resume is None):
@@ -571,6 +577,8 @@ def run(args):
     learning_enabled = args.mode == "train" and resolve_learning_mode(
             None if catalog_state is None else catalog_state["session"],
             learning=getattr(args, "learning", None), inference_only=args.inference_only)
+    if getattr(args, "rollout_size", None) is not None and not learning_enabled:
+        raise ValueError("explicit rollout size cannot be used with a learning-disabled snapshot")
     manifest = {"schema": "minecraft-paper-lab/v1", "sourceCommit": args.source_commit, "mode": args.mode,
                 "worldSeed": args.world_seed, "seedPlanSha256": sha256(output / "seed-plan.json"),
                 "paperJarSha256": sha256(server / "paper.jar"), "pluginSha256": sha256(plugin.parent / "MinecraftAI.jar"),
@@ -588,6 +596,9 @@ def run(args):
     manifest["stopOnObjective"] = getattr(args, "stop_on_objective", False)
     manifest["objectiveAdmission"] = None
     manifest["backendOwner"] = "plugin" if args.managed_backend else "external-lab"
+    rollout_size = getattr(args, "rollout_size", None) or 32
+    if args.mode == "train" and not args.managed_backend:
+        manifest["externalRolloutSize"] = rollout_size
     manifest["seedSelection"] = "random-per-world-run" if random_seed else "explicit-frozen-plan"
     manifest["playerPersistence"] = args.player_persistence
     if args.save_model_at_end:
@@ -635,7 +646,7 @@ def run(args):
             if args.mode == "train" and not args.managed_backend:
                 command = [sys.executable, "-u", str(source / "training/train_paper_ppo.py"), "--channel",
                     str(plugin / "training-session/channel"), "--output", str(output / "training"),
-                    "--max-transitions", str(args.steps), "--rollout-size", "32", "--seed", str(args.policy_seed),
+                    "--max-transitions", str(args.steps), "--rollout-size", str(rollout_size), "--seed", str(args.policy_seed),
                     "--stop-file", str(output / "trainer.stop.request")]
                 if catalog_state:
                     command.extend(["--restore-session", str(output / "catalog-source-session.json")])
@@ -846,6 +857,7 @@ def main():
     parser.add_argument("--port", type=int, required=True)
     parser.add_argument("--seconds", type=int, required=True)
     parser.add_argument("--steps", type=int, default=512)
+    parser.add_argument("--rollout-size", type=int, help="external learning batch size, a multiple of 32; default 32")
     parser.add_argument("--policy-seed", type=int, default=777)
     parser.add_argument("--inference-seed", type=int, help="development Java evaluation sampling stream; independent of world/training RNG, resets on brain creation")
     parser.add_argument("--objective-item", help="exact canonical item; server acknowledgement is required before play")
