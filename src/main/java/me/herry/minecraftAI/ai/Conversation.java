@@ -54,15 +54,18 @@ final class Conversation implements CommunicationHub.Participant {
 
     private String status() {
         Player player = ai.getPlayer();
+        if (!ai.acceptsLegacyGoals()) return ai.policyStatus() + ". 현재 상태: " + ai.getState() + ", 행동: " + ai.getCurrentActionName();
         return Phrases.status(ai.getState(), ai.getCurrentGoal(), (int) Math.ceil(player.getHealth()), player.getFoodLevel());
     }
 
     private String explain() {
         if (ai.getState() != AIState.RUNNING) return status();
+        if (!ai.acceptsLegacyGoals()) return "현재 행동은 " + ai.getCurrentActionName() + "예요. 관측을 받은 학습 정책의 출력으로 선택해요.";
         return DecisionExplainer.brief(ai.getDecision());
     }
 
     private String stageNote() {
+        if (!ai.acceptsLegacyGoals()) return "";
         Situation situation = ai.getLastSituation();
         return situation == null ? "" : "지금은 '" + situation.stage.label() + "' 단계예요.";
     }
@@ -111,6 +114,7 @@ final class Conversation implements CommunicationHub.Participant {
         Situation situation = ai.getLastSituation();
         String rejection = situation == null ? null : directive.rejection(situation);
         if (rejection != null) return rejection;
+        if (!ai.acceptsLegacyGoals()) return "그 요청을 학습 정책에 전달하는 기능은 아직 준비 중이에요. 기존 규칙 판단으로 바꾸어 실행하지는 않을게요.";
         ai.setDirective(directive);
         return directive.kind() == Directive.Kind.GO_HOME ? "알겠어요, 집으로 돌아갈게요."
                 : "알겠어요, " + Directive.subjectLabel(directive.subject()) + " 구해 올게요.";

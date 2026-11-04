@@ -62,6 +62,7 @@ public final class CraftingSystem {
     // 결과물별 제작 레시피. 처음 쓸 때 만든다.
     private @Nullable Map<Material, List<Recipe>> recipeIndex;
     private @Nullable Map<Material, List<RecipeOption>> cookingIndex;
+    private @Nullable Map<Material, List<RecipeOption>> ingredientOptionIndex;
     private final Map<Material, List<RecipeOption>> optionIndex = new EnumMap<>(Material.class);
     private long revision;
 
@@ -72,7 +73,20 @@ public final class CraftingSystem {
         revision++;
         recipeIndex = null;
         cookingIndex = null;
+        ingredientOptionIndex = null;
         optionIndex.clear();
+    }
+
+    /** Registered possibilities sharing an owned ingredient, not a preferred result or a feasible plan. */
+    public List<RecipeOption> recipeOptionsUsing(Map<Material, Integer> stock) {
+        warmUp();
+        Map<String, RecipeOption> choices = new java.util.TreeMap<>();
+        for (var entry : stock.entrySet()) {
+            if (entry.getValue() <= 0) continue;
+            for (var option : ingredientOptionIndex.getOrDefault(entry.getKey(), List.of()))
+                choices.putIfAbsent(option.id(), option);
+        }
+        return List.copyOf(choices.values());
     }
 
     /** Cached, immutable recipe knowledge; reading it never performs a craft or changes inventory. */
@@ -310,6 +324,22 @@ public final class CraftingSystem {
     // 첫 판단 때 서버가 멈칫하지 않도록, 플러그인이 켜질 때 미리 레시피를 읽어 둔다.
     public void warmUp() {
         if (recipeIndex == null) recipeIndex = buildIndex();
+        if (ingredientOptionIndex != null) return;
+        Map<Material, List<RecipeOption>> byIngredient = new EnumMap<>(Material.class);
+        for (Material result : recipeIndex.keySet()) {
+            for (var option : recipeOptions(result)) {
+                if (!option.countPlannable() || option.smelting()) continue;
+                Set<Material> inputs = EnumSet.noneOf(Material.class);
+                for (var group : option.ingredients()) for (String alternative : group.alternatives()) {
+                    Material material = Material.matchMaterial(alternative);
+                    if (material != null) inputs.add(material);
+                }
+                for (Material input : inputs)
+                    byIngredient.computeIfAbsent(input, ignored -> new ArrayList<>()).add(option);
+            }
+        }
+        byIngredient.replaceAll((material, options) -> List.copyOf(options));
+        ingredientOptionIndex = byIngredient;
     }
 
     // 같은 재료가 여러 칸에 들어가는 경우 하나로 합쳐서 필요한 개수를 센다.

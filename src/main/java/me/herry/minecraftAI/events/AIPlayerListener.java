@@ -4,8 +4,10 @@ import me.herry.minecraftAI.ai.AIController;
 import me.herry.minecraftAI.ai.AIDebugger;
 import me.herry.minecraftAI.ai.AIPlayer;
 import me.herry.minecraftAI.ai.observation.RiskCapture;
+import me.herry.minecraftAI.ai.util.Positions;
 import me.herry.minecraftAI.commands.AICommand;
 import me.herry.minecraftAI.view.InventoryViews;
+import org.bukkit.Bukkit;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.Projectile;
@@ -16,8 +18,10 @@ import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
+import org.bukkit.event.block.BlockDropItemEvent;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.entity.EntityDamageEvent;
+import org.bukkit.event.entity.EntityPickupItemEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
 import io.papermc.paper.event.player.AsyncChatEvent;
 import io.papermc.paper.event.server.ServerResourcesReloadedEvent;
@@ -47,6 +51,10 @@ public class AIPlayerListener implements Listener {
         if (ai == null) return;
 
         RiskCapture.record(ai, event);
+        if (ai.isDebugEnabled()) {
+            ai.debug("DamageEvent world=" + ai.getWorldId() + " tick=" + Integer.toUnsignedLong(Bukkit.getCurrentTick())
+                    + " cause=" + event.getCause().name() + " finalDamage=" + event.getFinalDamage());
+        }
         // Environmental damage is observed too, but keeps its own meaning instead of becoming an attack.
         if (!(event instanceof EntityDamageByEntityEvent attack)) return;
 
@@ -58,9 +66,55 @@ public class AIPlayerListener implements Listener {
         ai.onAttacked(attacker);
     }
 
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onBlockDrops(BlockDropItemEvent event) {
+        AIPlayer ai = controller.getByEntity(event.getPlayer());
+        if (ai == null || !ai.isDebugEnabled()) return;
+        var block = event.getBlock();
+        var source = Positions.of(block).encode();
+        for (var item : event.getItems()) {
+            var stack = item.getItemStack();
+            ai.debug("BlockDropEvent world=" + block.getWorld().getUID() + " tick=" + Bukkit.getCurrentTick()
+                    + " source=" + source + " block=" + event.getBlockState().getType().name()
+                    + " entity=" + item.getUniqueId() + " item=" + stack.getType().name()
+                    + " count=" + stack.getAmount() + " cancelled=" + event.isCancelled());
+        }
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onItemPickup(EntityPickupItemEvent event) {
+        AIPlayer ai = controller.getByEntity(event.getEntity());
+        if (ai == null || !ai.isDebugEnabled()) return;
+        var item = event.getItem();
+        var stack = item.getItemStack();
+        // This event precedes the inventory transfer. Actual ownership is sampled separately.
+        ai.debug("ItemPickupEvent world=" + item.getWorld().getUID() + " tick=" + Bukkit.getCurrentTick()
+                + " entity=" + item.getUniqueId() + " item=" + stack.getType().name()
+                + " stackCount=" + stack.getAmount() + " remaining=" + event.getRemaining()
+                + " cancelled=" + event.isCancelled());
+    }
+
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onDeath(PlayerDeathEvent event) {
         controller.handleDeath(event.getEntity());
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onDragonDefeated(org.bukkit.event.entity.EntityDeathEvent event) {
+        if (!(event.getEntity() instanceof org.bukkit.entity.EnderDragon)) return;
+        Player killer = event.getEntity().getKiller();
+        if (killer == null) return;
+        AIPlayer ai = controller.getByEntity(killer);
+        if (ai != null) ai.recordLearningObjective(50);
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onAdvancementCompleted(org.bukkit.event.player.PlayerAdvancementDoneEvent event) {
+        AIPlayer ai = controller.getByEntity(event.getPlayer());
+        if (ai == null) return;
+        var advancement = event.getAdvancement();
+        ai.recordLearningAdvancement(advancement.getKey().toString(),
+                event.getPlayer().getAdvancementProgress(advancement).isDone(), advancement.getDisplay() != null);
     }
 
     // 가짜 플레이어는 접속을 끊으라는 패킷을 받을 클라이언트가 없어서 킥을 당해도 서버에 그대로 남는다.

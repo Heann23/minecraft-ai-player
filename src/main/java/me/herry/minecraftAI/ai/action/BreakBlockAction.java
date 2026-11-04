@@ -65,6 +65,17 @@ public final class BreakBlockAction extends AbstractAction implements PrimitiveA
     // 0 이상이면 캔 자리로 모래나 자갈이 떨어지기를 기다리는 중이다.
     private int settleTicks = -1;
     private int refills;
+    private boolean executionEndLogged;
+
+    /** Cached execution facts only. Reading this does not inspect the world or advance mining. */
+    public record MiningProgress(String target, String material, String current, String currentMaterial,
+                                 float progress, int aimTicks, int actionTicks) {}
+
+    public MiningProgress miningProgress() {
+        return new MiningProgress(target.encode(), expected == null ? "UNKNOWN" : expected.name(),
+                current == null ? "UNKNOWN" : current.encode(), currentType == null ? "UNKNOWN" : currentType.name(),
+                progress, aimTicks, getElapsed());
+    }
 
     public BreakBlockAction(BlockPoint target) {
         this(target, false);
@@ -121,6 +132,7 @@ public final class BreakBlockAction extends AbstractAction implements PrimitiveA
 
     @Override
     protected void onStart(AIPlayer ai) {
+        if (exactTarget) ai.debug("MiningExecution start target=" + target.encode());
         Player player = ai.getPlayer();
         world = player.getWorld();
         if (!Positions.isLoaded(world, target)) {
@@ -218,6 +230,7 @@ public final class BreakBlockAction extends AbstractAction implements PrimitiveA
             fail("cannot break");
             return;
         }
+        if (exactTarget && progress == 0) ai.debug("MiningExecution progress-start target=" + target.encode() + " material=" + currentType.name());
         progress += speed;
         if (getElapsed() % SWING_INTERVAL == 0) player.swingMainHand();
         showCrack(player, center, Math.min(progress, 1.0F));
@@ -242,6 +255,12 @@ public final class BreakBlockAction extends AbstractAction implements PrimitiveA
 
     @Override
     protected void onEnd(AIPlayer ai) {
+        if (exactTarget && !executionEndLogged) {
+            executionEndLogged = true;
+            ai.debug("MiningExecution end target=" + target.encode() + " status=" + getStatus().name()
+                    + " cancelled=" + getFailReason().equals("cancelled") + " progress=" + progress
+                    + " actionTicks=" + getElapsed());
+        }
         ai.getBody().inputJump(false);
         if (exactTarget) ai.getBody().inputSneak(false);
         if (crackShown && world != null && current != null) showCrack(ai.getPlayer(), Positions.center(world, current), 0.0F);

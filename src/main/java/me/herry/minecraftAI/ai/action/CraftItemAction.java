@@ -89,8 +89,8 @@ public final class CraftItemAction extends AbstractAction implements PrimitiveAc
         player.getWorld().playSound(player.getLocation(), Sound.ENTITY_ITEM_PICKUP, 0.4F, 1.2F);
         ai.debug("Crafted " + step.result() + " x" + step.recipe().getResult().getAmount() * step.times());
         if (++stepIndex >= steps.size()) {
-            // 갑옷을 만들었으면 바로 입는다. 입고 있던 것보다 좋으면 바꿔 입는다.
-            ai.getInventory().wearBestArmor();
+            // Teacher keeps its old convenience; learned mode chooses an explicit equipment operation separately.
+            if (!ai.getConfig().learnedControl) ai.getInventory().wearBestArmor();
             succeed();
         }
     }

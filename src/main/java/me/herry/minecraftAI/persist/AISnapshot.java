@@ -15,6 +15,7 @@ public final class AISnapshot {
     public static final int VERSION = 1;
 
     public String name = "";
+    public @Nullable UUID executionId;
     public @Nullable String skinValue;
     public @Nullable String skinSignature;
 
