@@ -376,7 +376,7 @@ def summarize_game_log(path: Path):
             respawns += "[AI:RLLearner] Respawned" in line
             rejected += "PPO request deferred" in line
             if "RLLearner has the following entity data: [" in line:
-                inventory = line.split("following entity data: ", 1)[1].strip()
+                inventory = re.sub(r"\x1b\[[0-9;]*m", "", line.split("following entity data: ", 1)[1]).strip()
     damage_total = sum(damage_amounts.values())
     damage_events = None if not damage_counts else {
         "observedEvents": sum(damage_counts.values()), "countsByCause": dict(damage_counts),
@@ -866,7 +866,9 @@ def run(args):
                 manifest["managedRuntimeSessions"] = sessions
                 manifest["managedBackendReady"] = managed_ready
             write_json(output / "result.json", manifest)
-            write_json(output / "observed-gameplay.json", summarize_game_log(server / "logs/latest.log"))
+            # Paper rotates latest.log at midnight. The captured console covers the whole lab round.
+            log.flush()
+            write_json(output / "observed-gameplay.json", summarize_game_log(output / "server-console.log"))
     print(json.dumps(manifest, ensure_ascii=False), flush=True)
 
 
