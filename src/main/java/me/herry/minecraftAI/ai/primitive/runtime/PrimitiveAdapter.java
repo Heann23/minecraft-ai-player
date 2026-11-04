@@ -62,7 +62,7 @@ import java.util.TreeMap;
 public final class PrimitiveAdapter {
     public static final int MAX_CANDIDATES = 32;
     private static final double LOCAL_RANGE = 32.0;
-    private static final double REACH = 4.9;
+    public static final double BLOCK_REACH = 4.9;
     private static final BlockFace[] FACES = {
             BlockFace.DOWN, BlockFace.UP, BlockFace.NORTH, BlockFace.SOUTH, BlockFace.EAST, BlockFace.WEST
     };
@@ -299,7 +299,7 @@ public final class PrimitiveAdapter {
     }
 
     private static String checkMining(AIPlayer ai, PrimitiveCommand.BreakBlock mine) {
-        String reason = checkBlock(ai, mine.target(), REACH);
+        String reason = checkBlock(ai, mine.target(), BLOCK_REACH);
         if (!reason.isEmpty()) return reason;
         reason = checkTool(ai, mine.tool());
         if (!reason.isEmpty()) return reason;
@@ -345,7 +345,7 @@ public final class PrimitiveAdapter {
     private static String checkPlacement(AIPlayer ai, PrimitiveCommand.PlaceBlock place) {
         Material material = material(place.material());
         if (material == null) return "unknown material";
-        String reason = checkBlock(ai, place.target(), REACH);
+        String reason = checkBlock(ai, place.target(), BLOCK_REACH);
         return reason.isEmpty() ? ExactPlaceBlockAction.unavailableReason(ai, place.target(), material) : reason;
     }
 

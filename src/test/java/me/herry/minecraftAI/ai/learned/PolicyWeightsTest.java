@@ -12,6 +12,18 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.*;
 
 class PolicyWeightsTest {
+    @Test void offAxisSightUsesTheSameBoundedWindowAndKeepsLocalCoverage() {
+        var feet = new me.herry.minecraftAI.ai.util.BlockPoint(0, 64, 0);
+        var crosshair = feet.offset(0, 1, 4);
+        var offAxis = feet.offset(2, 1, 3);
+        var local = PolicyCandidates.nearbyTargets(feet).getFirst();
+        var targets = PolicyCandidates.miningObservationTargets(feet, crosshair, 0,
+                List.of(offAxis, local, offAxis, crosshair));
+        assertEquals(24, targets.size());
+        assertEquals(List.of(crosshair, local, offAxis), targets.subList(0, 3));
+        assertEquals(1, PolicyCandidates.nextMiningObservationCursor(feet, 0, targets.subList(0, 3)));
+    }
+
     @Test void partialMiningInspectionResumesWithoutSkippingUnprocessedCells() {
         var feet=new me.herry.minecraftAI.ai.util.BlockPoint(0,64,0);
         int cursor=0;var covered=new java.util.HashSet<me.herry.minecraftAI.ai.util.BlockPoint>();

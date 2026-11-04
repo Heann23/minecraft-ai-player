@@ -149,7 +149,7 @@ public final class PolicyCandidates {
                 case LOOK -> look(ai, found);
                 case JUMP -> add(ai, found, "jump", new PrimitiveCommand.Jump(), null, null, 0, 0, 0, "", true);
                 case EQUIPMENT -> equipment(ai, found);
-                case MINE -> mining(ai, state.inventory(), found);
+                case MINE -> mining(ai, state.inventory(), observed.sight(), found);
                 case CONSUME -> consumables(ai, state.inventory(), found);
                 case PLACE -> placement(ai, state.inventory(), found);
                 case ATTACK -> attacks(ai, found);
@@ -199,7 +199,7 @@ public final class PolicyCandidates {
     }
 
     private void mining(AIPlayer ai, List<me.herry.minecraftAI.ai.primitive.control.PrimitiveSnapshot.ItemSlot> inventory,
-                        Map<String, Candidate> found) {
+                        PolicyFrame.SightObservation sight, Map<String, Candidate> found) {
         var p = ai.getPlayer();
         var feet = ai.getPosition();
         boolean rayLoaded = true;
@@ -208,7 +208,8 @@ public final class PolicyCandidates {
         var ray = rayLoaded ? p.getTargetBlockExact(4) : null;
         // Keep the actual crosshair, then rotate geometric observation coverage. A static nearest
         // prefix otherwise never inspects many reachable cells while standing at the same location.
-        var targets = miningObservationTargets(feet, ray == null ? null : Positions.of(ray), miningObservationCursor);
+        var targets = miningObservationTargets(feet, ray == null ? null : Positions.of(ray), miningObservationCursor,
+                reachableSightTargets(sight));
         int previousCursor = miningObservationCursor;
         // Inspect only local visible cells. Unloaded/hidden cells never become material observations.
         var inspected = PrimitiveAdapter.inspect(ai, targets);
@@ -394,12 +395,36 @@ public final class PolicyCandidates {
     }
 
     static List<BlockPoint> miningObservationTargets(BlockPoint feet, BlockPoint crosshair, int cursor) {
+        return miningObservationTargets(feet, crosshair, cursor, List.of());
+    }
+
+    static List<BlockPoint> miningObservationTargets(BlockPoint feet, BlockPoint crosshair, int cursor,
+                                                     List<BlockPoint> sightTargets) {
         var nearby = nearbyTargets(feet);
         var targets = new LinkedHashSet<BlockPoint>();
         if (crosshair != null) targets.add(crosshair);
-        for (int offset = 0; offset < nearby.size() && targets.size() < 24; offset++)
+        // Give off-axis observations outside the local volume a slot without starving the rotating local prefix.
+        var outerSight = sightTargets.stream().filter(point -> !nearby.contains(point)).distinct().iterator();
+        for (int offset = 0; offset < nearby.size() && targets.size() < 24; offset++) {
             targets.add(nearby.get(Math.floorMod(cursor + offset, nearby.size())));
+            if (targets.size() < 24 && outerSight.hasNext()) targets.add(outerSight.next());
+        }
         return List.copyOf(targets);
+    }
+
+    private static List<BlockPoint> reachableSightTargets(PolicyFrame.SightObservation sight) {
+        if (sight == null) return List.of();
+        List<BlockPoint> result = new ArrayList<>();
+        for (var ray : sight.rays()) {
+            var block = ray.block();
+            if (block == null) continue;
+            double dx = block.x() + 0.5 - sight.eyeX();
+            double dy = block.y() + 0.5 - sight.eyeY();
+            double dz = block.z() + 0.5 - sight.eyeZ();
+            if (dx * dx + dy * dy + dz * dz <= PrimitiveAdapter.BLOCK_REACH * PrimitiveAdapter.BLOCK_REACH)
+                result.add(new BlockPoint(block.x(), block.y(), block.z()));
+        }
+        return result;
     }
 
     static int nextMiningObservationCursor(BlockPoint feet, int cursor, List<BlockPoint> inspected) {
