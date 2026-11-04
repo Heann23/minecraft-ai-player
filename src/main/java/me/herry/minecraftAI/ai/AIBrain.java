@@ -477,7 +477,8 @@ final class AIBrain {
                                 + " tick=" + captured.frame().serverTick() + " item=" + task.objective().goal().item()
                                 + " required=" + task.objective().goal().count() + " owned=" + task.owned()
                                 + " matched=" + task.worldMatches() + " visibleRays=" + visibleRays
-                                + " candidates=" + candidates + " freshCandidates=" + freshCandidates + " chosenTarget=" + chosenTarget);
+                                + " candidates=" + candidates + " freshCandidates=" + freshCandidates + " chosenTarget=" + chosenTarget
+                                + " feet=" + ai.getPosition().encode());
                     }
                     if (activeLearned == null || !selected.inputId().equals(activeLearned.inputId()) || plan == null || plan.isFinished()) {
                         cancelLearnedForReplacement(ai, selected.id());

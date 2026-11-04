@@ -8,6 +8,7 @@ import argparse
 from collections import Counter
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import queue
@@ -262,8 +263,10 @@ def summarize_game_log(path: Path):
     mining_executions = Counter()
     positions, health, food = [], [], []
     deaths = respawns = rejected = 0
+    damage_counts, damage_amounts = Counter(), Counter()
     inventory = None
     goal_samples = {}
+    goal_footprints = {}
     unaggregated_goal_samples = 0
     first_policy_inputs = {}
     unaggregated_policy_inputs = 0
@@ -271,6 +274,13 @@ def summarize_game_log(path: Path):
         return {"available": False, "allWorldAutonomyProven": False}
     with path.open(encoding="utf-8", errors="replace") as stream:
         for line in stream:
+            damage = re.search(r"\[AI:RLLearner\] DamageEvent world=[0-9a-f-]{36} tick=\d+ cause=([A-Z_]+) "
+                               r"finalDamage=(\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)(?:\s|$)", line)
+            if damage:
+                amount = float(damage[2])
+                if math.isfinite(amount) and amount >= 0:
+                    damage_counts[damage[1]] += 1
+                    damage_amounts[damage[1]] += amount
             fingerprint = re.search(r"\[AI:RLLearner\] PolicyInputFirst goal=([0-9a-f-]{36}) tick=(\d+) state=([0-9a-f]{64}) outsideGoal=([0-9a-f]{64}) candidates=([0-9a-f]{64}) count=(\d+) model=([0-9a-f]{64}) index=(\d+) logProbability=([0-9.eE+-]+)(?:\s|$)", line)
             if fingerprint:
                 if fingerprint[1] not in first_policy_inputs and len(first_policy_inputs) >= 32:
@@ -315,6 +325,17 @@ def summarize_game_log(path: Path):
                             summary["firstObservedAchievedTick"] = tick
                     else:
                         summary["worldMismatchSamples"] += 1
+                    feet = re.search(r" feet=(-?\d+,-?\d+,-?\d+)(?:\s|$)", line)
+                    if feet and goal[7] == "true":
+                        cell = feet[1]
+                        previous_tick, previous_cell, first_tick = goal_footprints.get(key, (tick, cell, tick))
+                        if previous_cell != cell or not 0 <= tick - previous_tick <= 40:
+                            first_tick = tick
+                        goal_footprints[key] = (tick, cell, first_tick)
+                        summary["positionSamples"] = summary.get("positionSamples", 0) + 1
+                        summary["maxSampledSameCellTicks"] = max(summary.get("maxSampledSameCellTicks", 0), tick - first_tick)
+                    else:
+                        goal_footprints.pop(key, None)
             selected = re.search(r"Model [0-9a-f]{64} selected ([^\s]+)", line)
             if selected:
                 choices[selected[1].split(":", 1)[0]] += 1
@@ -356,12 +377,17 @@ def summarize_game_log(path: Path):
             rejected += "PPO request deferred" in line
             if "RLLearner has the following entity data: [" in line:
                 inventory = line.split("following entity data: ", 1)[1].strip()
+    damage_total = sum(damage_amounts.values())
+    damage_events = None if not damage_counts else {
+        "observedEvents": sum(damage_counts.values()), "countsByCause": dict(damage_counts),
+        "sumEventFinalDamage": damage_total if math.isfinite(damage_total) else None,
+        "scope": "Recorded non-cancelled damage events while debugging. Event damage is not measured health loss."}
     return {"available": True, "modelChoiceCounts": dict(choices), "inputOutcomeCounts": dict(endings),
             "inputCancellationCounts": dict(cancellations), "miningCancellationProgress": list(mining_progress.values()),
             "miningExecutionEvents": dict(mining_executions),
             "miningCancellationsWithoutProgressTrace": max(0, cancellations["BreakBlock"] - sum(x["samples"] for x in mining_progress.values())),
             "sampledPositions": positions, "sampledHealthCeilings": health, "sampledFood": food,
-            "recordedDeaths": deaths, "recordedRespawns": respawns, "deferredRequests": rejected,
+            "recordedDeaths": deaths, "recordedRespawns": respawns, "deferredRequests": rejected, "damageEventSummary": damage_events,
             "finalInventoryNbt": inventory, "allWorldAutonomyProven": False,
             "goalObservationSummaries": list(goal_samples.values()), "unaggregatedGoalSamples": unaggregated_goal_samples,
             "firstNativePolicyInputs": list(first_policy_inputs.values()), "unaggregatedFirstPolicyInputs": unaggregated_policy_inputs,

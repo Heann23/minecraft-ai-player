@@ -11,6 +11,26 @@ from paper_lab import read_plan, validate_options, summarize_game_log, validate_
 
 
 class SeedPlanTests(unittest.TestCase):
+    def test_damage_events_and_sampled_residence_do_not_invent_missing_evidence(self):
+        world = "12345678-1234-1234-1234-123456789abc"
+        goal = "22345678-1234-1234-1234-123456789abc"
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "console.log"
+            prefix = "[AI:RLLearner] "
+            samples = [f"{prefix}GoalSample world={world} goal={goal} tick={tick} "
+                       "item=OAK_LOG required=1 owned=0 matched=true feet=-1,64,2"
+                       for tick in (10, 30, 110, 125)]
+            samples.append(f"{prefix}DamageEvent world={world} tick=28 cause=FALL finalDamage=2.25")
+            samples.append(f"{prefix}DamageEvent world={world} tick=40 cause=ENTITY_ATTACK finalDamage=3.5E0")
+            samples.append(f"{prefix}DamageEvent world={world} tick=55 cause=FALL finalDamage=1.0E309")
+            path.write_text("\n".join(samples))
+            result = summarize_game_log(path)
+            self.assertEqual(result["goalObservationSummaries"][0]["maxSampledSameCellTicks"], 20)
+            self.assertEqual(result["damageEventSummary"]["countsByCause"], {"FALL": 1, "ENTITY_ATTACK": 1})
+            self.assertEqual(result["damageEventSummary"]["sumEventFinalDamage"], 5.75)
+            path.write_text(prefix + "no telemetry")
+            self.assertIsNone(summarize_game_log(path)["damageEventSummary"])
+
     def test_exploration_conversion_preserves_all_prior_optimizer_fields(self):
         from paper_lab import resume_parent_directory,sha256
         with tempfile.TemporaryDirectory() as directory:

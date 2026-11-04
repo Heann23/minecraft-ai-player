@@ -51,6 +51,10 @@ public class AIPlayerListener implements Listener {
         if (ai == null) return;
 
         RiskCapture.record(ai, event);
+        if (ai.isDebugEnabled()) {
+            ai.debug("DamageEvent world=" + ai.getWorldId() + " tick=" + Integer.toUnsignedLong(Bukkit.getCurrentTick())
+                    + " cause=" + event.getCause().name() + " finalDamage=" + event.getFinalDamage());
+        }
         // Environmental damage is observed too, but keeps its own meaning instead of becoming an attack.
         if (!(event instanceof EntityDamageByEntityEvent attack)) return;
 
