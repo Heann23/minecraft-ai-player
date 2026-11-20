@@ -23,6 +23,7 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.HumanoidArm;
 import net.minecraft.world.entity.player.ChatVisiblity;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 import org.bukkit.Bukkit;
@@ -171,6 +172,20 @@ public final class FakePlayerBody implements AIBody {
         ItemStack stack = handle.getItemInHand(InteractionHand.MAIN_HAND);
         if (stack.isEmpty()) return false;
         return handle.gameMode.useItem(handle, handle.level(), stack, InteractionHand.MAIN_HAND).consumesAction();
+    }
+
+    @Override
+    public boolean canShootBow() {
+        if (!isUsable()) return false;
+        ItemStack bow = handle.getMainHandItem();
+        return bow.is(Items.BOW) && !handle.getProjectile(bow).isEmpty();
+    }
+
+    @Override
+    public boolean releaseBow() {
+        if (!canShootBow() || !handle.isUsingItem() || handle.getUsedItemHand() != InteractionHand.MAIN_HAND) return false;
+        handle.releaseUsingItem();
+        return true;
     }
 
     @Override

@@ -19,6 +19,7 @@ import me.herry.minecraftAI.ai.action.LookAtAction;
 import me.herry.minecraftAI.ai.action.MoveToAction;
 import me.herry.minecraftAI.ai.action.PickupItemAction;
 import me.herry.minecraftAI.ai.action.SelectHotbarSlotAction;
+import me.herry.minecraftAI.ai.action.ShootBowAction;
 import me.herry.minecraftAI.ai.action.SlotEquipAction;
 import me.herry.minecraftAI.ai.action.SneakAction;
 import me.herry.minecraftAI.ai.action.SwimAction;
@@ -252,6 +253,7 @@ public final class PrimitiveAdapter {
             case PrimitiveCommand.EnterEndPortal enter -> checkPortalEntry(ai, enter.world(), enter.portal(), Material.END_PORTAL);
             case PrimitiveCommand.ThrowEnderEye eye -> checkHeldEye(ai, eye.world());
             case PrimitiveCommand.SocketEnderEye eye -> checkEyeSocket(ai, eye);
+            case PrimitiveCommand.ShootBow shot -> ShootBowAction.check(ai, shot);
             case PrimitiveCommand.Attack attack -> checkAttack(ai, attack);
             case PrimitiveCommand.Pickup pickup -> checkPickup(ai, pickup.radius());
             case PrimitiveCommand.Equip equip -> checkTool(ai, equip.tool());
@@ -290,6 +292,7 @@ public final class PrimitiveAdapter {
             case PrimitiveCommand.EnterEndPortal enter -> new EnterPortalAction(enter.portal(), Material.END_PORTAL);
             case PrimitiveCommand.ThrowEnderEye eye -> new EnderEyeAction(eye);
             case PrimitiveCommand.SocketEnderEye eye -> new EnderEyeAction(eye);
+            case PrimitiveCommand.ShootBow shot -> new ShootBowAction(shot);
             case PrimitiveCommand.Attack attack -> Bukkit.getEntity(attack.entityId()) instanceof EnderCrystal
                     ? new StrikeExactAction(ai.getWorldId(), attack.entityId())
                     : AttackEntityAction.exactTarget((LivingEntity) Bukkit.getEntity(attack.entityId()));

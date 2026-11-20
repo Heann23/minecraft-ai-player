@@ -39,6 +39,7 @@ public final class PolicyCandidates {
         }
         /** Reconsider within20 ticks; finite movement uses its hold, other executors keep their own timeout. */
         public int reconsiderAfterTicks() {
+            if (command instanceof PrimitiveCommand.ShootBow) return ShootBowAction.ACTION_TICKS;
             return Math.max(1, Math.min(20, commitmentTicks));
         }
         public Candidate committed(int ticks) {
@@ -174,7 +175,8 @@ public final class PolicyCandidates {
                 expanded.add(new Candidate(candidate.id(), candidate.command(), candidate.recipe(), candidate.consumable(),
                         new PolicyFrame.Option(candidate.id(), retained, candidate.encoded().blockEvidence()), candidate.commitmentTicks(), candidate.inputId(), candidate.equipment(), candidate.movement()));
                 expanded.addAll(compatibleReconsiderations(candidate));
-            } else if (candidate.equipment() != null) expanded.add(candidate.committed(5));
+            } else if (candidate.command() instanceof PrimitiveCommand.ShootBow) expanded.add(candidate.committed(ShootBowAction.ACTION_TICKS));
+            else if (candidate.equipment() != null) expanded.add(candidate.committed(5));
             else for (int ticks : new int[]{5, 20, 80, 600}) expanded.add(candidate.committed(ticks));
         }
         var candidates = selectFair(expanded, active == null ? "" : active.id());
@@ -290,11 +292,20 @@ public final class PolicyCandidates {
 
     private void attacks(AIPlayer ai, Map<String, Candidate> found, CandidateActionContext.Context actionContext) {
         var p = ai.getPlayer();
+        var origin = p.getLocation();
+        if (ai.getBody().canShootBow()) {
+            for (var crystal : ai.getPerception().getEndCrystals()) {
+                if (ai.getWorkBudget().isExhausted()) break;
+                var at = crystal.getLocation();
+                var shot = new PrimitiveCommand.ShootBow(ai.getWorldId(), crystal.getUniqueId());
+                add(ai, found, "shoot-bow:" + crystal.getUniqueId(), shot, null, null, at.getX() - origin.getX(),
+                        at.getY() - origin.getY(), at.getZ() - origin.getZ(), crystal.getType().name(), true, actionContext);
+            }
+        }
         var targets = new LinkedHashMap<UUID, org.bukkit.entity.Entity>();
         for (var entity : ai.getPerception().getEndCrystals()) targets.putIfAbsent(entity.getUniqueId(), entity);
         for (var entity : ai.getPerception().getHostiles()) targets.putIfAbsent(entity.getUniqueId(), entity);
         for (var entity : ai.getPerception().getAnimals()) targets.putIfAbsent(entity.getUniqueId(), entity);
-        var origin = p.getLocation();
         for (var target : targets.values()) {
             if (ai.getWorkBudget().isExhausted()) break;
             if (!StrikeExactAction.canReach(ai, target)) continue;
@@ -575,7 +586,8 @@ public final class PolicyCandidates {
         double[] features = new double[PolicyFrame.ACTION_SIZE];
         PrimitiveType type = recipe != null ? PrimitiveType.CRAFT_ITEM : consumable != null ? PrimitiveType.USE_ITEM : command.type();
         features[type.ordinal()] = 1;
-        features[24] = Math.clamp(dx / 16, -1, 1); features[25] = Math.clamp(dy / 16, -1, 1); features[26] = Math.clamp(dz / 16, -1, 1);
+        double range = command instanceof PrimitiveCommand.ShootBow ? ShootBowAction.RANGE : 16;
+        features[24] = Math.clamp(dx / range, -1, 1); features[25] = Math.clamp(dy / range, -1, 1); features[26] = Math.clamp(dz / range, -1, 1);
         features[32 + bucket(identity, 16)] = 1;
         String semantic = recipe != null ? recipe.result() : consumable != null ? consumable.consumption().remainderMaterial()
                 : command instanceof PrimitiveCommand.BreakBlock mine ? mine.tool().material()
@@ -584,6 +596,7 @@ public final class PolicyCandidates {
                 : command instanceof PrimitiveCommand.EnterNetherPortal ? "NETHER_PORTAL"
                 : command instanceof PrimitiveCommand.EnterEndPortal ? "END_PORTAL"
                 : command instanceof PrimitiveCommand.ThrowEnderEye || command instanceof PrimitiveCommand.SocketEnderEye ? "ENDER_EYE"
+                : command instanceof PrimitiveCommand.ShootBow ? "BOW"
                 : command instanceof PrimitiveCommand.Equip equip ? equip.tool().material() : "";
         if (!semantic.isBlank()) features[48 + bucket(semantic, 7)] = 1;
         if (consumable != null) {
@@ -650,7 +663,7 @@ public final class PolicyCandidates {
 
     /** Keep execution identity and observation age; finite movement/equipment retain their existing bound. */
     static List<Candidate> compatibleReconsiderations(Candidate active) {
-        if (active.movement() != null || active.equipment() != null) return List.of();
+        if (active.movement() != null || active.equipment() != null || active.command() instanceof PrimitiveCommand.ShootBow) return List.of();
         List<Candidate> result = new ArrayList<>();
         for (int ticks : new int[]{5, 20, 80, 600}) {
             var variant = active.committed(ticks);

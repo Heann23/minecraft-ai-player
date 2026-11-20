@@ -96,6 +96,14 @@ public sealed interface PrimitiveCommand {
         @Override public PrimitiveType type() { return PrimitiveType.ATTACK; }
     }
 
+    record ShootBow(UUID world, UUID entityId) implements PrimitiveCommand {
+        public ShootBow {
+            Objects.requireNonNull(world, "world");
+            Objects.requireNonNull(entityId, "entityId");
+        }
+        @Override public PrimitiveType type() { return PrimitiveType.USE_ITEM; }
+    }
+
     record Pickup(double radius) implements PrimitiveCommand {
         public Pickup { ContractValues.finiteRange(radius, 0.1, 16, "radius"); }
         @Override public PrimitiveType type() { return PrimitiveType.PICKUP_ITEM; }

@@ -42,6 +42,11 @@ public interface AIBody {
      */
     boolean useItem();
 
+    boolean canShootBow();
+
+    /** Releases an active main-hand bow through the normal server input path. */
+    boolean releaseBow();
+
     /**
      * 손에 든 아이템을 그 블록의 그 면에 대고 쓴다 (부싯돌과 부시로 불 붙이기 등). 진짜 플레이어가 블록을 우클릭한 것과 같다.
      * 서버는 이 경로에서 거리와 시야를 다시 확인하지 않으므로, 부르는 쪽이 손이 닿고 그 면이 보이는지 먼저 확인해야 한다.
