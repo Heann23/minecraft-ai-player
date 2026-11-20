@@ -11,6 +11,24 @@ from paper_lab import read_plan, validate_options, summarize_game_log, validate_
 
 
 class SeedPlanTests(unittest.TestCase):
+    def test_goal_craft_opportunity_is_separate_from_selection_and_ownership(self):
+        world = "12345678-1234-1234-1234-123456789abc"
+        goal = "22345678-1234-1234-1234-123456789abc"
+        prefix = f"[AI:RLLearner] GoalSample world={world} goal={goal} tick="
+        task = " item=CRAFTING_TABLE required=1 owned=0 matched=true"
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "console.log"
+            path.write_text("\n".join((prefix + "10" + task,
+                prefix + "15" + task + " craftCandidates=0 chosenCraft=false",
+                prefix + "20" + task + " craftCandidates=3 chosenCraft=false",
+                prefix + "25" + task + " craftCandidates=2 chosenCraft=true")))
+            [result] = summarize_game_log(path)["goalObservationSummaries"]
+            self.assertEqual(result["craftOpportunitySamples"], 3)
+            self.assertEqual(result["targetCraftCandidateFrames"], 2)
+            self.assertEqual(result["firstTargetCraftCandidateTick"], 20)
+            self.assertEqual(result["chosenTargetCraftFrames"], 1)
+            self.assertIsNone(result["firstObservedAchievedTick"])
+
     def test_block_drop_pickup_requires_same_world_item_and_entity(self):
         world = "12345678-1234-1234-1234-123456789abc"
         other_world = "22345678-1234-1234-1234-123456789abc"

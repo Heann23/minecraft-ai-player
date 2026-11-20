@@ -353,6 +353,14 @@ def summarize_game_log(path: Path):
                             summary.setdefault("firstObservedTargetTick", tick)
                         if int(opportunity[2]) > 0:
                             summary.setdefault("firstTargetCandidateTick", tick)
+                    craft = re.search(r" craftCandidates=(\d+) chosenCraft=(true|false)(?:\s|$)", line)
+                    if craft and goal[7] == "true":
+                        craft_available = int(craft[1]) > 0
+                        summary["craftOpportunitySamples"] = summary.get("craftOpportunitySamples", 0) + 1
+                        summary["targetCraftCandidateFrames"] = summary.get("targetCraftCandidateFrames", 0) + craft_available
+                        summary["chosenTargetCraftFrames"] = summary.get("chosenTargetCraftFrames", 0) + (craft[2] == "true")
+                        if craft_available:
+                            summary.setdefault("firstTargetCraftCandidateTick", tick)
                     if goal[7] == "true":
                         summary["maxOwned"] = max(summary["maxOwned"], owned)
                         if owned >= required and summary["firstObservedAchievedTick"] is None:

@@ -462,6 +462,8 @@ final class AIBrain {
                         // Native Java inference has no TrainingControl episode. Consume observed achievement
                         // without a learning credit, including a goal already held at the first observation.
                         ai.getPolicyTaskMemory().settleCompletion(task, task, false);
+                    }
+                    if (ai.isDebugEnabled() && task != null && task.objective() != null) {
                         String item = task.objective().goal().item();
                         var frame = captured.frame();
                         long visibleRays = frame.sight() == null ? -1 : frame.sight().rays().stream()
@@ -473,12 +475,16 @@ final class AIBrain {
                                 && option.blockEvidence().observedTick() == frame.serverTick()).count();
                         var chosenBlock = selected.encoded().blockEvidence();
                         boolean chosenTarget = selected.id().startsWith("mine:") && chosenBlock != null && item.equals(chosenBlock.material());
+                        long targetCraftCandidates = captured.candidates().stream()
+                                .filter(candidate -> candidate.recipe() != null && item.equals(candidate.recipe().result())).count();
+                        boolean chosenTargetCraft = selected.recipe() != null && item.equals(selected.recipe().result());
                         ai.debug("GoalSample world=" + captured.frame().world() + " goal=" + task.objective().id()
                                 + " tick=" + captured.frame().serverTick() + " item=" + task.objective().goal().item()
                                 + " required=" + task.objective().goal().count() + " owned=" + task.owned()
                                 + " matched=" + task.worldMatches() + " visibleRays=" + visibleRays
                                 + " candidates=" + candidates + " freshCandidates=" + freshCandidates + " chosenTarget=" + chosenTarget
-                                + " feet=" + ai.getPosition().encode());
+                                + " feet=" + ai.getPosition().encode()
+                                + " craftCandidates=" + targetCraftCandidates + " chosenCraft=" + chosenTargetCraft);
                     }
                     if (activeLearned == null || !selected.inputId().equals(activeLearned.inputId()) || plan == null || plan.isFinished()) {
                         cancelLearnedForReplacement(ai, selected.id());
