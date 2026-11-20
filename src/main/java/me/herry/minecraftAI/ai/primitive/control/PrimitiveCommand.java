@@ -69,6 +69,15 @@ public sealed interface PrimitiveCommand {
         @Override public PrimitiveType type() { return PrimitiveType.INTERACT_BLOCK; }
     }
 
+    record EnterEndPortal(UUID world, BlockPoint portal) implements PrimitiveCommand {
+        public EnterEndPortal {
+            Objects.requireNonNull(world, "world");
+            portal = ContractValues.block(portal);
+        }
+
+        @Override public PrimitiveType type() { return PrimitiveType.INTERACT_BLOCK; }
+    }
+
     record ThrowEnderEye(UUID world) implements PrimitiveCommand {
         public ThrowEnderEye { Objects.requireNonNull(world, "world"); }
         @Override public PrimitiveType type() { return PrimitiveType.USE_ITEM; }

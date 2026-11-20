@@ -100,7 +100,7 @@ public final class PrimitiveAdapter {
                 case SNEAK -> "Hold sneak for a bounded number of ticks and release it";
                 case SWIM -> "Use swimming inputs toward a local point in water";
                 case MOVE_INPUT -> "Hold selected player movement keys via the learned candidate lane";
-                case INTERACT_BLOCK -> "Use a chosen furnace slot or enter an active Nether portal";
+                case INTERACT_BLOCK -> "Use a chosen furnace slot or enter an active portal";
                 case INTERACT_ENTITY -> "Unavailable in control schema version 1";
             };
             String limitation = switch (type) {
@@ -246,7 +246,8 @@ public final class PrimitiveAdapter {
             case PrimitiveCommand.Eat ignored -> ai.getPlayer().getFoodLevel() >= 20 ? "not hungry"
                     : ai.getInventory().bestFoodSlot() < 0 ? "no safe food" : "";
             case PrimitiveCommand.IgnitePortal ignite -> IgniteAction.heldToolUnavailable(ai.getPlayer(), ignite.world(), ignite.floor());
-            case PrimitiveCommand.EnterNetherPortal enter -> checkPortalEntry(ai, enter);
+            case PrimitiveCommand.EnterNetherPortal enter -> checkPortalEntry(ai, enter.world(), enter.portal(), Material.NETHER_PORTAL);
+            case PrimitiveCommand.EnterEndPortal enter -> checkPortalEntry(ai, enter.world(), enter.portal(), Material.END_PORTAL);
             case PrimitiveCommand.ThrowEnderEye eye -> checkHeldEye(ai, eye.world());
             case PrimitiveCommand.SocketEnderEye eye -> checkEyeSocket(ai, eye);
             case PrimitiveCommand.Attack attack -> checkAttack(ai, attack);
@@ -284,6 +285,7 @@ public final class PrimitiveAdapter {
             case PrimitiveCommand.Eat ignored -> new EatFoodAction();
             case PrimitiveCommand.IgnitePortal ignite -> new IgniteAction(ignite.floor(), ignite.world());
             case PrimitiveCommand.EnterNetherPortal enter -> new EnterPortalAction(enter.portal());
+            case PrimitiveCommand.EnterEndPortal enter -> new EnterPortalAction(enter.portal(), Material.END_PORTAL);
             case PrimitiveCommand.ThrowEnderEye eye -> new EnderEyeAction(eye);
             case PrimitiveCommand.SocketEnderEye eye -> new EnderEyeAction(eye);
             case PrimitiveCommand.Attack attack -> AttackEntityAction.exactTarget((LivingEntity) Bukkit.getEntity(attack.entityId()));
@@ -374,15 +376,15 @@ public final class PrimitiveAdapter {
         return FurnaceSlotAction.unavailableReason(ai, transfer);
     }
 
-    private static String checkPortalEntry(AIPlayer ai, PrimitiveCommand.EnterNetherPortal enter) {
-        if (!ai.getWorldId().equals(enter.world())) return "portal world changed";
+    private static String checkPortalEntry(AIPlayer ai, java.util.UUID source, BlockPoint portal, Material portalMaterial) {
+        if (!ai.getWorldId().equals(source)) return "portal world changed";
         var world = ai.getPlayer().getWorld();
-        if (world.getEnvironment() != World.Environment.NORMAL && world.getEnvironment() != World.Environment.NETHER)
-            return "Nether travel is unavailable in this dimension";
-        var portal = enter.portal();
+        if (world.getEnvironment() != World.Environment.NORMAL
+                && !(world.getEnvironment() == World.Environment.NETHER && portalMaterial == Material.NETHER_PORTAL))
+            return "portal travel is unavailable in this dimension";
         var reason = checkBlock(ai, portal, BLOCK_REACH);
         if (!reason.isEmpty()) return reason;
-        if (Positions.block(world, portal).getType() != Material.NETHER_PORTAL) return "target portal is inactive";
+        if (Positions.block(world, portal).getType() != portalMaterial) return "target portal is inactive";
         return visibleBlock(ai.getPlayer(), portal) ? "" : "portal is blocked from view";
     }
 

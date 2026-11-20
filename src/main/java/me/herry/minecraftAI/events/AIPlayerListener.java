@@ -162,17 +162,20 @@ public class AIPlayerListener implements Listener {
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
-    public void onNetherPortal(PlayerPortalEvent event) {
-        if (event.getCause() != PlayerTeleportEvent.TeleportCause.NETHER_PORTAL || event.getTo() == null) return;
+    public void onPortal(PlayerPortalEvent event) {
+        boolean end = event.getCause() == PlayerTeleportEvent.TeleportCause.END_PORTAL;
+        if ((!end && event.getCause() != PlayerTeleportEvent.TeleportCause.NETHER_PORTAL) || event.getTo() == null) return;
         var from = event.getFrom().getWorld();
         var to = event.getTo().getWorld();
         if (from == null || to == null) return;
         var source = from.getEnvironment();
         var destination = to.getEnvironment();
-        if (!((source == org.bukkit.World.Environment.NORMAL && destination == org.bukkit.World.Environment.NETHER)
-                || (source == org.bukkit.World.Environment.NETHER && destination == org.bukkit.World.Environment.NORMAL))) return;
+        boolean matches = end ? source == org.bukkit.World.Environment.NORMAL && destination == org.bukkit.World.Environment.THE_END
+                : (source == org.bukkit.World.Environment.NORMAL && destination == org.bukkit.World.Environment.NETHER)
+                || (source == org.bukkit.World.Environment.NETHER && destination == org.bukkit.World.Environment.NORMAL);
+        if (!matches) return;
         AIPlayer ai = controller.getByEntity(event.getPlayer());
-        if (ai != null) ai.observeNetherPortalDeparture(from.getUID(), to.getUID());
+        if (ai != null) ai.observePortalDeparture(from.getUID(), to.getUID(), end);
     }
 
     // 관리자가 AI 를 우클릭하면 AI 의 인벤토리를 보여 준다. 손이 두 개라 이벤트가 두 번 오므로 주로 쓰는 손만 처리한다.

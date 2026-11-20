@@ -207,12 +207,14 @@ final class AIBrain {
         ai.getBody().clearInputs();
     }
 
-    void observeNetherPortalDeparture(java.util.UUID source, java.util.UUID destination) {
-        if (learnedLane && activeLearned != null && activeLearned.command() instanceof me.herry.minecraftAI.ai.primitive.control.PrimitiveCommand.EnterNetherPortal enter
-                && enter.world().equals(source) && plan != null && plan.current() != null
-                && plan.current().getStatus() == ActionStatus.RUNNING) {
-            portalDeparture = new PortalDeparture(source, destination, activeLearned.inputId(), ai.getTicks());
-        }
+    void observePortalDeparture(java.util.UUID source, java.util.UUID destination, boolean end) {
+        if (!learnedLane || activeLearned == null || plan == null || plan.current() == null
+                || plan.current().getStatus() != ActionStatus.RUNNING) return;
+        var command = activeLearned.command();
+        boolean matches = end
+                ? command instanceof me.herry.minecraftAI.ai.primitive.control.PrimitiveCommand.EnterEndPortal portal && portal.world().equals(source)
+                : command instanceof me.herry.minecraftAI.ai.primitive.control.PrimitiveCommand.EnterNetherPortal portal && portal.world().equals(source);
+        if (matches) portalDeparture = new PortalDeparture(source, destination, activeLearned.inputId(), ai.getTicks());
     }
 
     void observeWorldArrival(java.util.UUID source) {
@@ -221,7 +223,9 @@ final class AIBrain {
         if (departure == null || activeLearned == null || !departure.source().equals(source)
                 || !departure.destination().equals(ai.getWorldId()) || !departure.inputId().equals(activeLearned.inputId())
                 || ai.getTicks() - departure.observedTick() > 40) return;
-        ai.getPolicyTaskMemory().ended(ai.getWorldId(), ai.getTicks(), activeLearned.id(), "SUCCESS", "nether portal arrival");
+        String reason = activeLearned.command() instanceof me.herry.minecraftAI.ai.primitive.control.PrimitiveCommand.EnterEndPortal
+                ? "end portal arrival" : "nether portal arrival";
+        ai.getPolicyTaskMemory().ended(ai.getWorldId(), ai.getTicks(), activeLearned.id(), "SUCCESS", reason);
         ai.debug("Learned portal arrival: choice=" + activeLearned.id() + " from=" + source + " to=" + ai.getWorldId());
     }
 

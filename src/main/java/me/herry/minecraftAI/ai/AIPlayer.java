@@ -372,8 +372,8 @@ public final class AIPlayer {
         treeJob = null;
     }
 
-    public void observeNetherPortalDeparture(java.util.UUID source, java.util.UUID destination) {
-        if (state == AIState.RUNNING) brain.observeNetherPortalDeparture(source, destination);
+    public void observePortalDeparture(java.util.UUID source, java.util.UUID destination, boolean end) {
+        if (state == AIState.RUNNING) brain.observePortalDeparture(source, destination, end);
     }
 
     /**

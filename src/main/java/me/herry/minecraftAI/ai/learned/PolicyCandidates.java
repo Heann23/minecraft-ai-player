@@ -385,13 +385,22 @@ public final class PolicyCandidates {
         for (var target : targets) {
             if (ai.getWorkBudget().isExhausted()) break;
             inspected++;
-            if (target.y() < world.getMinHeight() || target.y() >= world.getMaxHeight() || !Positions.isLoaded(world, target)
-                    || Positions.block(world, target).getType() != Material.NETHER_PORTAL) continue;
-            var below = target.offset(0, -1, 0);
-            if (!target.equals(feet) && below.y() >= world.getMinHeight()
-                    && Positions.block(world, below).getType() == Material.NETHER_PORTAL) continue;
-            add(ai, found, "enter-nether-portal:" + target.encode(), new PrimitiveCommand.EnterNetherPortal(ai.getWorldId(), target),
-                    null, null, target.x() - feet.x(), target.y() - feet.y(), target.z() - feet.z(), "enter-nether-portal", true, actionContext);
+            if (target.y() < world.getMinHeight() || target.y() >= world.getMaxHeight() || !Positions.isLoaded(world, target)) continue;
+            var material = Positions.block(world, target).getType();
+            PrimitiveCommand command;
+            String kind;
+            if (material == Material.NETHER_PORTAL) {
+                var below = target.offset(0, -1, 0);
+                if (!target.equals(feet) && below.y() >= world.getMinHeight()
+                        && Positions.block(world, below).getType() == Material.NETHER_PORTAL) continue;
+                command = new PrimitiveCommand.EnterNetherPortal(ai.getWorldId(), target);
+                kind = "enter-nether-portal";
+            } else if (material == Material.END_PORTAL && world.getEnvironment() == org.bukkit.World.Environment.NORMAL) {
+                command = new PrimitiveCommand.EnterEndPortal(ai.getWorldId(), target);
+                kind = "enter-end-portal";
+            } else continue;
+            add(ai, found, kind + ":" + target.encode(), command, null, null,
+                    target.x() - feet.x(), target.y() - feet.y(), target.z() - feet.z(), kind, true, actionContext);
         }
         // The standing cell is prepended so a return portal remains discoverable immediately.
         portalObservationCursor = nextMiningObservationCursor(feet.offset(0, -1, 0), portalObservationCursor, targets.subList(0, inspected));
@@ -571,6 +580,7 @@ public final class PolicyCandidates {
                 : command instanceof PrimitiveCommand.FurnaceTransfer transfer ? transfer.material()
                 : command instanceof PrimitiveCommand.IgnitePortal ? "FLINT_AND_STEEL"
                 : command instanceof PrimitiveCommand.EnterNetherPortal ? "NETHER_PORTAL"
+                : command instanceof PrimitiveCommand.EnterEndPortal ? "END_PORTAL"
                 : command instanceof PrimitiveCommand.ThrowEnderEye || command instanceof PrimitiveCommand.SocketEnderEye ? "ENDER_EYE"
                 : command instanceof PrimitiveCommand.Equip equip ? equip.tool().material() : "";
         if (!semantic.isBlank()) features[48 + bucket(semantic, 7)] = 1;
