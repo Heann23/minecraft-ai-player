@@ -99,7 +99,8 @@ class SeedPlanTests(unittest.TestCase):
             old={'optimizer':{'params':{'w':[1]},'first':{},'second':{},'rng':{'state':1}},'rolloutSha256':'0'*64};original.write_text(json.dumps(old))
             converted=root/'converted/checkpoints/version-two/model.json';converted.parent.mkdir(parents=True)
             new=copy.deepcopy(old);new['optimizer']['interaction']='goal-action-bilinear/v1'
-            for group in ('params','first','second'):new['optimizer'][group]['goal_action_w']=[[0.]*256 for _ in range(24)]
+            from rl_actor import ACTION_SIZE
+            for group in ('params','first','second'):new['optimizer'][group]['goal_action_w']=[[0.]*ACTION_SIZE for _ in range(24)]
             converted.write_text(json.dumps(new))
             before={'checkpoint':str(original),'brainId':'brain','policyVersion':1,'gradientUpdates':4,'trainedEnvironmentSteps':32,'collectedEnvironmentSteps':32,'rng':{'state':1}}
             after=dict(before,checkpoint=str(converted),checkpointSha256=sha256(converted))

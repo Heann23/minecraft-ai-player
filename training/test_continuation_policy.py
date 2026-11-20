@@ -26,10 +26,11 @@ class ContinuationTests(unittest.TestCase):
         np.testing.assert_allclose(gradient,p*(np.log(p)+entropy))
 
     def frame(self, count, running=True):
-        state=[0.0]*432;state[400]=state[401]=int(running)
+        from rl_actor import ACTION_SIZE, STATE_SIZE
+        state=[0.0]*STATE_SIZE;state[400]=state[401]=int(running)
         options=[]
         for i in range(count):
-            f=[0.0]*256;f[55]=int(i==0);options.append({"features":f,"inputId":str(i)})
+            f=[0.0]*ACTION_SIZE;f[55]=int(i==0);options.append({"features":f,"inputId":str(i)})
         return {"state":state,"options":options}
 
     def test_neutral_continue_mass_is_independent_of_switch_multiplicity(self):

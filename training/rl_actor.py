@@ -6,8 +6,8 @@ import copy
 import numpy as np
 import continuation_policy
 
-CONTRACT = "minecraft-primitive-candidates/v7"
-STATE_SIZE, ACTION_SIZE, MAX_OPTIONS = 432, 256, 128
+CONTRACT = "minecraft-primitive-candidates/v8"
+STATE_SIZE, ACTION_SIZE, MAX_OPTIONS = 432, 288, 128
 INPUT_SIZE = STATE_SIZE + ACTION_SIZE
 
 
@@ -191,20 +191,40 @@ class ActorCritic:
 
     @classmethod
     def upgrade_legacy_context(cls, state: dict):
-        """Explicit legacy->v7 migration. New context has zero influence; no invented learning."""
-        old_size = {"minecraft-primitive-candidates/v1": 64, "minecraft-primitive-candidates/v2": 128,
-                    "minecraft-primitive-candidates/v3": 192, "minecraft-primitive-candidates/v4": 208, "minecraft-primitive-candidates/v5": 240,
-                    "minecraft-primitive-candidates/v6": 400}.get(state.get("contract"))
-        if state.get("schema") != "minecraft-ppo-optimizer/v1" or old_size is None:
-            raise ValueError("context upgrade requires a v1 through v6 optimizer checkpoint")
+        """Explicit legacy->v8 migration. New context/action features have zero influence; no invented learning."""
+        legacy = {
+            "minecraft-primitive-candidates/v1": (64, 256),
+            "minecraft-primitive-candidates/v2": (128, 256),
+            "minecraft-primitive-candidates/v3": (192, 256),
+            "minecraft-primitive-candidates/v4": (208, 256),
+            "minecraft-primitive-candidates/v5": (240, 256),
+            "minecraft-primitive-candidates/v6": (400, 256),
+            "minecraft-primitive-candidates/v7": (432, 256),
+        }.get(state.get("contract"))
+        if state.get("schema") != "minecraft-ppo-optimizer/v1" or legacy is None:
+            raise ValueError("context upgrade requires a v1 through v7 optimizer checkpoint")
+        old_state, old_action = legacy
         upgraded = copy.deepcopy(state)
         for group in ("params", "first", "second"):
-            for key, old_columns in (("actor_w", old_size + ACTION_SIZE), ("value_w", old_size)):
-                value = np.asarray(state[group][key], dtype=np.float64)
-                if value.ndim != 2 or value.shape[1] != old_columns:
-                    raise ValueError("invalid legacy context tensor")
-                zeros = np.zeros((value.shape[0], STATE_SIZE - old_size))
-                upgraded[group][key] = np.concatenate((value[:, :old_size], zeros, value[:, old_size:]), axis=1).tolist()
+            actor = np.asarray(state[group]["actor_w"], dtype=np.float64)
+            if actor.ndim != 2 or actor.shape[1] != old_state + old_action:
+                raise ValueError("invalid legacy context tensor")
+            state_zeros = np.zeros((actor.shape[0], STATE_SIZE - old_state))
+            action_zeros = np.zeros((actor.shape[0], ACTION_SIZE - old_action))
+            upgraded[group]["actor_w"] = np.concatenate(
+                (actor[:, :old_state], state_zeros, actor[:, old_state:], action_zeros), axis=1
+            ).tolist()
+            value = np.asarray(state[group]["value_w"], dtype=np.float64)
+            if value.ndim != 2 or value.shape[1] != old_state:
+                raise ValueError("invalid legacy context tensor")
+            value_zeros = np.zeros((value.shape[0], STATE_SIZE - old_state))
+            upgraded[group]["value_w"] = np.concatenate((value, value_zeros), axis=1).tolist()
+            if "goal_action_w" in state[group]:
+                cross = np.asarray(state[group]["goal_action_w"], dtype=np.float64)
+                if cross.ndim != 2 or cross.shape != (24, old_action):
+                    raise ValueError("invalid legacy goal interaction tensor")
+                cross_zeros = np.zeros((24, ACTION_SIZE - old_action))
+                upgraded[group]["goal_action_w"] = np.concatenate((cross, cross_zeros), axis=1).tolist()
         upgraded["contract"] = CONTRACT
         return cls.from_optimizer_state(upgraded)
 

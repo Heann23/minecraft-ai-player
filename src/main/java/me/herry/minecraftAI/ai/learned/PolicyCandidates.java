@@ -132,9 +132,12 @@ public final class PolicyCandidates {
         var observed = observe(ai, active, activeTicks);
         var state = observed.snapshot();
         var body = observed.features();
+        var taskView = ai.getPolicyTaskMemory().observe(ai.getWorldId(), observed.stock());
+        var actionContext = CandidateActionContext.capture(ai.getCrafting(), observed.stock(), taskView,
+                !ai.getConfig().maskObjectiveInput);
         Map<String, Candidate> found = new LinkedHashMap<>();
         // Waiting is always a legal input choice, without awarding it any hand-written priority.
-        add(ai, found, "wait:5", new PrimitiveCommand.Wait(5), null, null, 0, 0, 0, "", false);
+        add(ai, found, "wait:5", new PrimitiveCommand.Wait(5), null, null, 0, 0, 0, "", false, actionContext);
         if (active != null) found.putIfAbsent(active.id(), active);
         recipeOptions = recipesChecked = -1;
         recipeScanComplete = false;
@@ -145,16 +148,16 @@ public final class PolicyCandidates {
             int before = found.size();
             switch (source) {
                 case DIRECT_MOVE -> movementInputs(ai, found);
-                case TARGET_MOVE -> movementTargets(ai, found);
-                case LOOK -> look(ai, found);
-                case JUMP -> add(ai, found, "jump", new PrimitiveCommand.Jump(), null, null, 0, 0, 0, "", true);
-                case EQUIPMENT -> equipment(ai, found);
-                case MINE -> mining(ai, state.inventory(), observed.sight(), found);
-                case CONSUME -> consumables(ai, state.inventory(), found);
-                case PLACE -> placement(ai, state.inventory(), found);
-                case ATTACK -> attacks(ai, found);
-                case PICKUP -> add(ai, found, "pickup:4", new PrimitiveCommand.Pickup(4), null, null, 0, 0, 0, "", true);
-                case CRAFT -> crafting(ai, found);
+                case TARGET_MOVE -> movementTargets(ai, found, actionContext);
+                case LOOK -> look(ai, found, actionContext);
+                case JUMP -> add(ai, found, "jump", new PrimitiveCommand.Jump(), null, null, 0, 0, 0, "", true, actionContext);
+                case EQUIPMENT -> equipment(ai, found, actionContext);
+                case MINE -> mining(ai, state.inventory(), observed.sight(), found, actionContext);
+                case CONSUME -> consumables(ai, state.inventory(), found, actionContext);
+                case PLACE -> placement(ai, state.inventory(), found, actionContext);
+                case ATTACK -> attacks(ai, found, actionContext);
+                case PICKUP -> add(ai, found, "pickup:4", new PrimitiveCommand.Pickup(4), null, null, 0, 0, 0, "", true, actionContext);
+                case CRAFT -> crafting(ai, found, actionContext);
             }
             generated.put(source.name(), found.size() - before);
         });
@@ -175,31 +178,31 @@ public final class PolicyCandidates {
         return new Capture(new PolicyFrame(ai.getWorldId(), Integer.toUnsignedLong(Bukkit.getCurrentTick()), body,
                 candidates.stream().map(candidate -> new PolicyFrame.Option(candidate.id(), candidate.encoded().features(),
                         candidate.encoded().blockEvidence(), candidate.inputId())).toList(), false, evidence,
-                ai.getPolicyTaskMemory().observe(ai.getWorldId(), observed.stock()), observed.sight()), candidates, observed.body(), observed.stock());
+                taskView, observed.sight()), candidates, observed.body(), observed.stock());
     }
 
-    private void movementTargets(AIPlayer ai, Map<String, Candidate> found) {
+    private void movementTargets(AIPlayer ai, Map<String, Candidate> found, CandidateActionContext.Context actionContext) {
         for (var delta : movementOffsets(movementCursor)) {
             if (ai.getWorkBudget().isExhausted()) break;
             BlockPoint target = ai.getPosition().offset(delta.x(), delta.y(), delta.z());
             add(ai, found, "move:" + target.encode(), new PrimitiveCommand.MoveTo(target, 0.5), null, null,
-                    delta.x(), delta.y(), delta.z(), "", true);
+                    delta.x(), delta.y(), delta.z(), "", true, actionContext);
         }
         movementCursor = Math.floorMod(movementCursor + 1, MOVE_OFFSETS.size());
     }
 
-    private void look(AIPlayer ai, Map<String, Candidate> found) {
+    private void look(AIPlayer ai, Map<String, Candidate> found, CandidateActionContext.Context actionContext) {
         var p = ai.getPlayer();
         for (int yaw : new int[]{-90, -45, 45, 90}) {
             double angle = Math.toRadians(p.getLocation().getYaw() + yaw);
             var eye = p.getEyeLocation();
             var target = new PrimitiveTarget.Point(eye.getX() - Math.sin(angle) * 4, eye.getY(), eye.getZ() + Math.cos(angle) * 4);
-            add(ai, found, "look:" + yaw, new PrimitiveCommand.LookAt(target), null, null, -Math.sin(angle) * 4, 0, Math.cos(angle) * 4, "", true);
+            add(ai, found, "look:" + yaw, new PrimitiveCommand.LookAt(target), null, null, -Math.sin(angle) * 4, 0, Math.cos(angle) * 4, "", true, actionContext);
         }
     }
 
     private void mining(AIPlayer ai, List<me.herry.minecraftAI.ai.primitive.control.PrimitiveSnapshot.ItemSlot> inventory,
-                        PolicyFrame.SightObservation sight, Map<String, Candidate> found) {
+                        PolicyFrame.SightObservation sight, Map<String, Candidate> found, CandidateActionContext.Context actionContext) {
         var p = ai.getPlayer();
         var feet = ai.getPosition();
         boolean rayLoaded = true;
@@ -229,13 +232,13 @@ public final class PolicyCandidates {
             var delta = block.point().offset(-ai.getPosition().x(), -ai.getPosition().y(), -ai.getPosition().z());
             String id = "mine:" + block.point().encode() + ":" + slot.slot();
             if (add(ai, found, id, new PrimitiveCommand.BreakBlock(block.point(), tool), null, null,
-                    delta.x(), delta.y(), delta.z(), block.material() + ":" + slot.material(), true)) mined++;
+                    delta.x(), delta.y(), delta.z(), block.material() + ":" + slot.material(), true, actionContext)) mined++;
         }
         miningCursor = pairs == 0 ? 0 : Math.floorMod(miningCursor + attempted, pairs);
     }
 
     private void consumables(AIPlayer ai, List<me.herry.minecraftAI.ai.primitive.control.PrimitiveSnapshot.ItemSlot> inventory,
-                             Map<String, Candidate> found) {
+                             Map<String, Candidate> found, CandidateActionContext.Context actionContext) {
         int inspected = 0;
         int snapshotSlots = (int) inventory.stream().filter(slot -> slot.slot() < 36).count();
         int scanned = 0, empty = 0, nonConsumable = 0, hunger = 0, blocked = 0, unknown = 0, unsupported = 0, available = 0;
@@ -249,7 +252,7 @@ public final class PolicyCandidates {
             if (item.amount() == 0) empty++;
             else if (ConsumeExactAction.supported(item)) {
                 available++;
-                add(ai, found, "consume:" + slot.slot(), null, null, item, 0, 0, 0, item.material(), false);
+                add(ai, found, "consume:" + slot.slot(), null, null, item, 0, 0, 0, item.material(), false, actionContext);
             } else switch (use.eligibility()) {
                 case NOT_CONSUMABLE -> nonConsumable++;
                 case BLOCKED -> { if (use.reason().equals("requires hunger")) hunger++; else blocked++; }
@@ -262,7 +265,7 @@ public final class PolicyCandidates {
     }
 
     private void placement(AIPlayer ai, List<me.herry.minecraftAI.ai.primitive.control.PrimitiveSnapshot.ItemSlot> inventory,
-                           Map<String, Candidate> found) {
+                           Map<String, Candidate> found, CandidateActionContext.Context actionContext) {
         int placed = 0;
         int inspected = 0;
         while (inspected < inventory.size() && placed < 12 && !ai.getWorkBudget().isExhausted()) {
@@ -273,13 +276,13 @@ public final class PolicyCandidates {
                 for (int[] direction : new int[][]{{1,0},{-1,0},{0,1},{0,-1}}) {
                     BlockPoint target = ai.getPosition().offset(direction[0], 0, direction[1]);
                     if (add(ai, found, "place:" + target.encode() + ":" + material, new PrimitiveCommand.PlaceBlock(target, material.name()),
-                            null, null, direction[0], 0, direction[1], material.name(), true)) placed++;
+                            null, null, direction[0], 0, direction[1], material.name(), true, actionContext)) placed++;
                 }
             }
         }
     }
 
-    private void attacks(AIPlayer ai, Map<String, Candidate> found) {
+    private void attacks(AIPlayer ai, Map<String, Candidate> found, CandidateActionContext.Context actionContext) {
         var p = ai.getPlayer();
         var livingTargets = new LinkedHashMap<java.util.UUID, org.bukkit.entity.LivingEntity>();
         for (var entity : ai.getPerception().getHostiles()) livingTargets.putIfAbsent(entity.getUniqueId(), entity);
@@ -289,11 +292,11 @@ public final class PolicyCandidates {
             if (!StrikeExactAction.canReach(ai, hostile)) continue;
             var at = hostile.getLocation();
             add(ai, found, "attack:" + hostile.getUniqueId(), new PrimitiveCommand.Attack(hostile.getUniqueId()), null, null,
-                    at.getX() - p.getLocation().getX(), at.getY() - p.getLocation().getY(), at.getZ() - p.getLocation().getZ(), hostile.getType().name(), true);
+                    at.getX() - p.getLocation().getX(), at.getY() - p.getLocation().getY(), at.getZ() - p.getLocation().getZ(), hostile.getType().name(), true, actionContext);
         }
     }
 
-    private void crafting(AIPlayer ai, Map<String, Candidate> found) {
+    private void crafting(AIPlayer ai, Map<String, Candidate> found, CandidateActionContext.Context actionContext) {
         if (recipeRevision != ai.getCrafting().revision()) { recipeCursor = 0; recipeRevision = ai.getCrafting().revision(); }
         int crafted = 0;
         var stock = ai.getInventory().snapshot();
@@ -305,7 +308,7 @@ public final class PolicyCandidates {
             Material result = Material.matchMaterial(recipe.result());
             if (recipe.needsTable() && table == null) table = Progression.nearbyTable(ai) != null;
             if (result == null || recipe.needsTable() && !table || ai.getCrafting().singleStep(result, recipe.id(), stock) == null) continue;
-            if (add(ai, found, "craft:" + recipe.id(), null, recipe, null, 0, 0, 0, recipe.id(), false)) crafted++;
+            if (add(ai, found, "craft:" + recipe.id(), null, recipe, null, 0, 0, 0, recipe.id(), false, actionContext)) crafted++;
         }
         recipeScanComplete = recipesChecked == recipes.size();
     }
@@ -328,7 +331,7 @@ public final class PolicyCandidates {
         return false; // A rotating subset never claims that unoffered key inputs do not exist.
     }
 
-    private void equipment(AIPlayer ai, Map<String, Candidate> found) {
+    private void equipment(AIPlayer ai, Map<String, Candidate> found, CandidateActionContext.Context actionContext) {
         var player = ai.getPlayer();
         int held = player.getInventory().getHeldItemSlot();
         Map<Integer, ExactEquipment.Stack> targets = new LinkedHashMap<>();
@@ -360,6 +363,8 @@ public final class PolicyCandidates {
                     int index = 80 + bucket(key, 16);
                     features[index] = Math.clamp(features[index] + level / 8.0, 0, 16);
                 });
+                CandidateActionContext.encode(features, PrimitiveType.EQUIP_ITEM,
+                        from.amount() > 0 ? from.material() : null, null, actionContext);
                 found.putIfAbsent(id, new Candidate(id, null, null, null, new PolicyFrame.Option(id, features), 0, id, choice));
             }
         }
@@ -449,7 +454,8 @@ public final class PolicyCandidates {
     }
 
     private boolean add(AIPlayer ai, Map<String, Candidate> found, String id, PrimitiveCommand command, RecipeOption recipe,
-                        SurvivalObservation.Item consumable, double dx, double dy, double dz, String identity, boolean check) {
+                        SurvivalObservation.Item consumable, double dx, double dy, double dz, String identity, boolean check,
+                        CandidateActionContext.Context actionContext) {
         if (found.size() >= 512 || found.containsKey(id)) return false;
         if (check && (ai.getWorkBudget().isExhausted() || !PrimitiveAdapter.check(ai, command).allowed())) return false;
         double[] features = new double[PolicyFrame.ACTION_SIZE];
@@ -485,6 +491,11 @@ public final class PolicyCandidates {
             features[57] = Math.clamp(observedBlock.getBlockData().getDestroySpeed(actualTool, true) / 32.0, 0, 16);
         }
         if (recipe != null) features[27] = recipe.resultAmount() / 64.0;
+        String directMaterial = recipe != null ? recipe.result()
+                : blockEvidence != null ? blockEvidence.material()
+                : command instanceof PrimitiveCommand.PlaceBlock place ? place.material()
+                : consumable != null ? consumable.material() : null;
+        CandidateActionContext.encode(features, type, directMaterial, recipe, actionContext);
         found.put(id, new Candidate(id, command, recipe, consumable, new PolicyFrame.Option(id, features, blockEvidence)));
         return true;
     }

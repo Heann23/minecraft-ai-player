@@ -12,13 +12,13 @@ import brain_session,checkpoint_store
 from model_catalog import ModelCatalog,verify_state,model_name
 from train_paper_ppo import resume_checkpoint
 from continuation_policy import SELECTION
-from rl_actor import ActorCritic
+from rl_actor import ActorCritic, CONTRACT, ACTION_SIZE
 
 def convert(source: Path, output: Path, name: str, *, goal_interaction=False, relative_entropy=False):
     if goal_interaction and relative_entropy:raise ValueError('one explicit conversion at a time')
     state=brain_session.load(source);verify_state(state)
-    if state['contract']!='minecraft-primitive-candidates/v7' or state.get('contextUpgrade') or state['initializationOnly'] or state['pendingRolloutTransitions']:
-        raise ValueError('conversion requires trained native v7 with no pending; originals preserved')
+    if state['contract']!=CONTRACT or state.get('contextUpgrade') or state['initializationOnly'] or state['pendingRolloutTransitions']:
+        raise ValueError('conversion requires trained native current-contract brain with no pending; originals preserved')
     if output.exists():raise ValueError('conversion output must be new')
     cp=Path(state['checkpoint']);model,parent=resume_checkpoint(cp)
     if not goal_interaction and not relative_entropy and model.selection!='flat':raise ValueError('source must use flat selection')
@@ -50,7 +50,7 @@ def convert(source: Path, output: Path, name: str, *, goal_interaction=False, re
     brain_session.save(output/'runtime-session.json',migrated,recoverable=True)
     revision=ModelCatalog(output/'catalog').save(name,migrated)
     evidence={'schema':'minecraft-temporal-policy-conversion/v1','sourceSession':state,'convertedSession':migrated,'selection':SELECTION,'allTensorsAdamCheckpointRngAndCountersPreserved':True,'sessionRngPreserved':state['rng']==migrated['rng'],'initialProbabilitiesPreserved':False,'architecturePriorChanged':True,'newLearning':False,'abilityProven':False,'sourcePrefixSha256':hashlib.sha256(payload).hexdigest()}
-    if goal_interaction:evidence.update(schema='minecraft-goal-interaction-conversion/v1',selection=model.selection,interaction=model.interaction,initialProbabilitiesPreserved=True,architecturePriorChanged=False,newZeroGoalActionTensorShape=[24,256])
+    if goal_interaction:evidence.update(schema='minecraft-goal-interaction-conversion/v1',selection=model.selection,interaction=model.interaction,initialProbabilitiesPreserved=True,architecturePriorChanged=False,newZeroGoalActionTensorShape=[24,ACTION_SIZE])
     if relative_entropy:evidence.update(schema='minecraft-ppo-exploration-conversion/v1',selection=model.selection,exploration=model.exploration,initialProbabilitiesPreserved=True,architecturePriorChanged=False,trainingObjectiveChanged=True)
     checkpoint_store.durable_replace(output/'conversion-evidence.json',checkpoint_store.encoded(evidence))
     return revision

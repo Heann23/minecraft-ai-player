@@ -15,9 +15,9 @@ public record PolicyFrame(UUID world, long serverTick, double[] state, List<Opti
     public PolicyFrame(UUID world, long serverTick, double[] state, List<Option> options, boolean complete, Discovery discovery) {
         this(world, serverTick, state, options, complete, discovery, null);
     }
-    public static final String CONTRACT = "minecraft-primitive-candidates/v7";
+    public static final String CONTRACT = "minecraft-primitive-candidates/v8";
     public static final int STATE_SIZE = 432;
-    public static final int ACTION_SIZE = 256;
+    public static final int ACTION_SIZE = 288;
     public static final int INPUT_SIZE = STATE_SIZE + ACTION_SIZE;
     public static final int MAX_OPTIONS = 128;
 

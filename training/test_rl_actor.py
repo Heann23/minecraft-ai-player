@@ -110,24 +110,63 @@ class ActorTests(unittest.TestCase):
         self.assertEqual(restored.selection,SELECTION)
         self.assertEqual(restored.artifact(environment_steps=1,training_run='numerical-fixture',rollout_sha256='0'*64)['schema'],'minecraft-rl-actor/v2')
 
+    def test_v7_candidate_action_upgrade_preserves_optimizer_goal_interaction_rng_and_old_outputs(self):
+        import copy
+        for with_goal in (False, True):
+            model = ActorCritic(31, hidden=4)
+            if with_goal:
+                model.enable_goal_interaction()
+            model.fit([row(model)])
+            legacy = copy.deepcopy(model.optimizer_state()); legacy["contract"] = "minecraft-primitive-candidates/v7"
+            for group in ("params", "first", "second"):
+                actor = np.asarray(legacy[group]["actor_w"])
+                legacy[group]["actor_w"] = actor[:, :STATE_SIZE + 256].tolist()
+                if with_goal:
+                    cross = np.asarray(legacy[group]["goal_action_w"])
+                    legacy[group]["goal_action_w"] = cross[:, :256].tolist()
+            with self.assertRaises(ValueError):
+                ActorCritic.from_optimizer_state(legacy)
+            upgraded = ActorCritic.upgrade_legacy_context(legacy)
+            for group in ("params", "first", "second"):
+                actor = getattr(upgraded, group)["actor_w"]
+                np.testing.assert_array_equal(actor[:, STATE_SIZE + 256:], 0)
+                np.testing.assert_array_equal(actor[:, :STATE_SIZE + 256], legacy[group]["actor_w"])
+                np.testing.assert_array_equal(getattr(upgraded, group)["value_w"], legacy[group]["value_w"])
+                if with_goal:
+                    cross = getattr(upgraded, group)["goal_action_w"]
+                    np.testing.assert_array_equal(cross[:, 256:], 0)
+                    np.testing.assert_array_equal(cross[:, :256], legacy[group]["goal_action_w"])
+            self.assertEqual(upgraded.rng.bit_generator.state, legacy["rng"])
+            observed = frame(); observed["state"][208] = observed["state"][217] = 1.0
+            before, value, _ = upgraded.evaluate(observed)
+            for option in observed["options"]:
+                option["features"][256:] = [0.75] * (ACTION_SIZE - 256)
+            after, next_value, _ = upgraded.evaluate(observed)
+            np.testing.assert_array_equal(before, after); self.assertEqual(value, next_value)
+
     def test_v6_execution_upgrade_preserves_optimizer_rng_and_old_outputs(self):
         import copy
         model = ActorCritic(31, hidden=4)
         model.fit([row(model)])
         legacy = copy.deepcopy(model.optimizer_state()); legacy["contract"] = "minecraft-primitive-candidates/v6"
         for group in ("params", "first", "second"):
-            for key in ("actor_w", "value_w"):
-                tensor = np.asarray(legacy[group][key])
-                legacy[group][key] = np.concatenate((tensor[:, :400], tensor[:, STATE_SIZE:]), axis=1).tolist()
+            actor = np.asarray(legacy[group]["actor_w"])
+            legacy[group]["actor_w"] = np.concatenate((actor[:, :400], actor[:, STATE_SIZE:STATE_SIZE + 256]), axis=1).tolist()
+            legacy[group]["value_w"] = np.asarray(legacy[group]["value_w"])[:, :400].tolist()
         upgraded = ActorCritic.upgrade_legacy_context(legacy)
         for group in ("params", "first", "second"):
-            for key in ("actor_w", "value_w"):
-                tensor = getattr(upgraded, group)[key]
-                np.testing.assert_array_equal(tensor[:, 400:432], 0)
-                np.testing.assert_array_equal(np.concatenate((tensor[:, :400], tensor[:, 432:]), axis=1), legacy[group][key])
+            actor = getattr(upgraded, group)["actor_w"]
+            np.testing.assert_array_equal(actor[:, 400:STATE_SIZE], 0)
+            np.testing.assert_array_equal(actor[:, STATE_SIZE + 256:], 0)
+            np.testing.assert_array_equal(np.concatenate((actor[:, :400], actor[:, STATE_SIZE:STATE_SIZE + 256]), axis=1), legacy[group]["actor_w"])
+            value_w = getattr(upgraded, group)["value_w"]
+            np.testing.assert_array_equal(value_w[:, 400:STATE_SIZE], 0)
+            np.testing.assert_array_equal(value_w[:, :400], legacy[group]["value_w"])
         self.assertEqual(upgraded.rng.bit_generator.state, legacy["rng"])
         observed = frame(); before, value, _ = upgraded.evaluate(observed)
         observed["state"][400:] = [0.42] * 32
+        for option in observed["options"]:
+            option["features"][256:] = [0.42] * (ACTION_SIZE - 256)
         after, next_value, _ = upgraded.evaluate(observed)
         np.testing.assert_array_equal(before, after); self.assertEqual(value, next_value)
 
@@ -138,21 +177,27 @@ class ActorTests(unittest.TestCase):
         legacy = copy.deepcopy(model.optimizer_state())
         legacy["contract"] = "minecraft-primitive-candidates/v4"
         for group in ("params", "first", "second"):
-            for key in ("actor_w", "value_w"):
-                tensor = np.asarray(legacy[group][key])
-                legacy[group][key] = np.concatenate((tensor[:, :208], tensor[:, STATE_SIZE:]), axis=1).tolist()
+            actor = np.asarray(legacy[group]["actor_w"])
+            legacy[group]["actor_w"] = np.concatenate((actor[:, :208], actor[:, STATE_SIZE:STATE_SIZE + 256]), axis=1).tolist()
+            legacy[group]["value_w"] = np.asarray(legacy[group]["value_w"])[:, :208].tolist()
         upgraded = ActorCritic.upgrade_legacy_context(legacy)
         observed = frame(); before, value, _ = upgraded.evaluate(observed)
         observed["state"][208:] = np.linspace(-1, 1, STATE_SIZE - 208).tolist()
+        for option in observed["options"]:
+            option["features"][256:] = np.linspace(-1, 1, ACTION_SIZE - 256).tolist()
         after, after_value, _ = upgraded.evaluate(observed)
         np.testing.assert_array_equal(before, after)
         self.assertEqual(value, after_value)
         for group in ("params", "first", "second"):
             for key, old in legacy[group].items():
                 actual = getattr(upgraded, group)[key]
-                if key in ("actor_w", "value_w"):
+                if key == "actor_w":
                     np.testing.assert_array_equal(actual[:, 208:STATE_SIZE], 0)
-                    actual = np.concatenate((actual[:, :208], actual[:, STATE_SIZE:]), axis=1)
+                    np.testing.assert_array_equal(actual[:, STATE_SIZE + 256:], 0)
+                    actual = np.concatenate((actual[:, :208], actual[:, STATE_SIZE:STATE_SIZE + 256]), axis=1)
+                elif key == "value_w":
+                    np.testing.assert_array_equal(actual[:, 208:STATE_SIZE], 0)
+                    actual = actual[:, :208]
                 np.testing.assert_array_equal(actual, old)
         self.assertEqual(upgraded.rng.bit_generator.state, legacy["rng"])
         self.assertEqual((upgraded.version, upgraded.updates), (legacy["version"], legacy["updates"]))
@@ -162,20 +207,26 @@ class ActorTests(unittest.TestCase):
         model = ActorCritic(31, hidden=4); model.fit([row(model)])
         legacy = copy.deepcopy(model.optimizer_state()); legacy["contract"] = "minecraft-primitive-candidates/v5"
         for group in ("params", "first", "second"):
-            for key in ("actor_w", "value_w"):
-                tensor = np.asarray(legacy[group][key])
-                legacy[group][key] = np.concatenate((tensor[:, :240], tensor[:, STATE_SIZE:]), axis=1).tolist()
+            actor = np.asarray(legacy[group]["actor_w"])
+            legacy[group]["actor_w"] = np.concatenate((actor[:, :240], actor[:, STATE_SIZE:STATE_SIZE + 256]), axis=1).tolist()
+            legacy[group]["value_w"] = np.asarray(legacy[group]["value_w"])[:, :240].tolist()
         upgraded = ActorCritic.upgrade_legacy_context(legacy)
         observed = frame(); before, value, _ = upgraded.evaluate(observed)
         observed["state"][240:] = np.linspace(-1, 1, STATE_SIZE - 240).tolist()
+        for option in observed["options"]:
+            option["features"][256:] = np.linspace(-1, 1, ACTION_SIZE - 256).tolist()
         after, after_value, _ = upgraded.evaluate(observed)
         np.testing.assert_array_equal(before, after); self.assertEqual(value, after_value)
         for group in ("params", "first", "second"):
             for key, old in legacy[group].items():
                 actual = getattr(upgraded, group)[key]
-                if key in ("actor_w", "value_w"):
+                if key == "actor_w":
                     np.testing.assert_array_equal(actual[:, 240:STATE_SIZE], 0)
-                    actual = np.concatenate((actual[:, :240], actual[:, STATE_SIZE:]), axis=1)
+                    np.testing.assert_array_equal(actual[:, STATE_SIZE + 256:], 0)
+                    actual = np.concatenate((actual[:, :240], actual[:, STATE_SIZE:STATE_SIZE + 256]), axis=1)
+                elif key == "value_w":
+                    np.testing.assert_array_equal(actual[:, 240:STATE_SIZE], 0)
+                    actual = actual[:, :240]
                 np.testing.assert_array_equal(actual, old)
         self.assertEqual(upgraded.rng.bit_generator.state, legacy["rng"])
         self.assertEqual((upgraded.version, upgraded.updates), (legacy["version"], legacy["updates"]))
@@ -258,16 +309,18 @@ class ActorTests(unittest.TestCase):
         legacy = model.optimizer_state()
         legacy["contract"] = "minecraft-primitive-candidates/v1"
         for group in ("params", "first", "second"):
-            for key in ("actor_w", "value_w"):
-                value = np.asarray(legacy[group][key])
-                legacy[group][key] = np.concatenate((value[:, :64], value[:, STATE_SIZE:]), axis=1).tolist()
+            actor = np.asarray(legacy[group]["actor_w"])
+            legacy[group]["actor_w"] = np.concatenate((actor[:, :64], actor[:, STATE_SIZE:STATE_SIZE + 256]), axis=1).tolist()
+            legacy[group]["value_w"] = np.asarray(legacy[group]["value_w"])[:, :64].tolist()
         with self.assertRaises(ValueError):
             ActorCritic.from_optimizer_state(legacy)
         upgraded = ActorCritic.upgrade_legacy_context(legacy)
         observed = frame()
         observed["state"] = np.linspace(-0.3, 0.3, STATE_SIZE).tolist()
+        for option in observed["options"]:
+            option["features"][256:] = np.linspace(-0.5, 0.5, ACTION_SIZE - 256).tolist()
         old_state = np.asarray(observed["state"][:64])
-        old_x = np.concatenate((np.tile(old_state, (2, 1)), [option["features"] for option in observed["options"]]), axis=1)
+        old_x = np.concatenate((np.tile(old_state, (2, 1)), [option["features"][:256] for option in observed["options"]]), axis=1)
         p = {key: np.asarray(value) for key, value in legacy["params"].items()}
         logits = np.tanh(old_x @ p["actor_w"].T + p["actor_b"]) @ p["actor_out"] + p["actor_bias"][0]
         expected = np.exp(logits-logits.max()); expected /= expected.sum()
@@ -277,6 +330,7 @@ class ActorTests(unittest.TestCase):
         self.assertAlmostEqual(float(expected_value), value, places=12)
         for group in ("params", "first", "second"):
             np.testing.assert_array_equal(getattr(upgraded, group)["actor_w"][:, 64:STATE_SIZE], 0)
+            np.testing.assert_array_equal(getattr(upgraded, group)["actor_w"][:, STATE_SIZE + 256:], 0)
             np.testing.assert_array_equal(getattr(upgraded, group)["value_w"][:, 64:STATE_SIZE], 0)
         self.assertEqual(upgraded.version, model.version)
         self.assertEqual(upgraded.updates, model.updates)
@@ -288,24 +342,30 @@ class ActorTests(unittest.TestCase):
         legacy = model.optimizer_state()
         legacy["contract"] = "minecraft-primitive-candidates/v2"
         for group in ("params", "first", "second"):
-            for key in ("actor_w", "value_w"):
-                values = np.asarray(legacy[group][key])
-                legacy[group][key] = np.concatenate((values[:, :128], values[:, STATE_SIZE:]), axis=1).tolist()
+            actor = np.asarray(legacy[group]["actor_w"])
+            legacy[group]["actor_w"] = np.concatenate((actor[:, :128], actor[:, STATE_SIZE:STATE_SIZE + 256]), axis=1).tolist()
+            legacy[group]["value_w"] = np.asarray(legacy[group]["value_w"])[:, :128].tolist()
         with self.assertRaises(ValueError):
             ActorCritic.from_optimizer_state(legacy)
         upgraded = ActorCritic.upgrade_legacy_context(legacy)
         observed = frame()
         base_probabilities, base_value, _ = upgraded.evaluate(observed)
         observed["state"][128:] = np.linspace(-1, 1, STATE_SIZE - 128).tolist()
+        for option in observed["options"]:
+            option["features"][256:] = np.linspace(-1, 1, ACTION_SIZE - 256).tolist()
         probabilities, value, _ = upgraded.evaluate(observed)
         np.testing.assert_array_equal(base_probabilities, probabilities)
         self.assertEqual(base_value, value)
         for group in ("params", "first", "second"):
             for key, old in legacy[group].items():
                 actual = getattr(upgraded, group)[key]
-                if key in ("actor_w", "value_w"):
+                if key == "actor_w":
                     np.testing.assert_array_equal(actual[:, 128:STATE_SIZE], 0)
-                    actual = np.concatenate((actual[:, :128], actual[:, STATE_SIZE:]), axis=1)
+                    np.testing.assert_array_equal(actual[:, STATE_SIZE + 256:], 0)
+                    actual = np.concatenate((actual[:, :128], actual[:, STATE_SIZE:STATE_SIZE + 256]), axis=1)
+                elif key == "value_w":
+                    np.testing.assert_array_equal(actual[:, 128:STATE_SIZE], 0)
+                    actual = actual[:, :128]
                 np.testing.assert_array_equal(actual, old)
         self.assertEqual(upgraded.rng.bit_generator.state, legacy["rng"])
         self.assertEqual((upgraded.version, upgraded.updates), (legacy["version"], legacy["updates"]))
@@ -316,24 +376,30 @@ class ActorTests(unittest.TestCase):
         legacy = model.optimizer_state()
         legacy["contract"] = "minecraft-primitive-candidates/v3"
         for group in ("params", "first", "second"):
-            for key in ("actor_w", "value_w"):
-                values = np.asarray(legacy[group][key])
-                legacy[group][key] = np.concatenate((values[:, :192], values[:, STATE_SIZE:]), axis=1).tolist()
+            actor = np.asarray(legacy[group]["actor_w"])
+            legacy[group]["actor_w"] = np.concatenate((actor[:, :192], actor[:, STATE_SIZE:STATE_SIZE + 256]), axis=1).tolist()
+            legacy[group]["value_w"] = np.asarray(legacy[group]["value_w"])[:, :192].tolist()
         with self.assertRaises(ValueError):
             ActorCritic.from_optimizer_state(legacy)
         upgraded = ActorCritic.upgrade_legacy_context(legacy)
         observed = frame()
         probabilities, value, _ = upgraded.evaluate(observed)
         observed["state"][192:] = np.linspace(-1, 1, STATE_SIZE - 192).tolist()
+        for option in observed["options"]:
+            option["features"][256:] = np.linspace(-1, 1, ACTION_SIZE - 256).tolist()
         after, after_value, _ = upgraded.evaluate(observed)
         np.testing.assert_array_equal(probabilities, after)
         self.assertEqual(value, after_value)
         for group in ("params", "first", "second"):
             for key, old in legacy[group].items():
                 actual = getattr(upgraded, group)[key]
-                if key in ("actor_w", "value_w"):
+                if key == "actor_w":
                     np.testing.assert_array_equal(actual[:, 192:STATE_SIZE], 0)
-                    actual = np.concatenate((actual[:, :192], actual[:, STATE_SIZE:]), axis=1)
+                    np.testing.assert_array_equal(actual[:, STATE_SIZE + 256:], 0)
+                    actual = np.concatenate((actual[:, :192], actual[:, STATE_SIZE:STATE_SIZE + 256]), axis=1)
+                elif key == "value_w":
+                    np.testing.assert_array_equal(actual[:, 192:STATE_SIZE], 0)
+                    actual = actual[:, :192]
                 np.testing.assert_array_equal(actual, old)
         self.assertEqual(upgraded.rng.bit_generator.state, legacy["rng"])
         self.assertEqual((upgraded.version, upgraded.updates), (legacy["version"], legacy["updates"]))

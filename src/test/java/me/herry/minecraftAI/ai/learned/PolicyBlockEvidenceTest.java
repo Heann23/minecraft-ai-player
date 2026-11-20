@@ -14,7 +14,7 @@ class PolicyBlockEvidenceTest {
         var committed = candidate.committed(80);
         assertEquals(evidence, committed.encoded().blockEvidence());
         assertEquals(10, committed.encoded().blockEvidence().observedTick());
-        assertEquals(256, committed.encoded().features().length);
+        assertEquals(PolicyFrame.ACTION_SIZE, committed.encoded().features().length);
         assertEquals(80 / 600.0, committed.encoded().features()[30]);
         assertNull(new PolicyFrame.Option("legacy", new double[PolicyFrame.ACTION_SIZE]).blockEvidence());
         assertThrows(IllegalArgumentException.class,
