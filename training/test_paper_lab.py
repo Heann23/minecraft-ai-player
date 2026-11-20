@@ -21,13 +21,17 @@ class SeedPlanTests(unittest.TestCase):
             path.write_text("\n".join((prefix + "10" + task,
                 prefix + "15" + task + " craftCandidates=0 chosenCraft=false",
                 prefix + "20" + task + " craftCandidates=3 chosenCraft=false",
-                prefix + "25" + task + " craftCandidates=2 chosenCraft=true")))
-            [result] = summarize_game_log(path)["goalObservationSummaries"]
+                prefix + "25" + task + " craftCandidates=2 chosenCraft=true",
+                "[AI:RLLearner] Vanilla crafted result taken: recipe=minecraft:birch_planks material=BIRCH_PLANKS amount=4")))
+            observed = summarize_game_log(path)
+            [result] = observed["goalObservationSummaries"]
             self.assertEqual(result["craftOpportunitySamples"], 3)
             self.assertEqual(result["targetCraftCandidateFrames"], 2)
             self.assertEqual(result["firstTargetCraftCandidateTick"], 20)
             self.assertEqual(result["chosenTargetCraftFrames"], 1)
             self.assertIsNone(result["firstObservedAchievedTick"])
+            self.assertEqual(observed["vanillaCraftResults"], [{"recipe": "minecraft:birch_planks", "item": "BIRCH_PLANKS",
+                                                               "observedResultEvents": 1, "observedItemCount": 4}])
 
     def test_block_drop_pickup_requires_same_world_item_and_entity(self):
         world = "12345678-1234-1234-1234-123456789abc"

@@ -264,6 +264,10 @@ ITEM_PICKUP_EVENT = re.compile(
     r"\[AI:RLLearner\] ItemPickupEvent world=([0-9a-f-]{36}) tick=(\d+) entity=([0-9a-f-]{36}) "
     r"item=([A-Z0-9_]+) stackCount=([1-9]\d*) remaining=(\d+) cancelled=false\s*$"
 )
+VANILLA_CRAFT_RESULT = re.compile(
+    r"\[AI:RLLearner\] Vanilla crafted result taken: recipe=([a-z0-9_.-]+:[a-z0-9_./-]+) "
+    r"material=([A-Z0-9_]+) amount=([1-9]\d*)(?:\s|$)"
+)
 
 
 def summarize_game_log(path: Path):
@@ -277,6 +281,7 @@ def summarize_game_log(path: Path):
     pending_block_drops = {}
     block_drop_counts = Counter()
     block_drop_pickups = {}
+    craft_result_counts, craft_result_amounts = Counter(), Counter()
     inventory = None
     goal_samples = {}
     goal_footprints = {}
@@ -287,6 +292,11 @@ def summarize_game_log(path: Path):
         return {"available": False, "allWorldAutonomyProven": False}
     with path.open(encoding="utf-8", errors="replace") as stream:
         for line in stream:
+            craft_result = VANILLA_CRAFT_RESULT.search(line)
+            if craft_result:
+                recipe, item, amount = craft_result.groups()
+                craft_result_counts[recipe, item] += 1
+                craft_result_amounts[recipe, item] += int(amount)
             drop = BLOCK_DROP_EVENT.search(line)
             if drop:
                 world, tick, source, block, entity, item, _ = drop.groups()
@@ -436,6 +446,12 @@ def summarize_game_log(path: Path):
                 for (block, item), count in sorted(block_drop_counts.items())
             ],
             "blockDropPickupScope": "Non-cancelled drops matched to a later or same-tick pickup attempt by world, item and entity. A pickup event precedes the inventory transfer.",
+            "vanillaCraftResults": [
+                {"recipe": recipe, "item": item, "observedResultEvents": count,
+                 "observedItemCount": craft_result_amounts[recipe, item]}
+                for (recipe, item), count in sorted(craft_result_counts.items())
+            ],
+            "vanillaCraftResultScope": "Real recipe output taken from the result slot; ownership and final inventory are separate observations.",
             "finalInventoryNbt": inventory, "allWorldAutonomyProven": False,
             "goalObservationSummaries": list(goal_samples.values()), "unaggregatedGoalSamples": unaggregated_goal_samples,
             "firstNativePolicyInputs": list(first_policy_inputs.values()), "unaggregatedFirstPolicyInputs": unaggregated_policy_inputs,
