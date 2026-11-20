@@ -19,6 +19,7 @@ import org.bukkit.entity.Animals;
 import org.bukkit.entity.Creeper;
 import org.bukkit.entity.Cod;
 import org.bukkit.entity.EnderCrystal;
+import org.bukkit.entity.EnderSignal;
 import org.bukkit.entity.Enderman;
 import org.bukkit.entity.Enemy;
 import org.bukkit.entity.Entity;
@@ -48,6 +49,7 @@ public final class PerceptionSystem {
     private final AIConfig config;
     private final BlockScanner scanner;
     private final Perception perception = new Perception();
+    private final EnderEyeTrack eyeTrack = new EnderEyeTrack();
 
     public PerceptionSystem(AIBody body, AIConfig config, WorkBudget budget) {
         this.body = body;
@@ -57,6 +59,14 @@ public final class PerceptionSystem {
 
     public Perception getPerception() {
         return perception;
+    }
+
+    public void trackThrownEye(EnderSignal signal) {
+        eyeTrack.begin(signal);
+    }
+
+    public EnderEyeTrack.Observation observeThrownEye() {
+        return eyeTrack.observe(body.getPlayer());
     }
 
     /**
@@ -143,6 +153,7 @@ public final class PerceptionSystem {
 
     public void reset() {
         scanner.reset();
+        eyeTrack.clear();
         perception.entityScanStamp = null;
         perception.world = null;
         perception.location = null;

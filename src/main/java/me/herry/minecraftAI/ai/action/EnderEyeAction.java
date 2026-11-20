@@ -7,6 +7,9 @@ import me.herry.minecraftAI.ai.util.BlockPoint;
 import me.herry.minecraftAI.ai.util.Positions;
 import org.bukkit.FluidCollisionMode;
 import org.bukkit.Material;
+import org.bukkit.entity.EnderSignal;
+
+import java.util.stream.Collectors;
 
 /** A selected use of one already-held eye through the normal survival input route. */
 public final class EnderEyeAction extends AbstractAction {
@@ -38,8 +41,16 @@ public final class EnderEyeAction extends AbstractAction {
         var player = ai.getPlayer();
         int before = player.getInventory().getItemInMainHand().getAmount();
         if (frame == null) {
-            if (ai.getBody().useItem() && remainingEyes(ai) == before - 1) succeed();
-            else fail("native eye throw did not spend the held eye");
+            var nearby = player.getWorld().getNearbyEntitiesByType(EnderSignal.class, player.getLocation(), 3);
+            var existing = nearby.stream().map(EnderSignal::getUniqueId).collect(Collectors.toSet());
+            if (!ai.getBody().useItem() || remainingEyes(ai) != before - 1) {
+                fail("native eye throw did not spend the held eye");
+                return;
+            }
+            var spawned = player.getWorld().getNearbyEntitiesByType(EnderSignal.class, player.getLocation(), 3)
+                    .stream().filter(eye -> !existing.contains(eye.getUniqueId())).toList();
+            if (spawned.size() == 1) ai.getPerceptionSystem().trackThrownEye(spawned.getFirst());
+            succeed();
             return;
         }
         var center = Positions.center(player.getWorld(), frame);

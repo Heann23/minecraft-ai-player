@@ -5,6 +5,7 @@ import me.herry.minecraftAI.ai.action.*;
 import me.herry.minecraftAI.ai.crafting.RecipeOption;
 import me.herry.minecraftAI.ai.observation.SurvivalCapture;
 import me.herry.minecraftAI.ai.observation.SurvivalObservation;
+import me.herry.minecraftAI.ai.perception.EnderEyeTrack;
 import me.herry.minecraftAI.ai.plan.Progression;
 import me.herry.minecraftAI.ai.primitive.PrimitiveTarget;
 import me.herry.minecraftAI.ai.primitive.PrimitiveType;
@@ -83,10 +84,11 @@ public final class PolicyCandidates {
     private static final List<BlockPoint> MOVE_OFFSETS = movementOffsets();
 
     public record Observed(me.herry.minecraftAI.ai.primitive.control.PrimitiveSnapshot snapshot,
-                           SurvivalObservation.Body body, Map<String, Integer> stock, double[] features, PolicyFrame.SightObservation sight) {
+                           SurvivalObservation.Body body, Map<String, Integer> stock, double[] features,
+                           PolicyFrame.SightObservation sight, EnderEyeTrack.Observation eye) {
         public Observed(me.herry.minecraftAI.ai.primitive.control.PrimitiveSnapshot snapshot,
                         SurvivalObservation.Body body, Map<String, Integer> stock, double[] features) {
-            this(snapshot, body, stock, features, null);
+            this(snapshot, body, stock, features, null, null);
         }
         public Observed { stock = Map.copyOf(stock); features = features.clone(); }
         @Override public double[] features() { return features.clone(); }
@@ -130,7 +132,20 @@ public final class PolicyCandidates {
         var sight = DirectionalPolicyContext.capture(ai, body);
         ExecutionPolicyContext.encode(body, ai.getLearnedExecution(),
                 ai.getPolicyTaskMemory().observe(ai.getWorldId(), counts), ai.getWorldId());
-        return new Observed(state, survival, counts, body, sight);
+        var eye = ai.getPerceptionSystem().observeThrownEye();
+        if (eye != null) {
+            var position = p.getEyeLocation();
+            body[406] = 1;
+            body[407] = eye.visible() ? 1 : 0;
+            body[408] = eye.age() / (double) EnderEyeTrack.MEMORY_TICKS;
+            body[409] = Math.clamp((eye.x() - position.getX()) / 32, -1, 1);
+            body[410] = Math.clamp((eye.y() - position.getY()) / 32, -1, 1);
+            body[411] = Math.clamp((eye.z() - position.getZ()) / 32, -1, 1);
+            body[412] = Math.clamp(eye.dx() / 16, -1, 1);
+            body[413] = Math.clamp(eye.dy() / 16, -1, 1);
+            body[414] = Math.clamp(eye.dz() / 16, -1, 1);
+        }
+        return new Observed(state, survival, counts, body, sight, eye);
     }
 
     public Capture capture(AIPlayer ai, Candidate active, int activeTicks) {
@@ -166,7 +181,7 @@ public final class PolicyCandidates {
                 case FURNACE -> furnaceTransfers(ai, observed.sight(), found, actionContext);
                 case IGNITE -> portalIgnitions(ai, observed.sight(), found, actionContext);
                 case PORTAL -> portalEntries(ai, found, actionContext);
-                case ENDER_EYE -> enderEyes(ai, observed.sight(), found, actionContext);
+                case ENDER_EYE -> enderEyes(ai, observed.sight(), observed.eye(), found, actionContext);
             }
             generated.put(source.name(), found.size() - before);
         });
@@ -433,9 +448,15 @@ public final class PolicyCandidates {
         portalObservationCursor = nextMiningObservationCursor(feet.offset(0, -1, 0), portalObservationCursor, targets.subList(0, inspected));
     }
 
-    private void enderEyes(AIPlayer ai, PolicyFrame.SightObservation sight, Map<String, Candidate> found,
+    private void enderEyes(AIPlayer ai, PolicyFrame.SightObservation sight, EnderEyeTrack.Observation eye, Map<String, Candidate> found,
                            CandidateActionContext.Context actionContext) {
         var player = ai.getPlayer();
+        if (eye != null) {
+            var from = player.getEyeLocation();
+            var target = new PrimitiveTarget.Point(eye.x(), eye.y(), eye.z());
+            add(ai, found, "look:thrown-eye", new PrimitiveCommand.LookAt(target), null, null,
+                    eye.x() - from.getX(), eye.y() - from.getY(), eye.z() - from.getZ(), "thrown-eye", true, actionContext);
+        }
         if (player.getWorld().getEnvironment() != org.bukkit.World.Environment.NORMAL
                 || player.getInventory().getItemInMainHand().getType() != Material.ENDER_EYE) return;
         add(ai, found, "throw-ender-eye", new PrimitiveCommand.ThrowEnderEye(ai.getWorldId()), null, null,
