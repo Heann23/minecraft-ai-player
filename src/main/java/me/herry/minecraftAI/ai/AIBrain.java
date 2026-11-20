@@ -212,8 +212,8 @@ final class AIBrain {
                 || plan.current().getStatus() != ActionStatus.RUNNING) return;
         var command = activeLearned.command();
         boolean matches = end
-                ? command instanceof me.herry.minecraftAI.ai.primitive.control.PrimitiveCommand.EnterEndPortal portal && portal.world().equals(source)
-                : command instanceof me.herry.minecraftAI.ai.primitive.control.PrimitiveCommand.EnterNetherPortal portal && portal.world().equals(source);
+                ? command instanceof me.herry.minecraftAI.ai.primitive.control.PrimitiveCommand.EnterEndPortal endPortal && endPortal.world().equals(source)
+                : command instanceof me.herry.minecraftAI.ai.primitive.control.PrimitiveCommand.EnterNetherPortal netherPortal && netherPortal.world().equals(source);
         if (matches) portalDeparture = new PortalDeparture(source, destination, activeLearned.inputId(), ai.getTicks());
     }
 
