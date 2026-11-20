@@ -403,11 +403,11 @@ public final class PolicyCandidates {
         var nearby = nearbyTargets(feet);
         var targets = new LinkedHashSet<BlockPoint>();
         if (crosshair != null) targets.add(crosshair);
-        // Give off-axis observations outside the local volume a slot without starving the rotating local prefix.
-        var outerSight = sightTargets.stream().filter(point -> !nearby.contains(point)).distinct().iterator();
+        // A visible block inside the local volume can still fall outside this tick's rotating scan.
+        var visibleTargets = sightTargets.stream().distinct().iterator();
         for (int offset = 0; offset < nearby.size() && targets.size() < 24; offset++) {
             targets.add(nearby.get(Math.floorMod(cursor + offset, nearby.size())));
-            if (targets.size() < 24 && outerSight.hasNext()) targets.add(outerSight.next());
+            if (targets.size() < 24 && visibleTargets.hasNext()) targets.add(visibleTargets.next());
         }
         return List.copyOf(targets);
     }

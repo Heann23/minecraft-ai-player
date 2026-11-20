@@ -37,6 +37,19 @@ class PolicyWeightsTest {
         var crosshair=feet.offset(0,1,4);
         assertEquals(17,PolicyCandidates.nextMiningObservationCursor(feet,17,java.util.List.of(crosshair)));
     }
+
+    @Test void inVolumeSightIsInspectedEvenWhenTheRotatingPrefixMissesIt() {
+        var feet = new me.herry.minecraftAI.ai.util.BlockPoint(-948, 63, -143);
+        var viewed = feet.offset(-1, 1, 0);
+        int cursor = 43;
+        assertTrue(PolicyCandidates.nearbyTargets(feet).contains(viewed));
+        var rotating = PolicyCandidates.miningObservationTargets(feet, null, cursor);
+        assertFalse(rotating.contains(viewed));
+        var targets = PolicyCandidates.miningObservationTargets(feet, null, cursor, List.of(viewed, viewed));
+        assertEquals(24, targets.size());
+        assertEquals(List.of(rotating.getFirst(), viewed), targets.subList(0, 2));
+        assertEquals(cursor + 1, PolicyCandidates.nextMiningObservationCursor(feet, cursor, targets.subList(0, 2)));
+    }
     @Test void stationaryMiningObservationCoversTheLocalVolumeWithoutMaterialAdvice() {
         var feet=new me.herry.minecraftAI.ai.util.BlockPoint(0,64,0);
         var distant=feet.offset(1,1,2);
