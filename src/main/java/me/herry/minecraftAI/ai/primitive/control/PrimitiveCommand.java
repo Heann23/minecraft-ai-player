@@ -49,6 +49,16 @@ public sealed interface PrimitiveCommand {
         @Override public PrimitiveType type() { return PrimitiveType.USE_ITEM; }
     }
 
+    /** Use the already-held flint and steel on the top face of the selected portal base block. */
+    record IgnitePortal(UUID world, BlockPoint floor) implements PrimitiveCommand {
+        public IgnitePortal {
+            Objects.requireNonNull(world, "world");
+            floor = ContractValues.block(floor);
+        }
+
+        @Override public PrimitiveType type() { return PrimitiveType.USE_ITEM; }
+    }
+
     record Attack(UUID entityId) implements PrimitiveCommand {
         public Attack { Objects.requireNonNull(entityId, "entityId"); }
         @Override public PrimitiveType type() { return PrimitiveType.ATTACK; }

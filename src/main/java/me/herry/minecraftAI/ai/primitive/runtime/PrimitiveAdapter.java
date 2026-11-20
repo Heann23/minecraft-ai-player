@@ -11,6 +11,7 @@ import me.herry.minecraftAI.ai.action.DropJunkAction;
 import me.herry.minecraftAI.ai.action.EatFoodAction;
 import me.herry.minecraftAI.ai.action.ExactPlaceBlockAction;
 import me.herry.minecraftAI.ai.action.FurnaceSlotAction;
+import me.herry.minecraftAI.ai.action.IgniteAction;
 import me.herry.minecraftAI.ai.action.JumpAction;
 import me.herry.minecraftAI.ai.action.LookAtAction;
 import me.herry.minecraftAI.ai.action.MoveToAction;
@@ -86,7 +87,7 @@ public final class PrimitiveAdapter {
                 case JUMP -> "Press jump once and land";
                 case BREAK_BLOCK -> "Mine exactly one visible block with the selected slot and enchantments";
                 case PLACE_BLOCK -> "Place one selected solid block at the selected cell";
-                case USE_ITEM -> "Consume one safe food item using the normal eating action";
+                case USE_ITEM -> "Eat or use held flint and steel on a selected obsidian base";
                 case ATTACK -> "Fight the selected living entity without switching to another target";
                 case PICKUP_ITEM -> "Walk to nearby drops using the existing pickup action";
                 case DROP_ITEM -> "Discard stacks selected by the existing junk policy";
@@ -101,7 +102,7 @@ public final class PrimitiveAdapter {
                 case INTERACT_ENTITY -> "Unavailable in control schema version 1";
             };
             String limitation = switch (type) {
-                case USE_ITEM -> "Food only; bucket, bow and other item uses need explicit contracts";
+                case USE_ITEM -> "Food and portal ignition; other item uses need explicit contracts";
                 case ATTACK -> "Existing combat action chooses a weapon and may chase; this is not a single-hit input";
                 case PICKUP_ITEM -> "No implicit obstruction mining; a blocked drop fails and requires another chosen command";
                 case DROP_ITEM -> "Junk policy selection, not arbitrary item disposal";
@@ -242,6 +243,7 @@ public final class PrimitiveAdapter {
             case PrimitiveCommand.PlaceBlock place -> checkPlacement(ai, place);
             case PrimitiveCommand.Eat ignored -> ai.getPlayer().getFoodLevel() >= 20 ? "not hungry"
                     : ai.getInventory().bestFoodSlot() < 0 ? "no safe food" : "";
+            case PrimitiveCommand.IgnitePortal ignite -> IgniteAction.heldToolUnavailable(ai.getPlayer(), ignite.world(), ignite.floor());
             case PrimitiveCommand.Attack attack -> checkAttack(ai, attack);
             case PrimitiveCommand.Pickup pickup -> checkPickup(ai, pickup.radius());
             case PrimitiveCommand.Equip equip -> checkTool(ai, equip.tool());
@@ -275,6 +277,7 @@ public final class PrimitiveAdapter {
             case PrimitiveCommand.BreakBlock mine -> BreakBlockAction.withTool(mine.target(), mine.tool(), mine.sneaking());
             case PrimitiveCommand.PlaceBlock place -> new ExactPlaceBlockAction(place.target(), material(place.material()));
             case PrimitiveCommand.Eat ignored -> new EatFoodAction();
+            case PrimitiveCommand.IgnitePortal ignite -> new IgniteAction(ignite.floor(), ignite.world());
             case PrimitiveCommand.Attack attack -> AttackEntityAction.exactTarget((LivingEntity) Bukkit.getEntity(attack.entityId()));
             case PrimitiveCommand.Pickup pickup -> PickupItemAction.direct(pickup.radius(), true);
             case PrimitiveCommand.Equip equip -> new SlotEquipAction(equip.tool());

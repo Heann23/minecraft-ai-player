@@ -160,6 +160,7 @@ public final class PolicyCandidates {
                 case PICKUP -> add(ai, found, "pickup:4", new PrimitiveCommand.Pickup(4), null, null, 0, 0, 0, "", true, actionContext);
                 case CRAFT -> crafting(ai, found, actionContext);
                 case FURNACE -> furnaceTransfers(ai, observed.sight(), found, actionContext);
+                case IGNITE -> portalIgnitions(ai, observed.sight(), found, actionContext);
             }
             generated.put(source.name(), found.size() - before);
         });
@@ -357,6 +358,20 @@ public final class PolicyCandidates {
                 transfer, null, null, offset.x(), offset.y(), offset.z(), type, true, actionContext);
     }
 
+    private void portalIgnitions(AIPlayer ai, PolicyFrame.SightObservation sight, Map<String, Candidate> found,
+                                 CandidateActionContext.Context actionContext) {
+        if (sight == null || ai.getPlayer().getInventory().getItemInMainHand().getType() != Material.FLINT_AND_STEEL) return;
+        var feet = ai.getPosition();
+        for (var ray : sight.rays()) {
+            if (ai.getWorkBudget().isExhausted()) return;
+            var observed = ray.block();
+            if (observed == null || !observed.material().equals("OBSIDIAN")) continue;
+            var floor = new BlockPoint(observed.x(), observed.y(), observed.z());
+            add(ai, found, "ignite-portal:" + floor.encode(), new PrimitiveCommand.IgnitePortal(ai.getWorldId(), floor),
+                    null, null, floor.x() - feet.x(), floor.y() - feet.y(), floor.z() - feet.z(), "ignite-portal", true, actionContext);
+        }
+    }
+
     private boolean movementInputs(AIPlayer ai, Map<String, Candidate> found) {
         if (ai.getWorkBudget().isExhausted()) return false;
         for (var input : MovementInput.choices(ai.getWorldId(), ai.getPlayer().getLocation().getYaw(), movementInputCursor, 24)) {
@@ -510,6 +525,7 @@ public final class PolicyCandidates {
         String semantic = recipe != null ? recipe.result() : consumable != null ? consumable.consumption().remainderMaterial()
                 : command instanceof PrimitiveCommand.BreakBlock mine ? mine.tool().material()
                 : command instanceof PrimitiveCommand.FurnaceTransfer transfer ? transfer.material()
+                : command instanceof PrimitiveCommand.IgnitePortal ? "FLINT_AND_STEEL"
                 : command instanceof PrimitiveCommand.Equip equip ? equip.tool().material() : "";
         if (!semantic.isBlank()) features[48 + bucket(semantic, 7)] = 1;
         if (consumable != null) {
