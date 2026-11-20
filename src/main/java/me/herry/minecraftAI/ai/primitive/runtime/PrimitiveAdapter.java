@@ -9,6 +9,7 @@ import me.herry.minecraftAI.ai.action.BreakBlockAction;
 import me.herry.minecraftAI.ai.action.CraftItemAction;
 import me.herry.minecraftAI.ai.action.DropJunkAction;
 import me.herry.minecraftAI.ai.action.EatFoodAction;
+import me.herry.minecraftAI.ai.action.EnterPortalAction;
 import me.herry.minecraftAI.ai.action.ExactPlaceBlockAction;
 import me.herry.minecraftAI.ai.action.FurnaceSlotAction;
 import me.herry.minecraftAI.ai.action.IgniteAction;
@@ -98,7 +99,7 @@ public final class PrimitiveAdapter {
                 case SNEAK -> "Hold sneak for a bounded number of ticks and release it";
                 case SWIM -> "Use swimming inputs toward a local point in water";
                 case MOVE_INPUT -> "Hold selected player movement keys via the learned candidate lane";
-                case INTERACT_BLOCK -> "Use the chosen furnace ingredient, fuel, or result slot";
+                case INTERACT_BLOCK -> "Use a chosen furnace slot or enter an active Nether portal";
                 case INTERACT_ENTITY -> "Unavailable in control schema version 1";
             };
             String limitation = switch (type) {
@@ -110,7 +111,7 @@ public final class PrimitiveAdapter {
                 case BREAK_BLOCK -> "Reach, visibility, correct drop tool, floor, home, lava and falling-block guards apply";
                 case PLACE_BLOCK -> "Solid single-cell non-gravity blocks only";
                 case MOVE_INPUT -> "Learned candidate lane only; standalone control schema version 1 does not expose these keys";
-                case INTERACT_BLOCK -> "Ordinary furnaces only, one insertion or one result-slot transfer per action";
+                case INTERACT_BLOCK -> "One ordinary furnace transfer or one local active portal entry per action";
                 case INTERACT_ENTITY -> "Unsupported commands are rejected, never replaced with a guessed action";
                 default -> "Availability must be checked for the concrete command before execution";
             };
@@ -244,6 +245,7 @@ public final class PrimitiveAdapter {
             case PrimitiveCommand.Eat ignored -> ai.getPlayer().getFoodLevel() >= 20 ? "not hungry"
                     : ai.getInventory().bestFoodSlot() < 0 ? "no safe food" : "";
             case PrimitiveCommand.IgnitePortal ignite -> IgniteAction.heldToolUnavailable(ai.getPlayer(), ignite.world(), ignite.floor());
+            case PrimitiveCommand.EnterNetherPortal enter -> checkPortalEntry(ai, enter);
             case PrimitiveCommand.Attack attack -> checkAttack(ai, attack);
             case PrimitiveCommand.Pickup pickup -> checkPickup(ai, pickup.radius());
             case PrimitiveCommand.Equip equip -> checkTool(ai, equip.tool());
@@ -278,6 +280,7 @@ public final class PrimitiveAdapter {
             case PrimitiveCommand.PlaceBlock place -> new ExactPlaceBlockAction(place.target(), material(place.material()));
             case PrimitiveCommand.Eat ignored -> new EatFoodAction();
             case PrimitiveCommand.IgnitePortal ignite -> new IgniteAction(ignite.floor(), ignite.world());
+            case PrimitiveCommand.EnterNetherPortal enter -> new EnterPortalAction(enter.portal());
             case PrimitiveCommand.Attack attack -> AttackEntityAction.exactTarget((LivingEntity) Bukkit.getEntity(attack.entityId()));
             case PrimitiveCommand.Pickup pickup -> PickupItemAction.direct(pickup.radius(), true);
             case PrimitiveCommand.Equip equip -> new SlotEquipAction(equip.tool());
@@ -364,6 +367,18 @@ public final class PrimitiveAdapter {
         if (!visibleBlock(ai.getPlayer(), transfer.target())) return "furnace is blocked from view";
         if (ai.getFurnaceJob() != null && ai.getFurnaceJob().isAt(transfer.world(), transfer.target())) return "furnace in use by an active job";
         return FurnaceSlotAction.unavailableReason(ai, transfer);
+    }
+
+    private static String checkPortalEntry(AIPlayer ai, PrimitiveCommand.EnterNetherPortal enter) {
+        if (!ai.getWorldId().equals(enter.world())) return "portal world changed";
+        var world = ai.getPlayer().getWorld();
+        if (world.getEnvironment() != World.Environment.NORMAL && world.getEnvironment() != World.Environment.NETHER)
+            return "Nether travel is unavailable in this dimension";
+        var portal = enter.portal();
+        var reason = checkBlock(ai, portal, BLOCK_REACH);
+        if (!reason.isEmpty()) return reason;
+        if (Positions.block(world, portal).getType() != Material.NETHER_PORTAL) return "target portal is inactive";
+        return visibleBlock(ai.getPlayer(), portal) ? "" : "portal is blocked from view";
     }
 
     private static String checkAttack(AIPlayer ai, PrimitiveCommand.Attack attack) {

@@ -95,10 +95,12 @@ final class AIBrain {
     private java.util.UUID lastFingerprintedObjective;
     private final me.herry.minecraftAI.ai.learned.TrainingControl trainingControl;
     private me.herry.minecraftAI.ai.learned.PolicyCandidates.Candidate activeLearned;
+    private PortalDeparture portalDeparture;
     private java.util.UUID learnedWorld;
     private long learnedStartedAt;
     private long learnedNextChoiceAt;
     private boolean learnedLane;
+    private record PortalDeparture(java.util.UUID source, java.util.UUID destination, String inputId, long observedTick) {}
     private @Nullable OverworldAutonomy.Decision activeAutonomy;
     private boolean autonomyPreparation;
     // 목표 명세, 스킬, 관측, 학습용 기록. 판단에는 쓰지 않는다.
@@ -179,6 +181,7 @@ final class AIBrain {
 
     // 진행 중인 행동과 계획을 모두 버리고 처음 상태로 돌아간다.
     void reset() {
+        portalDeparture = null;
         if (trainingControl != null) trainingControl.end(ai, activeLearned, (int) Math.min(2400, ai.getTicks() - learnedStartedAt));
         else if (learnedLane && learnedPolicy != null && ai.getBody().isUsable()) {
             var observed = me.herry.minecraftAI.ai.learned.PolicyCandidates.observe(ai, activeLearned,
@@ -202,6 +205,24 @@ final class AIBrain {
         activeLearned = null; learnedWorld = null; learnedLane = false;
         ai.getNavigation().stop();
         ai.getBody().clearInputs();
+    }
+
+    void observeNetherPortalDeparture(java.util.UUID source, java.util.UUID destination) {
+        if (learnedLane && activeLearned != null && activeLearned.command() instanceof me.herry.minecraftAI.ai.primitive.control.PrimitiveCommand.EnterNetherPortal enter
+                && enter.world().equals(source) && plan != null && plan.current() != null
+                && plan.current().getStatus() == ActionStatus.RUNNING) {
+            portalDeparture = new PortalDeparture(source, destination, activeLearned.inputId(), ai.getTicks());
+        }
+    }
+
+    void observeWorldArrival(java.util.UUID source) {
+        var departure = portalDeparture;
+        portalDeparture = null;
+        if (departure == null || activeLearned == null || !departure.source().equals(source)
+                || !departure.destination().equals(ai.getWorldId()) || !departure.inputId().equals(activeLearned.inputId())
+                || ai.getTicks() - departure.observedTick() > 40) return;
+        ai.getPolicyTaskMemory().ended(ai.getWorldId(), ai.getTicks(), activeLearned.id(), "SUCCESS", "nether portal arrival");
+        ai.debug("Learned portal arrival: choice=" + activeLearned.id() + " from=" + source + " to=" + ai.getWorldId());
     }
 
     // 닿지 못해서 포기했던 상대라도 먼저 때려 오면 다시 맞서 싸울 수 있게 한다.

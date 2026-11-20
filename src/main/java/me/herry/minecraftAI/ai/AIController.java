@@ -311,10 +311,10 @@ public final class AIController {
         crafting.clearCache();
     }
 
-    public void handleWorldChange(Player player) {
+    public void handleWorldChange(Player player, java.util.UUID sourceWorld) {
         Entry entry = entryOf(player);
         if (entry == null) return;
-        entry.ai.onWorldChanged();
+        entry.ai.onWorldChanged(sourceWorld);
         PortalTracker.onArrival(entry.ai);
     }
 

@@ -59,6 +59,16 @@ public sealed interface PrimitiveCommand {
         @Override public PrimitiveType type() { return PrimitiveType.USE_ITEM; }
     }
 
+    /** Walk into the selected active Nether portal cell and wait for normal dimension travel. */
+    record EnterNetherPortal(UUID world, BlockPoint portal) implements PrimitiveCommand {
+        public EnterNetherPortal {
+            Objects.requireNonNull(world, "world");
+            portal = ContractValues.block(portal);
+        }
+
+        @Override public PrimitiveType type() { return PrimitiveType.INTERACT_BLOCK; }
+    }
+
     record Attack(UUID entityId) implements PrimitiveCommand {
         public Attack { Objects.requireNonNull(entityId, "entityId"); }
         @Override public PrimitiveType type() { return PrimitiveType.ATTACK; }

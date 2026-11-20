@@ -62,6 +62,7 @@ public final class PolicyCandidates {
     }
     private int recipeCursor;
     private int furnaceStorageCursor;
+    private int portalObservationCursor;
     private long recipeRevision = Long.MIN_VALUE;
     private final CandidateDiscovery discovery = new CandidateDiscovery();
     private int recipeOptions;
@@ -161,6 +162,7 @@ public final class PolicyCandidates {
                 case CRAFT -> crafting(ai, found, actionContext);
                 case FURNACE -> furnaceTransfers(ai, observed.sight(), found, actionContext);
                 case IGNITE -> portalIgnitions(ai, observed.sight(), found, actionContext);
+                case PORTAL -> portalEntries(ai, found, actionContext);
             }
             generated.put(source.name(), found.size() - before);
         });
@@ -372,6 +374,28 @@ public final class PolicyCandidates {
         }
     }
 
+    private void portalEntries(AIPlayer ai, Map<String, Candidate> found, CandidateActionContext.Context actionContext) {
+        var feet = ai.getPosition();
+        var world = ai.getPlayer().getWorld();
+        if (world.getEnvironment() != org.bukkit.World.Environment.NORMAL && world.getEnvironment() != org.bukkit.World.Environment.NETHER) return;
+        // Portal blocks are passable. A ray that sees through one is not evidence it is absent.
+        var targets = miningObservationTargets(feet.offset(0, -1, 0), feet, portalObservationCursor);
+        int inspected = 0;
+        for (var target : targets) {
+            if (ai.getWorkBudget().isExhausted()) break;
+            inspected++;
+            if (target.y() < world.getMinHeight() || target.y() >= world.getMaxHeight() || !Positions.isLoaded(world, target)
+                    || Positions.block(world, target).getType() != Material.NETHER_PORTAL) continue;
+            var below = target.offset(0, -1, 0);
+            if (!target.equals(feet) && below.y() >= world.getMinHeight()
+                    && Positions.block(world, below).getType() == Material.NETHER_PORTAL) continue;
+            add(ai, found, "enter-nether-portal:" + target.encode(), new PrimitiveCommand.EnterNetherPortal(ai.getWorldId(), target),
+                    null, null, target.x() - feet.x(), target.y() - feet.y(), target.z() - feet.z(), "enter-nether-portal", true, actionContext);
+        }
+        // The standing cell is prepended so a return portal remains discoverable immediately.
+        portalObservationCursor = nextMiningObservationCursor(feet.offset(0, -1, 0), portalObservationCursor, targets.subList(0, inspected));
+    }
+
     private boolean movementInputs(AIPlayer ai, Map<String, Candidate> found) {
         if (ai.getWorkBudget().isExhausted()) return false;
         for (var input : MovementInput.choices(ai.getWorldId(), ai.getPlayer().getLocation().getYaw(), movementInputCursor, 24)) {
@@ -526,6 +550,7 @@ public final class PolicyCandidates {
                 : command instanceof PrimitiveCommand.BreakBlock mine ? mine.tool().material()
                 : command instanceof PrimitiveCommand.FurnaceTransfer transfer ? transfer.material()
                 : command instanceof PrimitiveCommand.IgnitePortal ? "FLINT_AND_STEEL"
+                : command instanceof PrimitiveCommand.EnterNetherPortal ? "NETHER_PORTAL"
                 : command instanceof PrimitiveCommand.Equip equip ? equip.tool().material() : "";
         if (!semantic.isBlank()) features[48 + bucket(semantic, 7)] = 1;
         if (consumable != null) {

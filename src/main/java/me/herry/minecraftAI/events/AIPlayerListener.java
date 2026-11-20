@@ -27,6 +27,8 @@ import io.papermc.paper.event.player.AsyncChatEvent;
 import io.papermc.paper.event.server.ServerResourcesReloadedEvent;
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
 import org.bukkit.event.player.PlayerChangedWorldEvent;
+import org.bukkit.event.player.PlayerPortalEvent;
+import org.bukkit.event.player.PlayerTeleportEvent;
 import org.bukkit.event.player.PlayerItemBreakEvent;
 import org.bukkit.event.player.PlayerKickEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
@@ -156,7 +158,21 @@ public class AIPlayerListener implements Listener {
 
     @EventHandler(priority = EventPriority.MONITOR)
     public void onWorldChange(PlayerChangedWorldEvent event) {
-        controller.handleWorldChange(event.getPlayer());
+        controller.handleWorldChange(event.getPlayer(), event.getFrom().getUID());
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onNetherPortal(PlayerPortalEvent event) {
+        if (event.getCause() != PlayerTeleportEvent.TeleportCause.NETHER_PORTAL || event.getTo() == null) return;
+        var from = event.getFrom().getWorld();
+        var to = event.getTo().getWorld();
+        if (from == null || to == null) return;
+        var source = from.getEnvironment();
+        var destination = to.getEnvironment();
+        if (!((source == org.bukkit.World.Environment.NORMAL && destination == org.bukkit.World.Environment.NETHER)
+                || (source == org.bukkit.World.Environment.NETHER && destination == org.bukkit.World.Environment.NORMAL))) return;
+        AIPlayer ai = controller.getByEntity(event.getPlayer());
+        if (ai != null) ai.observeNetherPortalDeparture(from.getUID(), to.getUID());
     }
 
     // 관리자가 AI 를 우클릭하면 AI 의 인벤토리를 보여 준다. 손이 두 개라 이벤트가 두 번 오므로 주로 쓰는 손만 처리한다.
