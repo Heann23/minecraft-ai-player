@@ -655,7 +655,7 @@ class BridgeProtocolTests(unittest.TestCase):
 
     def test_rollout_drains_in_flight_goal_completion_before_changing_policy(self):
         with tempfile.TemporaryDirectory() as temporary:
-            trainer = PaperTrainer(Path(temporary), seed=7, rollout_size=32, maximum=64, max_bytes=16*1024*1024)
+            trainer = PaperTrainer(Path(temporary) / "run", seed=7, rollout_size=32, maximum=64, max_bytes=16*1024*1024)
             session = str(uuid.uuid4())
             release_update = threading.Event()
 
