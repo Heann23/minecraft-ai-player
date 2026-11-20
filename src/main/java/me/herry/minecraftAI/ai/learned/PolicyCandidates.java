@@ -290,15 +290,17 @@ public final class PolicyCandidates {
 
     private void attacks(AIPlayer ai, Map<String, Candidate> found, CandidateActionContext.Context actionContext) {
         var p = ai.getPlayer();
-        var livingTargets = new LinkedHashMap<java.util.UUID, org.bukkit.entity.LivingEntity>();
-        for (var entity : ai.getPerception().getHostiles()) livingTargets.putIfAbsent(entity.getUniqueId(), entity);
-        for (var entity : ai.getPerception().getAnimals()) livingTargets.putIfAbsent(entity.getUniqueId(), entity);
-        for (var hostile : livingTargets.values()) {
+        var targets = new LinkedHashMap<UUID, org.bukkit.entity.Entity>();
+        for (var entity : ai.getPerception().getEndCrystals()) targets.putIfAbsent(entity.getUniqueId(), entity);
+        for (var entity : ai.getPerception().getHostiles()) targets.putIfAbsent(entity.getUniqueId(), entity);
+        for (var entity : ai.getPerception().getAnimals()) targets.putIfAbsent(entity.getUniqueId(), entity);
+        var origin = p.getLocation();
+        for (var target : targets.values()) {
             if (ai.getWorkBudget().isExhausted()) break;
-            if (!StrikeExactAction.canReach(ai, hostile)) continue;
-            var at = hostile.getLocation();
-            add(ai, found, "attack:" + hostile.getUniqueId(), new PrimitiveCommand.Attack(hostile.getUniqueId()), null, null,
-                    at.getX() - p.getLocation().getX(), at.getY() - p.getLocation().getY(), at.getZ() - p.getLocation().getZ(), hostile.getType().name(), true, actionContext);
+            if (!StrikeExactAction.canReach(ai, target)) continue;
+            var at = target.getLocation();
+            add(ai, found, "attack:" + target.getUniqueId(), new PrimitiveCommand.Attack(target.getUniqueId()), null, null,
+                    at.getX() - origin.getX(), at.getY() - origin.getY(), at.getZ() - origin.getZ(), target.getType().name(), true, actionContext);
         }
     }
 

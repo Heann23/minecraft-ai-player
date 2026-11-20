@@ -4,6 +4,8 @@ import me.herry.minecraftAI.ai.AIPlayer;
 import me.herry.minecraftAI.ai.action.AbstractAction;
 import me.herry.minecraftAI.ai.perception.PerceptionSystem;
 import org.bukkit.Bukkit;
+import org.bukkit.entity.EnderCrystal;
+import org.bukkit.entity.Entity;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
 
@@ -17,9 +19,17 @@ public final class StrikeExactAction extends AbstractAction {
     @Override protected void onTick(AIPlayer ai) {
         if (!ai.getWorldId().equals(world) || !ai.getBody().isUsable()) { fail("world/body changed"); return; }
         var entity = Bukkit.getEntity(target);
-        if (!(entity instanceof LivingEntity living) || !canReach(ai, living)) {
+        if (entity == null || !canReach(ai, entity)) {
             fail("target unavailable or outside melee reach"); return;
         }
+        if (entity instanceof EnderCrystal crystal) {
+            ai.getPlayer().attack(crystal);
+            ai.getPlayer().swingMainHand();
+            if (!crystal.isValid() || crystal.isDead()) succeed();
+            else fail("end crystal survived melee input");
+            return;
+        }
+        LivingEntity living = (LivingEntity) entity;
         double healthBefore = living.getHealth(), absorptionBefore = living.getAbsorptionAmount();
         ai.getPlayer().attack(living); ai.getPlayer().swingMainHand();
         ai.debug("Learned strike observed: target=" + target + " healthBefore=" + healthBefore
@@ -29,10 +39,11 @@ public final class StrikeExactAction extends AbstractAction {
         succeed();
     }
 
-    public static boolean canReach(AIPlayer ai, LivingEntity living) {
-        return !(living instanceof Player) && living.isValid() && !living.isDead()
-                && living.getWorld().equals(ai.getPlayer().getWorld()) && PerceptionSystem.canSee(ai.getPlayer(), living)
-                && distanceSquared(living.getBoundingBox(), ai.getPlayer().getEyeLocation()) <= 9;
+    public static boolean canReach(AIPlayer ai, Entity target) {
+        return (target instanceof LivingEntity || target instanceof EnderCrystal) && !(target instanceof Player)
+                && target.isValid() && !target.isDead()
+                && target.getWorld().equals(ai.getPlayer().getWorld()) && PerceptionSystem.canSee(ai.getPlayer(), target)
+                && distanceSquared(target.getBoundingBox(), ai.getPlayer().getEyeLocation()) <= 9;
     }
 
     private static double distanceSquared(org.bukkit.util.BoundingBox box, org.bukkit.Location eye) {

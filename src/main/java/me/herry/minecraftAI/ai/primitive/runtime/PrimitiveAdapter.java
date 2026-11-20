@@ -24,6 +24,7 @@ import me.herry.minecraftAI.ai.action.SneakAction;
 import me.herry.minecraftAI.ai.action.SwimAction;
 import me.herry.minecraftAI.ai.action.WaitAction;
 import me.herry.minecraftAI.ai.inventory.JunkPolicy;
+import me.herry.minecraftAI.ai.learned.StrikeExactAction;
 import me.herry.minecraftAI.ai.memory.MemoryType;
 import me.herry.minecraftAI.ai.navigation.BlockClass;
 import me.herry.minecraftAI.ai.navigation.BukkitTerrainView;
@@ -45,6 +46,7 @@ import org.bukkit.Material;
 import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockFace;
+import org.bukkit.entity.EnderCrystal;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Item;
 import org.bukkit.entity.LivingEntity;
@@ -288,7 +290,9 @@ public final class PrimitiveAdapter {
             case PrimitiveCommand.EnterEndPortal enter -> new EnterPortalAction(enter.portal(), Material.END_PORTAL);
             case PrimitiveCommand.ThrowEnderEye eye -> new EnderEyeAction(eye);
             case PrimitiveCommand.SocketEnderEye eye -> new EnderEyeAction(eye);
-            case PrimitiveCommand.Attack attack -> AttackEntityAction.exactTarget((LivingEntity) Bukkit.getEntity(attack.entityId()));
+            case PrimitiveCommand.Attack attack -> Bukkit.getEntity(attack.entityId()) instanceof EnderCrystal
+                    ? new StrikeExactAction(ai.getWorldId(), attack.entityId())
+                    : AttackEntityAction.exactTarget((LivingEntity) Bukkit.getEntity(attack.entityId()));
             case PrimitiveCommand.Pickup pickup -> PickupItemAction.direct(pickup.radius(), true);
             case PrimitiveCommand.Equip equip -> new SlotEquipAction(equip.tool());
             case PrimitiveCommand.SelectSlot select -> new SelectHotbarSlotAction(select.slot());
@@ -408,6 +412,8 @@ public final class PrimitiveAdapter {
 
     private static String checkAttack(AIPlayer ai, PrimitiveCommand.Attack attack) {
         Entity entity = Bukkit.getEntity(attack.entityId());
+        if (entity instanceof EnderCrystal crystal)
+            return StrikeExactAction.canReach(ai, crystal) ? "" : "end crystal unavailable or outside visible melee reach";
         if (!(entity instanceof LivingEntity target) || target instanceof Player) return "target is not an attackable non-player living entity";
         if (!target.isValid() || target.isDead() || !target.getWorld().equals(ai.getPlayer().getWorld())) return "target is unavailable in this world";
         if (target.getLocation().distanceSquared(ai.getPlayer().getLocation()) > 16.0 * 16.0) return "combat target exceeds local range";
