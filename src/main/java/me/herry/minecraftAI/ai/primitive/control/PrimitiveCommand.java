@@ -77,6 +77,23 @@ public sealed interface PrimitiveCommand {
         @Override public PrimitiveType type() { return PrimitiveType.CRAFT_ITEM; }
     }
 
+    enum FurnaceSlot { INGREDIENT, FUEL, RESULT }
+
+    /** Insert one item from the selected storage slot, or take the matching result into storage. */
+    record FurnaceTransfer(UUID world, BlockPoint target, FurnaceSlot slot, int inventorySlot,
+                            String material) implements PrimitiveCommand {
+        public FurnaceTransfer {
+            Objects.requireNonNull(world, "world");
+            target = ContractValues.block(target);
+            Objects.requireNonNull(slot, "slot");
+            ContractValues.range(inventorySlot, slot == FurnaceSlot.RESULT ? -1 : 0,
+                    slot == FurnaceSlot.RESULT ? -1 : 35, "inventorySlot");
+            material = ContractValues.material(material);
+        }
+
+        @Override public PrimitiveType type() { return PrimitiveType.INTERACT_BLOCK; }
+    }
+
     record Wait(int ticks) implements PrimitiveCommand {
         public Wait { ContractValues.range(ticks, 1, PrimitiveProgram.MAX_TICKS, "ticks"); }
         @Override public PrimitiveType type() { return PrimitiveType.WAIT; }

@@ -61,6 +61,7 @@ public final class PolicyCandidates {
         public Capture { candidates = List.copyOf(candidates); stock = Map.copyOf(stock); }
     }
     private int recipeCursor;
+    private int furnaceStorageCursor;
     private long recipeRevision = Long.MIN_VALUE;
     private final CandidateDiscovery discovery = new CandidateDiscovery();
     private int recipeOptions;
@@ -158,6 +159,7 @@ public final class PolicyCandidates {
                 case ATTACK -> attacks(ai, found, actionContext);
                 case PICKUP -> add(ai, found, "pickup:4", new PrimitiveCommand.Pickup(4), null, null, 0, 0, 0, "", true, actionContext);
                 case CRAFT -> crafting(ai, found, actionContext);
+                case FURNACE -> furnaceTransfers(ai, observed.sight(), found, actionContext);
             }
             generated.put(source.name(), found.size() - before);
         });
@@ -312,6 +314,49 @@ public final class PolicyCandidates {
         recipeScanComplete = recipesChecked == recipes.size();
     }
 
+    private void furnaceTransfers(AIPlayer ai, PolicyFrame.SightObservation sight, Map<String, Candidate> found,
+                                  CandidateActionContext.Context actionContext) {
+        if (sight == null) return;
+        var targets = new LinkedHashSet<BlockPoint>();
+        for (var ray : sight.rays()) {
+            var block = ray.block();
+            if (block != null && "FURNACE".equals(block.material()))
+                targets.add(new BlockPoint(block.x(), block.y(), block.z()));
+        }
+        if (targets.isEmpty()) return;
+        int start = furnaceStorageCursor;
+        furnaceStorageCursor = (furnaceStorageCursor + 8) % 36;
+        var player = ai.getPlayer();
+        var world = player.getWorld();
+        var eye = player.getEyeLocation();
+        for (var target : targets) {
+            if (ai.getWorkBudget().isExhausted()) return;
+            if (eye.distanceSquared(Positions.center(world, target)) > PrimitiveAdapter.BLOCK_REACH * PrimitiveAdapter.BLOCK_REACH) continue;
+            var furnace = Furnaces.inventory(world, target);
+            if (furnace == null) continue;
+            var output = furnace.getResult();
+            if (output != null && !output.isEmpty())
+                addFurnaceTransfer(ai, found, actionContext, new PrimitiveCommand.FurnaceTransfer(ai.getWorldId(), target,
+                        PrimitiveCommand.FurnaceSlot.RESULT, -1, output.getType().name()));
+            for (int offset = 0; offset < 8 && !ai.getWorkBudget().isExhausted(); offset++) {
+                int slot = (start + offset) % 36;
+                var item = player.getInventory().getItem(slot);
+                if (item == null || item.isEmpty()) continue;
+                for (var destination : List.of(PrimitiveCommand.FurnaceSlot.INGREDIENT, PrimitiveCommand.FurnaceSlot.FUEL))
+                    addFurnaceTransfer(ai, found, actionContext, new PrimitiveCommand.FurnaceTransfer(ai.getWorldId(),
+                            target, destination, slot, item.getType().name()));
+            }
+        }
+    }
+
+    private void addFurnaceTransfer(AIPlayer ai, Map<String, Candidate> found, CandidateActionContext.Context actionContext,
+                                    PrimitiveCommand.FurnaceTransfer transfer) {
+        var offset = transfer.target().offset(-ai.getPosition().x(), -ai.getPosition().y(), -ai.getPosition().z());
+        String type = "furnace-" + transfer.slot().name().toLowerCase(Locale.ROOT);
+        add(ai, found, type + ":" + transfer.target().encode() + ":" + transfer.inventorySlot() + ":" + transfer.material(),
+                transfer, null, null, offset.x(), offset.y(), offset.z(), type, true, actionContext);
+    }
+
     private boolean movementInputs(AIPlayer ai, Map<String, Candidate> found) {
         if (ai.getWorkBudget().isExhausted()) return false;
         for (var input : MovementInput.choices(ai.getWorldId(), ai.getPlayer().getLocation().getYaw(), movementInputCursor, 24)) {
@@ -464,6 +509,7 @@ public final class PolicyCandidates {
         features[32 + bucket(identity, 16)] = 1;
         String semantic = recipe != null ? recipe.result() : consumable != null ? consumable.consumption().remainderMaterial()
                 : command instanceof PrimitiveCommand.BreakBlock mine ? mine.tool().material()
+                : command instanceof PrimitiveCommand.FurnaceTransfer transfer ? transfer.material()
                 : command instanceof PrimitiveCommand.Equip equip ? equip.tool().material() : "";
         if (!semantic.isBlank()) features[48 + bucket(semantic, 7)] = 1;
         if (consumable != null) {
@@ -490,11 +536,15 @@ public final class PolicyCandidates {
             features[57] = Math.clamp(observedBlock.getBlockData().getDestroySpeed(actualTool, true) / 32.0, 0, 16);
         }
         if (recipe != null) features[27] = recipe.resultAmount() / 64.0;
+        if (command instanceof PrimitiveCommand.FurnaceTransfer transfer) features[29] = transfer.inventorySlot() / 35.0;
         String directMaterial = recipe != null ? recipe.result()
                 : blockEvidence != null ? blockEvidence.material()
                 : command instanceof PrimitiveCommand.PlaceBlock place ? place.material()
+                : command instanceof PrimitiveCommand.FurnaceTransfer transfer ? transfer.material()
                 : consumable != null ? consumable.material() : null;
-        CandidateActionContext.encode(features, type, directMaterial, recipe, actionContext);
+        boolean takesFurnaceResult = command instanceof PrimitiveCommand.FurnaceTransfer transfer
+                && transfer.slot() == PrimitiveCommand.FurnaceSlot.RESULT;
+        CandidateActionContext.encode(features, type, directMaterial, recipe, actionContext, takesFurnaceResult);
         found.put(id, new Candidate(id, command, recipe, consumable, new PolicyFrame.Option(id, features, blockEvidence)));
         return true;
     }

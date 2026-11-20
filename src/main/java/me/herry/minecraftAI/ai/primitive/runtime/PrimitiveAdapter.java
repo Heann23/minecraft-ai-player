@@ -10,6 +10,7 @@ import me.herry.minecraftAI.ai.action.CraftItemAction;
 import me.herry.minecraftAI.ai.action.DropJunkAction;
 import me.herry.minecraftAI.ai.action.EatFoodAction;
 import me.herry.minecraftAI.ai.action.ExactPlaceBlockAction;
+import me.herry.minecraftAI.ai.action.FurnaceSlotAction;
 import me.herry.minecraftAI.ai.action.JumpAction;
 import me.herry.minecraftAI.ai.action.LookAtAction;
 import me.herry.minecraftAI.ai.action.MoveToAction;
@@ -67,7 +68,7 @@ public final class PrimitiveAdapter {
             BlockFace.DOWN, BlockFace.UP, BlockFace.NORTH, BlockFace.SOUTH, BlockFace.EAST, BlockFace.WEST
     };
     private static final EnumSet<PrimitiveType> SUPPORTED = EnumSet.complementOf(
-            EnumSet.of(PrimitiveType.INTERACT_BLOCK, PrimitiveType.INTERACT_ENTITY, PrimitiveType.MOVE_INPUT));
+            EnumSet.of(PrimitiveType.INTERACT_ENTITY, PrimitiveType.MOVE_INPUT));
 
     private PrimitiveAdapter() {
     }
@@ -96,7 +97,8 @@ public final class PrimitiveAdapter {
                 case SNEAK -> "Hold sneak for a bounded number of ticks and release it";
                 case SWIM -> "Use swimming inputs toward a local point in water";
                 case MOVE_INPUT -> "Hold selected player movement keys via the learned candidate lane";
-                case INTERACT_BLOCK, INTERACT_ENTITY -> "Unavailable in control schema version 1";
+                case INTERACT_BLOCK -> "Use the chosen furnace ingredient, fuel, or result slot";
+                case INTERACT_ENTITY -> "Unavailable in control schema version 1";
             };
             String limitation = switch (type) {
                 case USE_ITEM -> "Food only; bucket, bow and other item uses need explicit contracts";
@@ -107,7 +109,8 @@ public final class PrimitiveAdapter {
                 case BREAK_BLOCK -> "Reach, visibility, correct drop tool, floor, home, lava and falling-block guards apply";
                 case PLACE_BLOCK -> "Solid single-cell non-gravity blocks only";
                 case MOVE_INPUT -> "Learned candidate lane only; standalone control schema version 1 does not expose these keys";
-                case INTERACT_BLOCK, INTERACT_ENTITY -> "Unsupported commands are rejected, never replaced with a guessed action";
+                case INTERACT_BLOCK -> "Ordinary furnaces only, one insertion or one result-slot transfer per action";
+                case INTERACT_ENTITY -> "Unsupported commands are rejected, never replaced with a guessed action";
                 default -> "Availability must be checked for the concrete command before execution";
             };
             result.add(new Capability(type, SUPPORTED.contains(type), effect, limitation));
@@ -244,6 +247,7 @@ public final class PrimitiveAdapter {
             case PrimitiveCommand.Equip equip -> checkTool(ai, equip.tool());
             case PrimitiveCommand.SelectSlot select -> select.slot() < 0 || select.slot() > 8 ? "hotbar slot must be 0..8" : "";
             case PrimitiveCommand.Craft craft -> checkCraft(ai, craft);
+            case PrimitiveCommand.FurnaceTransfer furnace -> checkFurnace(ai, furnace);
             case PrimitiveCommand.Wait wait -> checkTicks(wait.ticks(), 200);
             case PrimitiveCommand.Sneak sneak -> checkTicks(sneak.ticks(), 200);
             case PrimitiveCommand.Swim swim -> checkSwimming(ai, swim);
@@ -276,6 +280,7 @@ public final class PrimitiveAdapter {
             case PrimitiveCommand.Equip equip -> new SlotEquipAction(equip.tool());
             case PrimitiveCommand.SelectSlot select -> new SelectHotbarSlotAction(select.slot());
             case PrimitiveCommand.Craft craft -> new CraftItemAction(material(craft.material()), craft.amount());
+            case PrimitiveCommand.FurnaceTransfer furnace -> new FurnaceSlotAction(furnace);
             case PrimitiveCommand.Wait wait -> new WaitAction(wait.ticks());
             case PrimitiveCommand.Sneak sneak -> new SneakAction(sneak.ticks());
             case PrimitiveCommand.Swim swim -> new SwimAction(swim.target(), swim.timeoutTicks());
@@ -347,6 +352,15 @@ public final class PrimitiveAdapter {
         if (material == null) return "unknown material";
         String reason = checkBlock(ai, place.target(), BLOCK_REACH);
         return reason.isEmpty() ? ExactPlaceBlockAction.unavailableReason(ai, place.target(), material) : reason;
+    }
+
+    private static String checkFurnace(AIPlayer ai, PrimitiveCommand.FurnaceTransfer transfer) {
+        if (!ai.getWorldId().equals(transfer.world())) return "furnace world changed";
+        String reason = checkBlock(ai, transfer.target(), BLOCK_REACH);
+        if (!reason.isEmpty()) return reason;
+        if (!visibleBlock(ai.getPlayer(), transfer.target())) return "furnace is blocked from view";
+        if (ai.getFurnaceJob() != null && ai.getFurnaceJob().isAt(transfer.world(), transfer.target())) return "furnace in use by an active job";
+        return FurnaceSlotAction.unavailableReason(ai, transfer);
     }
 
     private static String checkAttack(AIPlayer ai, PrimitiveCommand.Attack attack) {
