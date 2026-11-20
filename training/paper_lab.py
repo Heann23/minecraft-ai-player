@@ -256,6 +256,16 @@ def confirm_model_command(process, events, send, operation, name, *, timeout=8):
     return False
 
 
+BLOCK_DROP_EVENT = re.compile(
+    r"\[AI:RLLearner\] BlockDropEvent world=([0-9a-f-]{36}) tick=(\d+) source=(\S+) "
+    r"block=([A-Z0-9_]+) entity=([0-9a-f-]{36}) item=([A-Z0-9_]+) count=([1-9]\d*) cancelled=false\s*$"
+)
+ITEM_PICKUP_EVENT = re.compile(
+    r"\[AI:RLLearner\] ItemPickupEvent world=([0-9a-f-]{36}) tick=(\d+) entity=([0-9a-f-]{36}) "
+    r"item=([A-Z0-9_]+) stackCount=([1-9]\d*) remaining=(\d+) cancelled=false\s*$"
+)
+
+
 def summarize_game_log(path: Path):
     """Observed diagnostics, never an inferred task success or an invented missing sample."""
     choices, endings, cancellations = Counter(), Counter(), Counter()
@@ -264,6 +274,9 @@ def summarize_game_log(path: Path):
     positions, health, food = [], [], []
     deaths = respawns = rejected = 0
     damage_counts, damage_amounts = Counter(), Counter()
+    pending_block_drops = {}
+    block_drop_counts = Counter()
+    block_drop_pickups = {}
     inventory = None
     goal_samples = {}
     goal_footprints = {}
@@ -274,6 +287,27 @@ def summarize_game_log(path: Path):
         return {"available": False, "allWorldAutonomyProven": False}
     with path.open(encoding="utf-8", errors="replace") as stream:
         for line in stream:
+            drop = BLOCK_DROP_EVENT.search(line)
+            if drop:
+                world, tick, source, block, entity, item, _ = drop.groups()
+                pending_block_drops[(world, entity)] = (int(tick), source, block, item)
+                block_drop_counts[block, item] += 1
+            pickup = ITEM_PICKUP_EVENT.search(line)
+            if pickup:
+                world, tick, entity, item, stack_count, remaining = pickup.groups()
+                key = (world, entity)
+                source_drop = pending_block_drops.get(key)
+                if source_drop and int(remaining) < int(stack_count):
+                    drop_tick, source, block, dropped_item = source_drop
+                    pickup_tick = int(tick)
+                    if dropped_item == item and drop_tick <= pickup_tick:
+                        del pending_block_drops[key]
+                        summary = block_drop_pickups.setdefault((block, item), {
+                            "matchedDropEntities": 0,
+                            "firstMatch": {"world": world, "source": source, "entity": entity,
+                                           "dropTick": drop_tick, "pickupTick": pickup_tick},
+                        })
+                        summary["matchedDropEntities"] += 1
             damage = re.search(r"\[AI:RLLearner\] DamageEvent world=[0-9a-f-]{36} tick=\d+ cause=([A-Z_]+) "
                                r"finalDamage=(\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)(?:\s|$)", line)
             if damage:
@@ -388,6 +422,12 @@ def summarize_game_log(path: Path):
             "miningCancellationsWithoutProgressTrace": max(0, cancellations["BreakBlock"] - sum(x["samples"] for x in mining_progress.values())),
             "sampledPositions": positions, "sampledHealthCeilings": health, "sampledFood": food,
             "recordedDeaths": deaths, "recordedRespawns": respawns, "deferredRequests": rejected, "damageEventSummary": damage_events,
+            "blockDropPickupSummaries": [
+                {"block": block, "item": item, "observedDropEvents": count,
+                 **block_drop_pickups.get((block, item), {"matchedDropEntities": 0, "firstMatch": None})}
+                for (block, item), count in sorted(block_drop_counts.items())
+            ],
+            "blockDropPickupScope": "Non-cancelled drops matched to a later or same-tick pickup attempt by world, item and entity. A pickup event precedes the inventory transfer.",
             "finalInventoryNbt": inventory, "allWorldAutonomyProven": False,
             "goalObservationSummaries": list(goal_samples.values()), "unaggregatedGoalSamples": unaggregated_goal_samples,
             "firstNativePolicyInputs": list(first_policy_inputs.values()), "unaggregatedFirstPolicyInputs": unaggregated_policy_inputs,

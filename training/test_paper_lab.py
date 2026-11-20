@@ -11,6 +11,29 @@ from paper_lab import read_plan, validate_options, summarize_game_log, validate_
 
 
 class SeedPlanTests(unittest.TestCase):
+    def test_block_drop_pickup_requires_same_world_item_and_entity(self):
+        world = "12345678-1234-1234-1234-123456789abc"
+        other_world = "22345678-1234-1234-1234-123456789abc"
+        entity = "32345678-1234-1234-1234-123456789abc"
+        prefix = "[AI:RLLearner] "
+        base = f"{prefix}BlockDropEvent world={world} tick=20 source=1,64,2 block=OAK_LOG entity={entity} item=OAK_LOG count=1"
+
+        def pickup(at_world=world, tick=21, item="OAK_LOG", remaining=0, cancelled="false"):
+            return (f"{prefix}ItemPickupEvent world={at_world} tick={tick} entity={entity} item={item} "
+                    f"stackCount=1 remaining={remaining} cancelled={cancelled}")
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "console.log"
+            path.write_text("\n".join((base + " cancelled=true", pickup(), base + " cancelled=false",
+                pickup(at_world=other_world), pickup(tick=19), pickup(item="BIRCH_LOG"),
+                pickup(remaining=1), pickup(cancelled="true"), pickup(tick=25), pickup(tick=26))))
+            [result] = summarize_game_log(path)["blockDropPickupSummaries"]
+            self.assertEqual((result["block"], result["item"]), ("OAK_LOG", "OAK_LOG"))
+            self.assertEqual(result["observedDropEvents"], 1)
+            self.assertEqual(result["matchedDropEntities"], 1)
+            self.assertEqual(result["firstMatch"], {"world": world, "source": "1,64,2", "entity": entity,
+                                                    "dropTick": 20, "pickupTick": 25})
+
     def test_damage_events_and_sampled_residence_do_not_invent_missing_evidence(self):
         world = "12345678-1234-1234-1234-123456789abc"
         goal = "22345678-1234-1234-1234-123456789abc"
