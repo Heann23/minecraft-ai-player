@@ -48,6 +48,7 @@ import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockFace;
 import org.bukkit.entity.EnderCrystal;
+import org.bukkit.entity.EnderDragon;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Item;
 import org.bukkit.entity.LivingEntity;
@@ -293,9 +294,12 @@ public final class PrimitiveAdapter {
             case PrimitiveCommand.ThrowEnderEye eye -> new EnderEyeAction(eye);
             case PrimitiveCommand.SocketEnderEye eye -> new EnderEyeAction(eye);
             case PrimitiveCommand.ShootBow shot -> new ShootBowAction(shot);
-            case PrimitiveCommand.Attack attack -> Bukkit.getEntity(attack.entityId()) instanceof EnderCrystal
-                    ? new StrikeExactAction(ai.getWorldId(), attack.entityId())
-                    : AttackEntityAction.exactTarget((LivingEntity) Bukkit.getEntity(attack.entityId()));
+            case PrimitiveCommand.Attack attack -> {
+                Entity target = Bukkit.getEntity(attack.entityId());
+                yield target instanceof EnderCrystal || target instanceof EnderDragon
+                        ? new StrikeExactAction(ai.getWorldId(), attack.entityId())
+                        : AttackEntityAction.exactTarget((LivingEntity) target);
+            }
             case PrimitiveCommand.Pickup pickup -> PickupItemAction.direct(pickup.radius(), true);
             case PrimitiveCommand.Equip equip -> new SlotEquipAction(equip.tool());
             case PrimitiveCommand.SelectSlot select -> new SelectHotbarSlotAction(select.slot());
@@ -415,8 +419,8 @@ public final class PrimitiveAdapter {
 
     private static String checkAttack(AIPlayer ai, PrimitiveCommand.Attack attack) {
         Entity entity = Bukkit.getEntity(attack.entityId());
-        if (entity instanceof EnderCrystal crystal)
-            return StrikeExactAction.canReach(ai, crystal) ? "" : "end crystal unavailable or outside visible melee reach";
+        if (entity instanceof EnderCrystal || entity instanceof EnderDragon)
+            return StrikeExactAction.canReach(ai, entity) ? "" : "target outside visible melee reach";
         if (!(entity instanceof LivingEntity target) || target instanceof Player) return "target is not an attackable non-player living entity";
         if (!target.isValid() || target.isDead() || !target.getWorld().equals(ai.getPlayer().getWorld())) return "target is unavailable in this world";
         if (target.getLocation().distanceSquared(ai.getPlayer().getLocation()) > 16.0 * 16.0) return "combat target exceeds local range";

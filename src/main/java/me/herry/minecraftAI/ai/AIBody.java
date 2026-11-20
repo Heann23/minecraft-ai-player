@@ -4,6 +4,8 @@ import me.herry.minecraftAI.ai.util.BlockPoint;
 import me.herry.minecraftAI.ai.util.Positions;
 import org.bukkit.Location;
 import org.bukkit.block.BlockFace;
+import org.bukkit.entity.EnderDragon;
+import org.bukkit.entity.EnderDragonPart;
 import org.bukkit.entity.Player;
 
 /**
@@ -46,6 +48,8 @@ public interface AIBody {
 
     /** Releases an active main-hand bow through the normal server input path. */
     boolean releaseBow();
+
+    EnderDragonPart dragonHead(EnderDragon dragon);
 
     /**
      * 손에 든 아이템을 그 블록의 그 면에 대고 쓴다 (부싯돌과 부시로 불 붙이기 등). 진짜 플레이어가 블록을 우클릭한 것과 같다.

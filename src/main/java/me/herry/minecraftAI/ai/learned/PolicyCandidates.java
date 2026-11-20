@@ -15,6 +15,8 @@ import me.herry.minecraftAI.ai.util.BlockPoint;
 import me.herry.minecraftAI.ai.util.Positions;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
+import org.bukkit.entity.EnderDragon;
+import org.bukkit.entity.Entity;
 
 import java.util.*;
 
@@ -296,10 +298,7 @@ public final class PolicyCandidates {
         if (ai.getBody().canShootBow()) {
             for (var crystal : ai.getPerception().getEndCrystals()) {
                 if (ai.getWorkBudget().isExhausted()) break;
-                var at = crystal.getLocation();
-                var shot = new PrimitiveCommand.ShootBow(ai.getWorldId(), crystal.getUniqueId());
-                add(ai, found, "shoot-bow:" + crystal.getUniqueId(), shot, null, null, at.getX() - origin.getX(),
-                        at.getY() - origin.getY(), at.getZ() - origin.getZ(), crystal.getType().name(), true, actionContext);
+                addBow(ai, found, actionContext, origin, crystal, crystal, crystal.getType().name());
             }
         }
         var targets = new LinkedHashMap<UUID, org.bukkit.entity.Entity>();
@@ -308,11 +307,26 @@ public final class PolicyCandidates {
         for (var entity : ai.getPerception().getAnimals()) targets.putIfAbsent(entity.getUniqueId(), entity);
         for (var target : targets.values()) {
             if (ai.getWorkBudget().isExhausted()) break;
+            Entity contact = target;
+            String identity = target.getType().name();
+            if (target instanceof EnderDragon dragon) {
+                contact = ai.getBody().dragonHead(dragon);
+                identity = "ENDER_DRAGON_HEAD:" + dragon.getPhase().name();
+                if (ai.getBody().canShootBow()) addBow(ai, found, actionContext, origin, dragon, contact, identity);
+            }
             if (!StrikeExactAction.canReach(ai, target)) continue;
-            var at = target.getLocation();
+            var at = contact.getLocation();
             add(ai, found, "attack:" + target.getUniqueId(), new PrimitiveCommand.Attack(target.getUniqueId()), null, null,
-                    at.getX() - origin.getX(), at.getY() - origin.getY(), at.getZ() - origin.getZ(), target.getType().name(), true, actionContext);
+                    at.getX() - origin.getX(), at.getY() - origin.getY(), at.getZ() - origin.getZ(), identity, true, actionContext);
         }
+    }
+
+    private void addBow(AIPlayer ai, Map<String, Candidate> found, CandidateActionContext.Context actionContext,
+                        org.bukkit.Location origin, Entity target, Entity contact, String identity) {
+        var at = contact.getLocation();
+        var shot = new PrimitiveCommand.ShootBow(ai.getWorldId(), target.getUniqueId());
+        add(ai, found, "shoot-bow:" + target.getUniqueId(), shot, null, null, at.getX() - origin.getX(),
+                at.getY() - origin.getY(), at.getZ() - origin.getZ(), identity, true, actionContext);
     }
 
     private void crafting(AIPlayer ai, Map<String, Candidate> found, CandidateActionContext.Context actionContext) {

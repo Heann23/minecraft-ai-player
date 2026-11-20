@@ -33,6 +33,9 @@ import org.bukkit.craftbukkit.CraftServer;
 import org.bukkit.block.BlockFace;
 import org.bukkit.craftbukkit.CraftWorld;
 import org.bukkit.craftbukkit.block.CraftBlock;
+import org.bukkit.craftbukkit.entity.CraftEnderDragon;
+import org.bukkit.entity.EnderDragon;
+import org.bukkit.entity.EnderDragonPart;
 import org.bukkit.entity.Player;
 import org.bukkit.event.player.PlayerRespawnEvent;
 
@@ -186,6 +189,11 @@ public final class FakePlayerBody implements AIBody {
         if (!canShootBow() || !handle.isUsingItem() || handle.getUsedItemHand() != InteractionHand.MAIN_HAND) return false;
         handle.releaseUsingItem();
         return true;
+    }
+
+    @Override
+    public EnderDragonPart dragonHead(EnderDragon dragon) {
+        return (EnderDragonPart) ((CraftEnderDragon) dragon).getHandle().head.getBukkitEntity();
     }
 
     @Override

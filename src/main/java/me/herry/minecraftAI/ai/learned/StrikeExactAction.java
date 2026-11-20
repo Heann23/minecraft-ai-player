@@ -5,6 +5,7 @@ import me.herry.minecraftAI.ai.action.AbstractAction;
 import me.herry.minecraftAI.ai.perception.PerceptionSystem;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.EnderCrystal;
+import org.bukkit.entity.EnderDragon;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
@@ -31,7 +32,8 @@ public final class StrikeExactAction extends AbstractAction {
         }
         LivingEntity living = (LivingEntity) entity;
         double healthBefore = living.getHealth(), absorptionBefore = living.getAbsorptionAmount();
-        ai.getPlayer().attack(living); ai.getPlayer().swingMainHand();
+        Entity contact = living instanceof EnderDragon dragon ? ai.getBody().dragonHead(dragon) : living;
+        ai.getPlayer().attack(contact); ai.getPlayer().swingMainHand();
         ai.debug("Learned strike observed: target=" + target + " healthBefore=" + healthBefore
                 + " healthAfter=" + living.getHealth() + " absorptionBefore=" + absorptionBefore
                 + " absorptionAfter=" + living.getAbsorptionAmount() + " deadAfter=" + living.isDead());
@@ -40,10 +42,12 @@ public final class StrikeExactAction extends AbstractAction {
     }
 
     public static boolean canReach(AIPlayer ai, Entity target) {
-        return (target instanceof LivingEntity || target instanceof EnderCrystal) && !(target instanceof Player)
-                && target.isValid() && !target.isDead()
-                && target.getWorld().equals(ai.getPlayer().getWorld()) && PerceptionSystem.canSee(ai.getPlayer(), target)
-                && distanceSquared(target.getBoundingBox(), ai.getPlayer().getEyeLocation()) <= 9;
+        if (!(target instanceof LivingEntity || target instanceof EnderCrystal) || target instanceof Player
+                || !target.isValid() || target.isDead() || !target.getWorld().equals(ai.getPlayer().getWorld())) return false;
+        if (target instanceof EnderDragon dragon && dragon.getPhase() == EnderDragon.Phase.DYING) return false;
+        Entity contact = target instanceof EnderDragon dragon ? ai.getBody().dragonHead(dragon) : target;
+        return distanceSquared(contact.getBoundingBox(), ai.getPlayer().getEyeLocation()) <= 9
+                && PerceptionSystem.canSee(ai.getPlayer(), contact);
     }
 
     private static double distanceSquared(org.bukkit.util.BoundingBox box, org.bukkit.Location eye) {
