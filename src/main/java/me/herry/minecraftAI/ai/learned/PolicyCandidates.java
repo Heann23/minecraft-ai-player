@@ -300,14 +300,13 @@ public final class PolicyCandidates {
         if (recipeRevision != ai.getCrafting().revision()) { recipeCursor = 0; recipeRevision = ai.getCrafting().revision(); }
         int crafted = 0;
         var stock = ai.getInventory().snapshot();
-        var recipes = ai.getCrafting().recipeOptionsUsing(stock);
+        var recipes = ai.getCrafting().feasibleRecipeOptions(stock,
+                () -> NearbyBlocks.find(ai.getPlayer(), Material.CRAFTING_TABLE, 4) != null);
         recipeOptions = recipes.size(); recipesChecked = 0;
-        Boolean table = null;
         while (recipesChecked < Math.min(64, recipes.size()) && crafted < 16 && !ai.getWorkBudget().isExhausted()) {
             var recipe = recipes.get(Math.floorMod(recipeCursor++, recipes.size())); recipesChecked++;
             Material result = Material.matchMaterial(recipe.result());
-            if (recipe.needsTable() && table == null) table = Progression.nearbyTable(ai) != null;
-            if (result == null || recipe.needsTable() && !table || ai.getCrafting().singleStep(result, recipe.id(), stock) == null) continue;
+            if (result == null || ai.getCrafting().singleStep(result, recipe.id(), stock) == null) continue;
             if (add(ai, found, "craft:" + recipe.id(), null, recipe, null, 0, 0, 0, recipe.id(), false, actionContext)) crafted++;
         }
         recipeScanComplete = recipesChecked == recipes.size();

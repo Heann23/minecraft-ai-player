@@ -18,7 +18,7 @@ public final class NearbyBlocks {
     }
 
     // 눈에서 radius + 0.5 칸 안에 있고 손이 닿는 가장 가까운 블록. 없으면 null.
-    static @Nullable BlockPoint find(Player player, Material material, int radius) {
+    public static @Nullable BlockPoint find(Player player, Material material, int radius) {
         World world = player.getWorld();
         Location eye = player.getEyeLocation();
         int ex = eye.getBlockX();

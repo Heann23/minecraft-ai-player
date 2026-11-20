@@ -89,6 +89,62 @@ public final class CraftingSystem {
         return List.copyOf(choices.values());
     }
 
+    /**
+     * Sound feasibility pre-filter over registered recipes sharing an owned ingredient.
+     * Eliminates recipes missing required ingredients or a reachable crafting table so impossible 3x3 recipes
+     * cannot starve the bounded recipe scan. Never ranks or prefers any material or recipe.
+     */
+    public List<RecipeOption> feasibleRecipeOptions(Map<Material, Integer> stock, java.util.function.BooleanSupplier hasTable) {
+        warmUp();
+        Map<String, Integer> counts = new HashMap<>();
+        for (var entry : stock.entrySet()) {
+            if (entry.getValue() > 0) counts.put(entry.getKey().name(), entry.getValue());
+        }
+        if (counts.isEmpty()) return List.of();
+        Map<String, RecipeOption> seen = new java.util.TreeMap<>();
+        for (var entry : stock.entrySet()) {
+            if (entry.getValue() <= 0) continue;
+            for (var option : ingredientOptionIndex.getOrDefault(entry.getKey(), List.of()))
+                seen.putIfAbsent(option.id(), option);
+        }
+        return filterFeasible(List.copyOf(seen.values()), counts, hasTable);
+    }
+
+    public static List<RecipeOption> filterFeasible(List<RecipeOption> options, Map<String, Integer> stock,
+                                                    java.util.function.BooleanSupplier hasTable) {
+        if (options.isEmpty() || stock.isEmpty()) return List.of();
+        List<RecipeOption> result = new ArrayList<>();
+        Boolean table = null;
+        for (var option : options) {
+            if (!hasRequiredIngredients(option, stock)) continue;
+            if (option.needsTable()) {
+                if (table == null) table = hasTable.getAsBoolean();
+                if (!table) continue;
+            }
+            result.add(option);
+        }
+        return List.copyOf(result);
+    }
+
+    /** Necessary count condition (per-group and union); zero false negatives even with overlapping alternatives. */
+    public static boolean hasRequiredIngredients(RecipeOption option, Map<String, Integer> stock) {
+        if (option.smelting() || !option.countPlannable()) return false;
+        int totalNeeded = 0;
+        Set<String> allAlternatives = new java.util.HashSet<>();
+        for (var group : option.ingredients()) {
+            int available = 0;
+            for (String alternative : group.alternatives()) {
+                available += Math.max(0, stock.getOrDefault(alternative, 0));
+                allAlternatives.add(alternative);
+            }
+            if (available < group.amount()) return false;
+            totalNeeded += group.amount();
+        }
+        int unionAvailable = 0;
+        for (String alternative : allAlternatives) unionAvailable += Math.max(0, stock.getOrDefault(alternative, 0));
+        return unionAvailable >= totalNeeded;
+    }
+
     /** Cached, immutable recipe knowledge; reading it never performs a craft or changes inventory. */
     public List<RecipeOption> recipeOptions(Material target) {
         return optionIndex.computeIfAbsent(target, material -> {
