@@ -69,6 +69,19 @@ public sealed interface PrimitiveCommand {
         @Override public PrimitiveType type() { return PrimitiveType.INTERACT_BLOCK; }
     }
 
+    record ThrowEnderEye(UUID world) implements PrimitiveCommand {
+        public ThrowEnderEye { Objects.requireNonNull(world, "world"); }
+        @Override public PrimitiveType type() { return PrimitiveType.USE_ITEM; }
+    }
+
+    record SocketEnderEye(UUID world, BlockPoint frame) implements PrimitiveCommand {
+        public SocketEnderEye {
+            Objects.requireNonNull(world, "world");
+            frame = ContractValues.block(frame);
+        }
+        @Override public PrimitiveType type() { return PrimitiveType.USE_ITEM; }
+    }
+
     record Attack(UUID entityId) implements PrimitiveCommand {
         public Attack { Objects.requireNonNull(entityId, "entityId"); }
         @Override public PrimitiveType type() { return PrimitiveType.ATTACK; }

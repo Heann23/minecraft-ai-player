@@ -163,6 +163,7 @@ public final class PolicyCandidates {
                 case FURNACE -> furnaceTransfers(ai, observed.sight(), found, actionContext);
                 case IGNITE -> portalIgnitions(ai, observed.sight(), found, actionContext);
                 case PORTAL -> portalEntries(ai, found, actionContext);
+                case ENDER_EYE -> enderEyes(ai, observed.sight(), found, actionContext);
             }
             generated.put(source.name(), found.size() - before);
         });
@@ -396,6 +397,25 @@ public final class PolicyCandidates {
         portalObservationCursor = nextMiningObservationCursor(feet.offset(0, -1, 0), portalObservationCursor, targets.subList(0, inspected));
     }
 
+    private void enderEyes(AIPlayer ai, PolicyFrame.SightObservation sight, Map<String, Candidate> found,
+                           CandidateActionContext.Context actionContext) {
+        var player = ai.getPlayer();
+        if (player.getWorld().getEnvironment() != org.bukkit.World.Environment.NORMAL
+                || player.getInventory().getItemInMainHand().getType() != Material.ENDER_EYE) return;
+        add(ai, found, "throw-ender-eye", new PrimitiveCommand.ThrowEnderEye(ai.getWorldId()), null, null,
+                0, 0, 0, "throw-ender-eye", true, actionContext);
+        if (sight == null) return;
+        var feet = ai.getPosition();
+        for (var ray : sight.rays()) {
+            if (ai.getWorkBudget().isExhausted()) break;
+            var block = ray.block();
+            if (block == null || !block.material().equals("END_PORTAL_FRAME")) continue;
+            var frame = new BlockPoint(block.x(), block.y(), block.z());
+            add(ai, found, "socket-ender-eye:" + frame.encode(), new PrimitiveCommand.SocketEnderEye(ai.getWorldId(), frame), null, null,
+                    frame.x() - feet.x(), frame.y() - feet.y(), frame.z() - feet.z(), "socket-ender-eye", true, actionContext);
+        }
+    }
+
     private boolean movementInputs(AIPlayer ai, Map<String, Candidate> found) {
         if (ai.getWorkBudget().isExhausted()) return false;
         for (var input : MovementInput.choices(ai.getWorldId(), ai.getPlayer().getLocation().getYaw(), movementInputCursor, 24)) {
@@ -551,6 +571,7 @@ public final class PolicyCandidates {
                 : command instanceof PrimitiveCommand.FurnaceTransfer transfer ? transfer.material()
                 : command instanceof PrimitiveCommand.IgnitePortal ? "FLINT_AND_STEEL"
                 : command instanceof PrimitiveCommand.EnterNetherPortal ? "NETHER_PORTAL"
+                : command instanceof PrimitiveCommand.ThrowEnderEye || command instanceof PrimitiveCommand.SocketEnderEye ? "ENDER_EYE"
                 : command instanceof PrimitiveCommand.Equip equip ? equip.tool().material() : "";
         if (!semantic.isBlank()) features[48 + bucket(semantic, 7)] = 1;
         if (consumable != null) {

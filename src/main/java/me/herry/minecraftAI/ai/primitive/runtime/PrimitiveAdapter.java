@@ -10,6 +10,7 @@ import me.herry.minecraftAI.ai.action.CraftItemAction;
 import me.herry.minecraftAI.ai.action.DropJunkAction;
 import me.herry.minecraftAI.ai.action.EatFoodAction;
 import me.herry.minecraftAI.ai.action.EnterPortalAction;
+import me.herry.minecraftAI.ai.action.EnderEyeAction;
 import me.herry.minecraftAI.ai.action.ExactPlaceBlockAction;
 import me.herry.minecraftAI.ai.action.FurnaceSlotAction;
 import me.herry.minecraftAI.ai.action.IgniteAction;
@@ -88,7 +89,7 @@ public final class PrimitiveAdapter {
                 case JUMP -> "Press jump once and land";
                 case BREAK_BLOCK -> "Mine exactly one visible block with the selected slot and enchantments";
                 case PLACE_BLOCK -> "Place one selected solid block at the selected cell";
-                case USE_ITEM -> "Eat or use held flint and steel on a selected obsidian base";
+                case USE_ITEM -> "Eat, ignite a portal, throw a held eye, or socket it in a selected frame";
                 case ATTACK -> "Fight the selected living entity without switching to another target";
                 case PICKUP_ITEM -> "Walk to nearby drops using the existing pickup action";
                 case DROP_ITEM -> "Discard stacks selected by the existing junk policy";
@@ -103,7 +104,7 @@ public final class PrimitiveAdapter {
                 case INTERACT_ENTITY -> "Unavailable in control schema version 1";
             };
             String limitation = switch (type) {
-                case USE_ITEM -> "Food and portal ignition; other item uses need explicit contracts";
+                case USE_ITEM -> "Food, portal ignition and ender eyes; other item uses need explicit contracts";
                 case ATTACK -> "Existing combat action chooses a weapon and may chase; this is not a single-hit input";
                 case PICKUP_ITEM -> "No implicit obstruction mining; a blocked drop fails and requires another chosen command";
                 case DROP_ITEM -> "Junk policy selection, not arbitrary item disposal";
@@ -246,6 +247,8 @@ public final class PrimitiveAdapter {
                     : ai.getInventory().bestFoodSlot() < 0 ? "no safe food" : "";
             case PrimitiveCommand.IgnitePortal ignite -> IgniteAction.heldToolUnavailable(ai.getPlayer(), ignite.world(), ignite.floor());
             case PrimitiveCommand.EnterNetherPortal enter -> checkPortalEntry(ai, enter);
+            case PrimitiveCommand.ThrowEnderEye eye -> checkHeldEye(ai, eye.world());
+            case PrimitiveCommand.SocketEnderEye eye -> checkEyeSocket(ai, eye);
             case PrimitiveCommand.Attack attack -> checkAttack(ai, attack);
             case PrimitiveCommand.Pickup pickup -> checkPickup(ai, pickup.radius());
             case PrimitiveCommand.Equip equip -> checkTool(ai, equip.tool());
@@ -281,6 +284,8 @@ public final class PrimitiveAdapter {
             case PrimitiveCommand.Eat ignored -> new EatFoodAction();
             case PrimitiveCommand.IgnitePortal ignite -> new IgniteAction(ignite.floor(), ignite.world());
             case PrimitiveCommand.EnterNetherPortal enter -> new EnterPortalAction(enter.portal());
+            case PrimitiveCommand.ThrowEnderEye eye -> new EnderEyeAction(eye);
+            case PrimitiveCommand.SocketEnderEye eye -> new EnderEyeAction(eye);
             case PrimitiveCommand.Attack attack -> AttackEntityAction.exactTarget((LivingEntity) Bukkit.getEntity(attack.entityId()));
             case PrimitiveCommand.Pickup pickup -> PickupItemAction.direct(pickup.radius(), true);
             case PrimitiveCommand.Equip equip -> new SlotEquipAction(equip.tool());
@@ -379,6 +384,22 @@ public final class PrimitiveAdapter {
         if (!reason.isEmpty()) return reason;
         if (Positions.block(world, portal).getType() != Material.NETHER_PORTAL) return "target portal is inactive";
         return visibleBlock(ai.getPlayer(), portal) ? "" : "portal is blocked from view";
+    }
+
+    private static String checkHeldEye(AIPlayer ai, java.util.UUID world) {
+        if (!ai.getWorldId().equals(world)) return "eye use world changed";
+        if (ai.getPlayer().getWorld().getEnvironment() != World.Environment.NORMAL) return "eye use requires the Overworld";
+        return ai.getPlayer().getInventory().getItemInMainHand().getType() == Material.ENDER_EYE ? "" : "no held ender eye";
+    }
+
+    private static String checkEyeSocket(AIPlayer ai, PrimitiveCommand.SocketEnderEye eye) {
+        String reason = checkHeldEye(ai, eye.world());
+        if (reason.isEmpty()) reason = checkBlock(ai, eye.frame(), BLOCK_REACH);
+        if (!reason.isEmpty()) return reason;
+        var block = Positions.block(ai.getPlayer().getWorld(), eye.frame());
+        if (!(block.getBlockData() instanceof org.bukkit.block.data.type.EndPortalFrame frame) || frame.hasEye())
+            return "selected frame has no empty eye socket";
+        return visibleBlock(ai.getPlayer(), eye.frame()) ? "" : "frame is blocked from view";
     }
 
     private static String checkAttack(AIPlayer ai, PrimitiveCommand.Attack attack) {
