@@ -38,6 +38,7 @@ public final class TrainingControl {
                 latestStatus = new PpoBridge.Status(response.modelVersion(), response.environmentSteps(), response.metadata()); latestReceivedTick = now;
                 // Acknowledgement is independent of whether this delayed decision can still be executed.
                 outbox.removeAll(sent);
+                if (response.rolloutBoundary() && !episode.active()) return null;
                 if (ai.getWorldId().equals(requested.frame().world()) && now >= requested.frame().serverTick()
                         && now - requested.frame().serverTick() <= 40 && ai.getBody().isUsable()) {
                     var actual = PolicyCandidates.observe(ai, active, activeTicks);
@@ -51,7 +52,8 @@ public final class TrainingControl {
                     // Invalidated clocks do not transfer old progress credit to a later action.
                     objectiveReward = 0; objectiveEvents.clear();
                     if (!learning) episode = new TrainingEpisode();
-                    return new Decision(requested, requested.candidates().get(response.index()), response, actual, now, after.taskMemory());
+                    var selected = response.rolloutBoundary() ? null : requested.candidates().get(response.index());
+                    return new Decision(requested, selected, response, actual, now, after.taskMemory());
                 }
             } catch (RuntimeException failure) {
                 if (now >= warnAfter) { warn.accept("PPO trainer unavailable; retaining only already admitted input, no Teacher fallback"); warnAfter = now + 200; }
@@ -61,7 +63,7 @@ public final class TrainingControl {
             try {
                 requested = catalog.capture(ai, active, activeTicks);
                 sent = List.copyOf(outbox);
-                pending = bridge.request(requested.frame(), sent);
+                pending = bridge.request(requested.frame(), sent, episode.active());
             } catch (RuntimeException failure) {
                 if (now >= warnAfter) { warn.accept("PPO request deferred: " + failure.getClass().getSimpleName()); warnAfter = now + 200; }
                 pending = null;
@@ -143,7 +145,7 @@ public final class TrainingControl {
                 var last = outbox.getLast();
                 PolicyFrame terminal = new PolicyFrame(ai.getWorldId(), Integer.toUnsignedLong(Bukkit.getCurrentTick()),
                         last.nextState(), last.frame().options(), false);
-                result = bridge.request(terminal, List.copyOf(outbox)).thenApply(ignored -> null);
+                result = bridge.request(terminal, List.copyOf(outbox), false).thenApply(ignored -> null);
             }
         } catch (RuntimeException failure) {
             warn.accept("Could not capture final RL state; missing transition is not converted into success");

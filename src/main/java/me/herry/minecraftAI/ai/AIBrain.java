@@ -507,6 +507,11 @@ final class AIBrain {
             var decision = trainingControl.poll(ai, activeLearned, (int) Math.min(2400, now - learnedStartedAt),
                     now % ai.getConfig().updateInterval == 0 && (plan == null || plan.isFinished() || now >= learnedNextChoiceAt));
             if (decision != null) {
+                if (decision.response().rolloutBoundary()) {
+                    cancelLearnedForReplacement(ai, "ppo-rollout-boundary");
+                    plan = null; activeLearned = null; ai.getBody().clearInputs();
+                    return;
+                }
                 try {
                     var selected = decision.selected();
                     if (activeLearned == null || !selected.inputId().equals(activeLearned.inputId()) || plan == null || plan.isFinished()) {

@@ -653,6 +653,58 @@ class BridgeProtocolTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 resume_checkpoint(output, allow_initial=True)
 
+    def test_rollout_drains_in_flight_goal_completion_before_changing_policy(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            trainer = PaperTrainer(Path(temporary), seed=7, rollout_size=32, maximum=64, max_bytes=16*1024*1024)
+            session = str(uuid.uuid4())
+            release_update = threading.Event()
+
+            def request(*transitions, active=False):
+                return trainer.handle({"schema": SCHEMA, "environment": "minecraft-paper", "id": str(uuid.uuid4()),
+                                       "frame": frame(), "transitions": list(transitions), "activeDecision": active})
+
+            def fit_after_release(model, transitions):
+                release_update.wait()
+                return PaperTrainer.fit_snapshot(model, transitions)
+
+            try:
+                with mock.patch.object(trainer, "fit_snapshot", side_effect=fit_after_release):
+                    rows = [row(trainer.model, session=session, sequence=i, terminal=False) for i in range(32)]
+                    for transition in rows:
+                        transition.pop("nextValue")
+                    request(*rows[:16]); request(*rows[16:30])
+                    drain = request(rows[30], active=True)
+                    self.assertTrue(drain["rolloutBoundary"])
+                    self.assertIsNone(trainer.training)
+                    self.assertEqual(trainer.steps, 31)
+
+                    completion = rows[31]
+                    world, identity = completion["nextWorld"], str(uuid.uuid4())
+                    objective = {"id": identity, "world": world,
+                                 "goal": {"item": "CRAFTING_TABLE", "count": 1, "metadata": {}}, "startedTick": 1}
+                    completion["frame"]["taskMemory"] = {"objective": objective, "owned": 0}
+                    completion.update(reward=1.0005, rewardContract="survival-progress/v3",
+                        nextTaskMemory={"objective": objective, "worldMatches": True, "owned": 1, "currentlyAchieved": True},
+                        taskCompletion={"objectiveId": identity, "world": world, "item": "CRAFTING_TABLE",
+                                        "required": 1, "beforeOwned": 0, "afterOwned": 1},
+                        rewardEvidence={"schema": "actual-reward-evidence/v1", "healthBefore": 20, "healthAfter": 20,
+                                        "foodBefore": 20, "foodAfter": 20, "saturationBefore": 0, "saturationAfter": 0,
+                                        "airBefore": 300, "airAfter": 300, "discoveries": 0, "objectiveReward": 0})
+                    self.assertTrue(request(completion)["rolloutBoundary"])
+                    self.assertTrue(request(completion)["rolloutBoundary"])
+                    self.assertEqual(trainer.steps, 32)
+                    release_update.set()
+                    trainer.poll_training(wait=True)
+                    self.assertEqual(request()["modelVersion"], 1)
+                    self.assertEqual(trainer.discard_reasons, {})
+                    accepted = [json.loads(line) for line in (trainer.output / "paper-rollouts.jsonl").read_text().splitlines()]
+                    self.assertEqual(len(accepted), 32)
+                    self.assertEqual(accepted[-1]["taskCompletion"], completion["taskCompletion"])
+                    self.assertEqual(accepted[-1]["reward"], completion["reward"])
+            finally:
+                release_update.set()
+                trainer.close()
+
     def test_episode_diagnostics_include_excluded_death_and_keep_unfinished_episodes_incomplete(self):
         with tempfile.TemporaryDirectory() as temporary:
             trainer = PaperTrainer(Path(temporary) / "run", seed=7, rollout_size=32, maximum=32, max_bytes=16*1024*1024)

@@ -467,8 +467,12 @@ class PaperTrainer:
         self.poll_training()
         if packet.get("schema") != SCHEMA or packet.get("environment") != "minecraft-paper":
             raise ValueError("only actual Paper bridge schema accepted")
-        if set(packet) - {"schema", "environment", "id", "frame", "transitions", "brainId", "controlEpoch"}:
+        if set(packet) - {"schema", "environment", "id", "frame", "transitions", "brainId", "controlEpoch", "activeDecision"}:
             raise ValueError("unexpected query data")
+        boundary_protocol = "activeDecision" in packet
+        active_decision = packet.get("activeDecision", False)
+        if type(active_decision) is not bool:
+            raise ValueError("invalid active policy decision state")
         if packet.get("brainId") is not None and packet["brainId"] != self.brain_id:
             raise ValueError("query belongs to another brain")
         if packet.get("controlEpoch") is not None:
@@ -516,8 +520,15 @@ class PaperTrainer:
                         self.training = self.worker.submit(self.fit_snapshot, copy.deepcopy(self.model), rows)
                 else:
                     self.preserve_discard(previous, "transition-budget-complete")
-        result = self.model.sample(frame)
-        self.decisions += 1
+        # The request carries the prior closed transition while Java may still be executing
+        # one already-issued decision. Drain that action into the last slot before fitting.
+        remaining = min(self.rollout_size - len(self.rows), self.maximum - self.steps)
+        if boundary_protocol and self.learning_enabled and (
+                self.training is not None or remaining == 0 or active_decision and remaining == 1):
+            result = {"rolloutBoundary": True, "index": -1, "logProbability": 0.0, "value": 0.0}
+        else:
+            result = self.model.sample(frame)
+            self.decisions += 1
         if time.monotonic() - self.last_session_save >= self.session_save_seconds:
             self.persist_session()
         return {"schema": SCHEMA, "id": packet["id"], **result, **self.status()}

@@ -122,12 +122,13 @@ public final class PpoBridge implements AutoCloseable {
                     + discoveries * 0.2 + objectiveReward - (terminated ? 10 : 0), -100, 100);
         }
     }
-    public record Query(String schema, String environment, String id, PolicyFrame frame, java.util.List<Transition> transitions, String brainId, String controlEpoch) {
+    public record Query(String schema, String environment, String id, PolicyFrame frame, java.util.List<Transition> transitions,
+                        String brainId, String controlEpoch, Boolean activeDecision) {
         public Query(String schema, String environment, String id, PolicyFrame frame, java.util.List<Transition> transitions) {
-            this(schema, environment, id, frame, transitions, null, null);
+            this(schema, environment, id, frame, transitions, null, null, null);
         }
         public Query(String schema, String environment, String id, PolicyFrame frame, java.util.List<Transition> transitions, String brainId) {
-            this(schema, environment, id, frame, transitions, brainId, null);
+            this(schema, environment, id, frame, transitions, brainId, null, null);
         }
         public Query {
             transitions = java.util.List.copyOf(transitions);
@@ -137,10 +138,10 @@ public final class PpoBridge implements AutoCloseable {
         }
     }
     public record Response(String schema, String id, int index, String candidate, double logProbability,
-                           double value, long modelVersion, long environmentSteps, Metadata metadata) {
+                           double value, long modelVersion, long environmentSteps, Metadata metadata, boolean rolloutBoundary) {
         public Response(String schema, String id, int index, String candidate, double logProbability,
                         double value, long modelVersion, long environmentSteps) {
-            this(schema, id, index, candidate, logProbability, value, modelVersion, environmentSteps, null);
+            this(schema, id, index, candidate, logProbability, value, modelVersion, environmentSteps, null, false);
         }
     }
     public record Metadata(String brainId, String trainingStartState, long gradientUpdates,
@@ -181,11 +182,11 @@ public final class PpoBridge implements AutoCloseable {
         Files.createDirectories(this.directory);
     }
 
-    public CompletableFuture<Response> request(PolicyFrame frame, java.util.List<Transition> transitions) {
+    public CompletableFuture<Response> request(PolicyFrame frame, java.util.List<Transition> transitions, boolean activeDecision) {
         String id = UUID.randomUUID().toString();
         synchronized (identityLock) {
             long generation = brainGeneration;
-            String payload = gson.toJson(new Query(SCHEMA, "minecraft-paper", id, frame, transitions, expectedBrainId, controlEpoch));
+            String payload = gson.toJson(new Query(SCHEMA, "minecraft-paper", id, frame, transitions, expectedBrainId, controlEpoch, activeDecision));
             return CompletableFuture.supplyAsync(() -> exchange(id, payload, frame, generation), io);
         }
     }
@@ -334,8 +335,7 @@ public final class PpoBridge implements AutoCloseable {
                     if (Files.size(response) > 16384) throw new IOException("oversized PPO response");
                     Response result = gson.fromJson(Files.readString(response), Response.class);
                     if (result == null || !SCHEMA.equals(result.schema()) || !id.equals(result.id())
-                            || result.index() < 0 || result.index() >= frame.options().size()
-                            || !frame.options().get(result.index()).id().equals(result.candidate())
+                            || !validSelection(result, frame)
                             || !Double.isFinite(result.logProbability()) || result.logProbability() > 0
                             || !Double.isFinite(result.value()) || result.modelVersion() < 0 || result.environmentSteps() < 0)
                         throw new IOException("invalid/stale PPO response");
@@ -356,6 +356,13 @@ public final class PpoBridge implements AutoCloseable {
         } finally {
             for (Path path : new Path[]{temporary, request, response}) try { Files.deleteIfExists(path); } catch (IOException ignored) {}
         }
+    }
+
+    private static boolean validSelection(Response response, PolicyFrame frame) {
+        if (response.rolloutBoundary()) return response.index() == -1 && response.candidate() == null
+                && response.metadata() != null && response.metadata().learningEnabled();
+        return response.index() >= 0 && response.index() < frame.options().size()
+                && frame.options().get(response.index()).id().equals(response.candidate());
     }
 
     @Override public void close() {
