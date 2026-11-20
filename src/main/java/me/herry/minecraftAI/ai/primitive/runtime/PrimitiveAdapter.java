@@ -385,7 +385,9 @@ public final class PrimitiveAdapter {
         var reason = checkBlock(ai, portal, BLOCK_REACH);
         if (!reason.isEmpty()) return reason;
         if (Positions.block(world, portal).getType() != portalMaterial) return "target portal is inactive";
-        return visibleBlock(ai.getPlayer(), portal) ? "" : "portal is blocked from view";
+        // The horizontal End portal surface is at 12/16 of the block, above its center.
+        double sightHeight = portalMaterial == Material.END_PORTAL ? 0.75 : 0.5;
+        return visibleBlock(ai.getPlayer(), portal, sightHeight) ? "" : "portal is blocked from view";
     }
 
     private static String checkHeldEye(AIPlayer ai, java.util.UUID world) {
@@ -484,9 +486,13 @@ public final class PrimitiveAdapter {
     }
 
     private static boolean visibleBlock(Player player, BlockPoint target) {
+        return visibleBlock(player, target, 0.5);
+    }
+
+    private static boolean visibleBlock(Player player, BlockPoint target, double height) {
         Location eye = player.getEyeLocation();
         World world = player.getWorld();
-        Location center = Positions.center(world, target);
+        Location center = new Location(world, target.x() + 0.5, target.y() + height, target.z() + 0.5);
         int minX = Math.min(eye.getBlockX(), target.x()) >> 4;
         int maxX = Math.max(eye.getBlockX(), target.x()) >> 4;
         int minZ = Math.min(eye.getBlockZ(), target.z()) >> 4;
