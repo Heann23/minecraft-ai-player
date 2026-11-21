@@ -198,6 +198,33 @@ public sealed interface PrimitiveCommand {
         @Override public PrimitiveType type() { return PrimitiveType.INTERACT_BLOCK; }
     }
 
+    /** Open a visible reachable chest or barrel via normal block interaction and collect items that fit. */
+    record LootChest(UUID world, BlockPoint chest) implements PrimitiveCommand {
+        public LootChest {
+            Objects.requireNonNull(world, "world");
+            chest = ContractValues.block(chest);
+        }
+        @Override public PrimitiveType type() { return PrimitiveType.INTERACT_BLOCK; }
+    }
+
+    /** Right-click a visible reachable bed through the normal server interaction path (set spawn / sleep). */
+    record UseBed(UUID world, BlockPoint bed) implements PrimitiveCommand {
+        public UseBed {
+            Objects.requireNonNull(world, "world");
+            bed = ContractValues.block(bed);
+        }
+        @Override public PrimitiveType type() { return PrimitiveType.INTERACT_BLOCK; }
+    }
+
+    /** Toggle a visible reachable door, trapdoor, fence gate, button, or lever via normal interaction. */
+    record ToggleBlock(UUID world, BlockPoint target) implements PrimitiveCommand {
+        public ToggleBlock {
+            Objects.requireNonNull(world, "world");
+            target = ContractValues.block(target);
+        }
+        @Override public PrimitiveType type() { return PrimitiveType.INTERACT_BLOCK; }
+    }
+
     record Wait(int ticks) implements PrimitiveCommand {
         public Wait { ContractValues.range(ticks, 1, PrimitiveProgram.MAX_TICKS, "ticks"); }
         @Override public PrimitiveType type() { return PrimitiveType.WAIT; }

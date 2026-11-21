@@ -120,6 +120,7 @@ public final class PolicyCandidates {
     private int placementOffsetCursor;
     private int bucketCursor;
     private int dropCursor;
+    private int interactCursor;
     private int movementCursor;
     private int movementInputCursor;
     private int pickupCursor;
@@ -289,6 +290,7 @@ public final class PolicyCandidates {
                 case IGNITE -> portalIgnitions(ai, observed.sight(), found, actionContext);
                 case BUCKET -> buckets(ai, observed.sight(), found, actionContext);
                 case DROP -> drops(ai, state.inventory(), found, actionContext);
+                case INTERACT -> interactions(ai, observed.sight(), found, actionContext);
                 case PORTAL -> portalEntries(ai, found, actionContext);
                 case ENDER_EYE -> enderEyes(ai, observed.sight(), observed.eye(), found, actionContext);
                 case VISIBLE_APPROACH -> visibleApproaches(ai, observed.sight(), found, actionContext);
@@ -309,7 +311,12 @@ public final class PolicyCandidates {
                 expanded.add(candidate.committed(ShootBowAction.ACTION_TICKS));
             else if (candidate.command() instanceof PrimitiveCommand.ShieldBlock shield)
                 expanded.add(candidate.committed(shield.holdTicks()));
-            else if (candidate.equipment() != null || candidate.command() instanceof PrimitiveCommand.DropExact)
+            else if (candidate.command() instanceof PrimitiveCommand.UseBed)
+                expanded.add(candidate.committed(ExactUseBedAction.ACTION_TICKS));
+            else if (candidate.command() instanceof PrimitiveCommand.LootChest)
+                expanded.add(candidate.committed(20));
+            else if (candidate.equipment() != null || candidate.command() instanceof PrimitiveCommand.DropExact
+                    || candidate.command() instanceof PrimitiveCommand.ToggleBlock)
                 expanded.add(candidate.committed(5));
             else
                 for (int ticks : new int[] { 5, 20, 80, 600 })
@@ -809,6 +816,62 @@ public final class PolicyCandidates {
         dropCursor = nextCursor;
     }
 
+    private void interactions(AIPlayer ai, PolicyFrame.SightObservation sight, Map<String, Candidate> found,
+            CandidateActionContext.Context actionContext) {
+        var feet = ai.getPosition();
+        var world = ai.getPlayer().getWorld();
+        int offered = 0;
+        if (sight != null) {
+            for (var ray : sight.rays()) {
+                if (offered >= 6 || ai.getWorkBudget().isExhausted())
+                    return;
+                var observed = ray.block();
+                if (observed == null)
+                    continue;
+                if (offerInteraction(ai, world, feet, new BlockPoint(observed.x(), observed.y(), observed.z()), found,
+                        actionContext)) {
+                    offered++;
+                }
+            }
+        }
+        var targets = nearbyTargets(feet);
+        for (int checked = 0; checked < 24 && offered < 6 && !ai.getWorkBudget().isExhausted(); checked++) {
+            var cell = targets.get(Math.floorMod(interactCursor++, targets.size()));
+            if (offerInteraction(ai, world, feet, cell, found, actionContext)) {
+                offered++;
+            }
+        }
+    }
+
+    private boolean offerInteraction(AIPlayer ai, org.bukkit.World world, BlockPoint feet, BlockPoint cell,
+            Map<String, Candidate> found, CandidateActionContext.Context actionContext) {
+        if (cell.y() < world.getMinHeight() || cell.y() >= world.getMaxHeight() || !Positions.isLoaded(world, cell))
+            return false;
+        var block = Positions.block(world, cell);
+        Material type = block.getType();
+        if (type.isAir())
+            return false;
+        if (ExactLootChestAction.isLootableContainer(type)) {
+            return add(ai, found, "loot-chest:" + cell.encode(),
+                    new PrimitiveCommand.LootChest(ai.getWorldId(), cell), null, null,
+                    cell.x() - feet.x(), cell.y() - feet.y(), cell.z() - feet.z(), type.name(), true, actionContext);
+        }
+        if (org.bukkit.Tag.BEDS.isTagged(type)) {
+            return add(ai, found, "use-bed:" + cell.encode(),
+                    new PrimitiveCommand.UseBed(ai.getWorldId(), cell), null, null,
+                    cell.x() - feet.x(), cell.y() - feet.y(), cell.z() - feet.z(), type.name(), true, actionContext);
+        }
+        if (ToggleBlockAction.isToggleable(block)) {
+            if (block.getBlockData() instanceof org.bukkit.block.data.type.Door door
+                    && door.getHalf() == org.bukkit.block.data.Bisected.Half.TOP)
+                return false;
+            return add(ai, found, "toggle-block:" + cell.encode(),
+                    new PrimitiveCommand.ToggleBlock(ai.getWorldId(), cell), null, null,
+                    cell.x() - feet.x(), cell.y() - feet.y(), cell.z() - feet.z(), type.name(), true, actionContext);
+        }
+        return false;
+    }
+
     private void portalEntries(AIPlayer ai, Map<String, Candidate> found,
             CandidateActionContext.Context actionContext) {
         var feet = ai.getPosition();
@@ -1231,7 +1294,13 @@ public final class PolicyCandidates {
                                                                                                 ? "SHIELD"
                                                                                                 : command instanceof PrimitiveCommand.DropExact drop
                                                                                                         ? drop.material()
-                                                                                                        : command instanceof PrimitiveCommand.Equip equip
+                                                                                                        : command instanceof PrimitiveCommand.LootChest
+                                                                                                                ? "CHEST"
+                                                                                                                : command instanceof PrimitiveCommand.UseBed
+                                                                                                                        ? "BED"
+                                                                                                                        : command instanceof PrimitiveCommand.ToggleBlock
+                                                                                                                                ? identity
+                                                                                                                                : command instanceof PrimitiveCommand.Equip equip
                                                                                                                 ? equip.tool()
                                                                                                                         .material()
                                                                                                                 : "";
@@ -1349,7 +1418,10 @@ public final class PolicyCandidates {
         if (active.movement() != null || active.equipment() != null
                 || active.command() instanceof PrimitiveCommand.ShootBow
                 || active.command() instanceof PrimitiveCommand.ShieldBlock
-                || active.command() instanceof PrimitiveCommand.DropExact)
+                || active.command() instanceof PrimitiveCommand.DropExact
+                || active.command() instanceof PrimitiveCommand.LootChest
+                || active.command() instanceof PrimitiveCommand.UseBed
+                || active.command() instanceof PrimitiveCommand.ToggleBlock)
             return List.of();
         List<Candidate> result = new ArrayList<>();
         for (int ticks : new int[] { 5, 20, 80, 600 }) {

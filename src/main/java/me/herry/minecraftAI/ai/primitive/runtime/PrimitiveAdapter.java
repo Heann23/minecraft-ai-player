@@ -268,6 +268,9 @@ public final class PrimitiveAdapter {
             case PrimitiveCommand.SelectSlot select -> select.slot() < 0 || select.slot() > 8 ? "hotbar slot must be 0..8" : "";
             case PrimitiveCommand.Craft craft -> checkCraft(ai, craft);
             case PrimitiveCommand.FurnaceTransfer furnace -> checkFurnace(ai, furnace);
+            case PrimitiveCommand.LootChest chest -> me.herry.minecraftAI.ai.action.ExactLootChestAction.unavailableReason(ai, chest);
+            case PrimitiveCommand.UseBed bed -> me.herry.minecraftAI.ai.action.ExactUseBedAction.unavailableReason(ai, bed);
+            case PrimitiveCommand.ToggleBlock toggle -> me.herry.minecraftAI.ai.action.ToggleBlockAction.unavailableReason(ai, toggle);
             case PrimitiveCommand.Wait wait -> checkTicks(wait.ticks(), 200);
             case PrimitiveCommand.Sneak sneak -> checkTicks(sneak.ticks(), 200);
             case PrimitiveCommand.Swim swim -> checkSwimming(ai, swim);
@@ -319,6 +322,9 @@ public final class PrimitiveAdapter {
             case PrimitiveCommand.SelectSlot select -> new SelectHotbarSlotAction(select.slot());
             case PrimitiveCommand.Craft craft -> new CraftItemAction(material(craft.material()), craft.amount());
             case PrimitiveCommand.FurnaceTransfer furnace -> new FurnaceSlotAction(furnace);
+            case PrimitiveCommand.LootChest chest -> new me.herry.minecraftAI.ai.action.ExactLootChestAction(chest);
+            case PrimitiveCommand.UseBed bed -> new me.herry.minecraftAI.ai.action.ExactUseBedAction(bed);
+            case PrimitiveCommand.ToggleBlock toggle -> new me.herry.minecraftAI.ai.action.ToggleBlockAction(toggle);
             case PrimitiveCommand.Wait wait -> new WaitAction(wait.ticks());
             case PrimitiveCommand.Sneak sneak -> new SneakAction(sneak.ticks());
             case PrimitiveCommand.Swim swim -> new SwimAction(swim.target(), swim.timeoutTicks());

@@ -228,6 +228,13 @@ public final class FakePlayerBody implements AIBody {
         if (!isUsable()) return false;
         ItemStack stack = handle.getItemInHand(InteractionHand.MAIN_HAND);
         if (stack.isEmpty()) return false;
+        return interactBlock(block, face);
+    }
+
+    @Override
+    public boolean interactBlock(BlockPoint block, BlockFace face) {
+        if (!isUsable()) return false;
+        ItemStack stack = handle.getItemInHand(InteractionHand.MAIN_HAND);
         BlockPos pos = new BlockPos(block.x(), block.y(), block.z());
         Direction direction = CraftBlock.blockFaceToNotch(face);
         // 클라이언트가 보내는 것처럼 그 면의 한가운데를 눌렀다고 알린다.

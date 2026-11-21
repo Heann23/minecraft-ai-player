@@ -73,6 +73,14 @@ public interface AIBody {
      */
     boolean useItemOn(BlockPoint block, BlockFace face);
 
+    /**
+     * Right-clicks a block face through the normal server interaction path even with an empty main hand
+     * (opening chests, using beds, toggling doors/buttons/levers).
+     */
+    default boolean interactBlock(BlockPoint block, BlockFace face) {
+        return false;
+    }
+
     default void lookAt(double x, double y, double z) {
         Location eye = getPlayer().getEyeLocation();
         double dx = x - eye.getX();

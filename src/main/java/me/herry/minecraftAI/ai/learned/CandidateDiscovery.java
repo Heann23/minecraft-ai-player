@@ -8,7 +8,7 @@ import java.util.function.Consumer;
 /** Resume discovery after the last visited source. This schedules observation work, never a chosen action. */
 final class CandidateDiscovery {
     enum Source { DIRECT_MOVE, TARGET_MOVE, LOOK, JUMP, EQUIPMENT, MINE, CONSUME, PLACE, ATTACK, PICKUP,
-        CRAFT, FURNACE, IGNITE, BUCKET, DROP, PORTAL, ENDER_EYE, VISIBLE_APPROACH }
+        CRAFT, FURNACE, IGNITE, BUCKET, DROP, INTERACT, PORTAL, ENDER_EYE, VISIBLE_APPROACH }
     record Visit(List<Source> sources, boolean budgetExhausted) {
         Visit { sources = List.copyOf(sources); }
     }
