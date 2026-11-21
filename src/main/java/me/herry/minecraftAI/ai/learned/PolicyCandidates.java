@@ -6,6 +6,8 @@ import me.herry.minecraftAI.ai.crafting.RecipeOption;
 import me.herry.minecraftAI.ai.observation.SurvivalCapture;
 import me.herry.minecraftAI.ai.observation.SurvivalObservation;
 import me.herry.minecraftAI.ai.perception.EnderEyeTrack;
+import me.herry.minecraftAI.ai.perception.PerceptionSystem;
+import me.herry.minecraftAI.ai.perception.Visibility;
 import me.herry.minecraftAI.ai.plan.Progression;
 import me.herry.minecraftAI.ai.primitive.PrimitiveTarget;
 import me.herry.minecraftAI.ai.primitive.PrimitiveType;
@@ -197,12 +199,12 @@ public final class PolicyCandidates {
             else for (int ticks : new int[]{5, 20, 80, 600}) expanded.add(candidate.committed(ticks));
         }
         var candidates = selectFair(expanded, active == null ? "" : active.id());
+        var feet = ai.getPosition();
         var evidence = new PolicyFrame.Discovery("candidate-discovery/v1", visit.sources().stream().map(Enum::name).toList(),
                 generated, visit.budgetExhausted(), recipeOptions, recipesChecked, recipeScanComplete, consumptionScan, miningScan);
         // Direct keys and budgeted registries are partial observations, even after every source was visited.
         return new Capture(new PolicyFrame(ai.getWorldId(), Integer.toUnsignedLong(Bukkit.getCurrentTick()), body,
-                candidates.stream().map(candidate -> new PolicyFrame.Option(candidate.id(), candidate.encoded().features(),
-                        candidate.encoded().blockEvidence(), candidate.inputId())).toList(), false, evidence,
+                candidates.stream().map(candidate -> option(candidate, feet, observed.eye())).toList(), false, evidence,
                 taskView, observed.sight()), candidates, observed.body(), observed.stock());
     }
 
@@ -456,6 +458,7 @@ public final class PolicyCandidates {
             var target = new PrimitiveTarget.Point(eye.x(), eye.y(), eye.z());
             add(ai, found, "look:thrown-eye", new PrimitiveCommand.LookAt(target), null, null,
                     eye.x() - from.getX(), eye.y() - from.getY(), eye.z() - from.getZ(), "thrown-eye", true, actionContext);
+            eyeBearingMoves(ai, found, eye, actionContext);
         }
         if (player.getWorld().getEnvironment() != org.bukkit.World.Environment.NORMAL
                 || player.getInventory().getItemInMainHand().getType() != Material.ENDER_EYE) return;
@@ -471,6 +474,42 @@ public final class PolicyCandidates {
             add(ai, found, "socket-ender-eye:" + frame.encode(), new PrimitiveCommand.SocketEnderEye(ai.getWorldId(), frame), null, null,
                     frame.x() - feet.x(), frame.y() - feet.y(), frame.z() - feet.z(), "socket-ender-eye", true, actionContext);
         }
+    }
+
+    private void eyeBearingMoves(AIPlayer ai, Map<String, Candidate> found, EnderEyeTrack.Observation eye,
+                                 CandidateActionContext.Context actionContext) {
+        double length = Math.hypot(eye.dx(), eye.dz());
+        if (length < 2) return; // Require observed flight beyond the immediate release.
+        var feet = ai.getPosition();
+        var view = ai.getPlayer().getEyeLocation();
+        var opacity = PerceptionSystem.opacityOf(view.getWorld());
+        for (int stride : new int[]{4, 8, 12}) {
+            int dx = (int) Math.round(stride * eye.dx() / length);
+            int dz = (int) Math.round(stride * eye.dz() / length);
+            for (int dy : new int[]{0, 1, -1}) {
+                if (ai.getWorkBudget().isExhausted()) return;
+                var target = feet.offset(dx, dy, dz);
+                if (!Visibility.canSeePoint(opacity, view.getX(), view.getY(), view.getZ(),
+                        target.x() + 0.5, target.y() + 0.25, target.z() + 0.5)) continue;
+                add(ai, found, "move-eye:" + target.encode(), new PrimitiveCommand.MoveTo(target, 0.5),
+                        null, null, dx, dy, dz, "thrown-eye", true, actionContext);
+            }
+        }
+    }
+
+    private static PolicyFrame.Option option(Candidate candidate, BlockPoint feet, EnderEyeTrack.Observation eye) {
+        double[] features = candidate.encoded().features();
+        if (eye != null && candidate.command() instanceof PrimitiveCommand.MoveTo move) {
+            double dx = move.target().x() - feet.x();
+            double dz = move.target().z() - feet.z();
+            double displacement = Math.hypot(dx, dz);
+            double flight = Math.hypot(eye.dx(), eye.dz());
+            if (flight >= 2 && displacement > 0) {
+                features[281] = 1;
+                features[282] = Math.clamp((dx * eye.dx() + dz * eye.dz()) / (displacement * flight), -1, 1);
+            }
+        }
+        return new PolicyFrame.Option(candidate.id(), features, candidate.encoded().blockEvidence(), candidate.inputId());
     }
 
     private boolean movementInputs(AIPlayer ai, Map<String, Candidate> found) {
