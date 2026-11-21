@@ -64,6 +64,8 @@ public final class PolicyCandidates {
         public int reconsiderAfterTicks() {
             if (command instanceof PrimitiveCommand.ShootBow)
                 return ShootBowAction.ACTION_TICKS;
+            if (recipe != null)
+                return VanillaCraftAction.ACTION_TICKS;
             return Math.max(1, Math.min(20, commitmentTicks));
         }
 
@@ -307,7 +309,9 @@ public final class PolicyCandidates {
                         new PolicyFrame.Option(candidate.id(), retained, candidate.encoded().blockEvidence()),
                         candidate.commitmentTicks(), candidate.inputId(), candidate.equipment(), candidate.movement()));
                 expanded.addAll(compatibleReconsiderations(candidate));
-            } else if (candidate.command() instanceof PrimitiveCommand.ShootBow)
+            } else if (candidate.recipe() != null)
+                expanded.add(candidate.committed(VanillaCraftAction.ACTION_TICKS));
+            else if (candidate.command() instanceof PrimitiveCommand.ShootBow)
                 expanded.add(candidate.committed(ShootBowAction.ACTION_TICKS));
             else if (candidate.command() instanceof PrimitiveCommand.ShieldBlock shield)
                 expanded.add(candidate.committed(shield.holdTicks()));
@@ -1416,6 +1420,7 @@ public final class PolicyCandidates {
      */
     static List<Candidate> compatibleReconsiderations(Candidate active) {
         if (active.movement() != null || active.equipment() != null
+                || active.recipe() != null
                 || active.command() instanceof PrimitiveCommand.ShootBow
                 || active.command() instanceof PrimitiveCommand.ShieldBlock
                 || active.command() instanceof PrimitiveCommand.DropExact

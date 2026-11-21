@@ -22,6 +22,8 @@ import org.bukkit.inventory.ShapelessRecipe;
 
 /** One explicit recipe, using actual grid/result slots. No inventory material exchange or recursive crafting. */
 public final class VanillaCraftAction extends AbstractAction {
+    /** Atomic single-recipe execution horizon (covers opening a 3x3 table plus up to 9 grid placements). */
+    public static final int ACTION_TICKS = 40;
     private final Material target;
     private final String recipeId;
     private java.util.UUID world;
