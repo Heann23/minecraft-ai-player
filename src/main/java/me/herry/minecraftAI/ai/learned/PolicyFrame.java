@@ -50,8 +50,8 @@ public record PolicyFrame(UUID world, long serverTick, double[] state, List<Opti
     public record MiningScan(String schema, int cursorBefore, int cursorAfter, int requestedCells,
                              int inspectedCells, int visibleLoadedCells, boolean processedAllRequests) {
         public MiningScan {
-            if (!"mining-window-scan/v1".equals(schema) || cursorBefore < 0 || cursorBefore >= 75
-                    || cursorAfter < 0 || cursorAfter >= 75 || requestedCells < 1 || requestedCells > 24
+            if (!"mining-window-scan/v1".equals(schema) || cursorBefore < 0 || cursorBefore >= PolicyCandidates.NEARBY_TARGET_COUNT
+                    || cursorAfter < 0 || cursorAfter >= PolicyCandidates.NEARBY_TARGET_COUNT || requestedCells < 1 || requestedCells > 24
                     || inspectedCells < 0 || inspectedCells > requestedCells || visibleLoadedCells < 0
                     || visibleLoadedCells > inspectedCells || processedAllRequests != (inspectedCells == requestedCells))
                 throw new IllegalArgumentException("invalid mining inspection evidence");

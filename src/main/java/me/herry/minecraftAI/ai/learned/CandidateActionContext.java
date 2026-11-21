@@ -147,6 +147,10 @@ public final class CandidateActionContext {
             if (!option.countPlannable() || option.smelting()) continue;
             for (RecipeOption.Ingredient ingredient : option.ingredients()) ingredients.addAll(ingredient.alternatives());
         }
+        for (RecipeOption option : crafting.smeltingOptions(target)) {
+            if (!option.countPlannable()) continue;
+            for (RecipeOption.Ingredient ingredient : option.ingredients()) ingredients.addAll(ingredient.alternatives());
+        }
         return ingredients;
     }
 
@@ -249,11 +253,18 @@ public final class CandidateActionContext {
         return Map.copyOf(next);
     }
 
+    public static void encodeMaterialImpact(double[] features, MaterialDelta delta, Context context, boolean tableKnownMissing) {
+        encodeMaterialImpact(features, delta, context, tableKnownMissing, null);
+    }
+
     /**
      * Encodes pure factual material-impact features (indices 288..300) for the given candidate delta against
      * registered objective recipes and (when missing) required crafting-table recipes.
+     * {@code smeltingOutput} is non-null only when a furnace ingredient transfer feeds a registered smelting recipe
+     * producing that material, so smelting an objective precursor is not flagged as wasteful consumption.
      */
-    public static void encodeMaterialImpact(double[] features, MaterialDelta delta, Context context, boolean tableKnownMissing) {
+    public static void encodeMaterialImpact(double[] features, MaterialDelta delta, Context context, boolean tableKnownMissing,
+                                            String smeltingOutput) {
         if (features.length != PolicyFrame.ACTION_SIZE) throw new IllegalArgumentException("candidate action context shape");
         for (int i = IMPACT_START; i <= IMPACT_END; i++) features[i] = 0;
         var task = context.task();
@@ -264,7 +275,7 @@ public final class CandidateActionContext {
         Map<String, Integer> before = context.storageStock();
         Map<String, Integer> after = applyDelta(before, delta);
         String goalItem = task.objective().goal().item();
-        boolean producesGoal = delta.produced().getOrDefault(goalItem, 0) > 0;
+        boolean producesGoal = delta.produced().getOrDefault(goalItem, 0) > 0 || goalItem.equals(smeltingOutput);
 
         if (!producesGoal) {
             int consumedObjUnits = 0;
@@ -290,6 +301,7 @@ public final class CandidateActionContext {
         }
 
         boolean producesGoalOrDirect = producesGoal
+                || (smeltingOutput != null && context.objectiveIngredients().contains(smeltingOutput))
                 || delta.produced().keySet().stream().anyMatch(context.objectiveIngredients()::contains);
         if (!producesGoalOrDirect
                 && delta.consumed().keySet().stream().anyMatch(context.indirectIngredients()::contains)) {

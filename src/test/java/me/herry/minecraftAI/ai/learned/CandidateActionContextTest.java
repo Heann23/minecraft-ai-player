@@ -218,4 +218,33 @@ class CandidateActionContextTest {
             assertEquals(0.0, maskedF[i], "masked index " + i);
         }
     }
+
+    @Test void smeltingPrecursorTransferDoesNotFlagWastefulConsumptionWhileFuelConsumptionDoes() {
+        UUID world = UUID.randomUUID();
+        var memory = new PolicyTaskMemory();
+        memory.acquire(world, "IRON_PICKAXE", 1, 10);
+        var stock = Map.of("RAW_IRON", 3, "OAK_PLANKS", 4, "STICK", 2);
+        var pickaxe = new RecipeOption("minecraft:iron_pickaxe", "IRON_PICKAXE", 1, true, false,
+                List.of(new RecipeOption.Ingredient(3, List.of("IRON_INGOT"), false),
+                        new RecipeOption.Ingredient(2, List.of("STICK"), false)));
+        var table = new RecipeOption("minecraft:crafting_table", "CRAFTING_TABLE", 1, false, false,
+                List.of(new RecipeOption.Ingredient(4, List.of("OAK_PLANKS"), false)));
+        var ctx = new CandidateActionContext.Context(stock, memory.observe(world, stock), true,
+                Set.of("IRON_INGOT", "STICK"), Set.of("RAW_IRON", "OAK_PLANKS"), true,
+                stock, List.of(), List.of(pickaxe), List.of(table));
+
+        // Putting RAW_IRON into furnace ingredient slot produces IRON_INGOT (direct ingredient) -> NOT wasteful indirect loss.
+        var smeltRawIron = new CandidateActionContext.MaterialDelta(Map.of("RAW_IRON", 1), Map.of());
+        double[] smeltF = new double[PolicyFrame.ACTION_SIZE];
+        CandidateActionContext.encodeMaterialImpact(smeltF, smeltRawIron, ctx, true, "IRON_INGOT");
+        assertEquals(0.0, smeltF[CandidateActionContext.CONSUMES_INDIRECT_INGREDIENT]);
+
+        // Burning OAK_PLANKS as furnace fuel (no smelting output) breaks required crafting table feasibility!
+        var burnPlanks = new CandidateActionContext.MaterialDelta(Map.of("OAK_PLANKS", 1), Map.of());
+        double[] fuelF = new double[PolicyFrame.ACTION_SIZE];
+        CandidateActionContext.encodeMaterialImpact(fuelF, burnPlanks, ctx, true, null);
+        assertEquals(1.0, fuelF[CandidateActionContext.CONSUMES_INDIRECT_INGREDIENT]);
+        assertEquals(1.0, fuelF[CandidateActionContext.CONSUMES_REQUIRED_TABLE_INGREDIENT]);
+        assertEquals(1.0, fuelF[CandidateActionContext.BREAKS_REQUIRED_TABLE_FEASIBILITY]);
+    }
 }
