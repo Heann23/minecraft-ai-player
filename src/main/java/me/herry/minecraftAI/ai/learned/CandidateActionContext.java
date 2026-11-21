@@ -5,7 +5,6 @@ import me.herry.minecraftAI.ai.crafting.RecipeOption;
 import me.herry.minecraftAI.ai.primitive.PrimitiveType;
 import org.bukkit.Material;
 
-import java.util.Collections;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
@@ -26,33 +25,56 @@ final class CandidateActionContext {
     static final int RECIPE_NEEDS_TABLE = 278;
     static final int RECIPE_INGREDIENT_UNITS = 279;
     static final int RECIPE_INGREDIENT_GROUPS = 280;
+    static final int OBJECTIVE_INDIRECT_INGREDIENT_MATCH = 283;
 
     record Context(Map<String, Integer> stock, PolicyTaskMemory.View task, boolean objectiveVisible,
-                   Set<String> objectiveIngredients) {
+                   Set<String> objectiveIngredients, Set<String> indirectIngredients) {
+        Context(Map<String, Integer> stock, PolicyTaskMemory.View task, boolean objectiveVisible,
+                Set<String> objectiveIngredients) {
+            this(stock, task, objectiveVisible, objectiveIngredients, Set.of());
+        }
+
         Context {
             stock = stock == null ? Map.of() : Map.copyOf(stock);
             objectiveIngredients = objectiveIngredients == null ? Set.of() : Set.copyOf(objectiveIngredients);
+            indirectIngredients = Set.copyOf(indirectIngredients);
         }
     }
 
-    private CandidateActionContext() {}
+    private CraftingSystem cachedCrafting;
+    private long cachedRevision;
+    private Material cachedTarget;
+    private Set<String> direct = Set.of();
+    private Set<String> indirect = Set.of();
 
-    static Context capture(CraftingSystem crafting, Map<String, Integer> stock,
-                           PolicyTaskMemory.View task, boolean objectiveVisible) {
-        return new Context(stock, task, objectiveVisible, objectiveIngredients(crafting, task, objectiveVisible));
+    Context capture(CraftingSystem crafting, Map<String, Integer> stock, PolicyTaskMemory.View task, boolean objectiveVisible) {
+        Material target = objectiveVisible && task != null && task.objective() != null
+                && task.worldMatches() && !task.currentlyAchieved() ? Material.getMaterial(task.objective().goal().item()) : null;
+        if (target == null) return new Context(stock, task, objectiveVisible, Set.of());
+        if (crafting != cachedCrafting || crafting.revision() != cachedRevision || target != cachedTarget) {
+            direct = Set.copyOf(ingredients(crafting, target));
+            Set<String> second = new HashSet<>();
+            for (String material : direct) {
+                Material intermediate = Material.getMaterial(material);
+                if (intermediate != null && intermediate != target) second.addAll(ingredients(crafting, intermediate));
+            }
+            second.removeAll(direct);
+            second.remove(target.name());
+            indirect = Set.copyOf(second);
+            cachedTarget = target;
+            cachedCrafting = crafting;
+            cachedRevision = crafting.revision();
+        }
+        return new Context(stock, task, objectiveVisible, direct, indirect);
     }
 
-    static Set<String> objectiveIngredients(CraftingSystem crafting, PolicyTaskMemory.View task, boolean objectiveVisible) {
-        if (!objectiveVisible || crafting == null || task == null || task.objective() == null
-                || !task.worldMatches() || task.currentlyAchieved()) return Set.of();
-        Material target = Material.matchMaterial(task.objective().goal().item());
-        if (target == null) return Set.of();
+    private static Set<String> ingredients(CraftingSystem crafting, Material target) {
         Set<String> ingredients = new HashSet<>();
         for (RecipeOption option : crafting.recipeOptions(target)) {
             if (!option.countPlannable() || option.smelting()) continue;
             for (RecipeOption.Ingredient ingredient : option.ingredients()) ingredients.addAll(ingredient.alternatives());
         }
-        return ingredients.isEmpty() ? Set.of() : Collections.unmodifiableSet(ingredients);
+        return ingredients;
     }
 
     static void encode(double[] features, PrimitiveType type, String directMaterial, RecipeOption recipe, Context context) {

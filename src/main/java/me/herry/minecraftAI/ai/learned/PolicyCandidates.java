@@ -71,6 +71,7 @@ public final class PolicyCandidates {
     private int portalObservationCursor;
     private long recipeRevision = Long.MIN_VALUE;
     private final CandidateDiscovery discovery = new CandidateDiscovery();
+    private final CandidateActionContext candidateContext = new CandidateActionContext();
     private int recipeOptions;
     private int recipesChecked;
     private boolean recipeScanComplete;
@@ -155,7 +156,7 @@ public final class PolicyCandidates {
         var state = observed.snapshot();
         var body = observed.features();
         var taskView = ai.getPolicyTaskMemory().observe(ai.getWorldId(), observed.stock());
-        var actionContext = CandidateActionContext.capture(ai.getCrafting(), observed.stock(), taskView,
+        var actionContext = candidateContext.capture(ai.getCrafting(), observed.stock(), taskView,
                 !ai.getConfig().maskObjectiveInput);
         Map<String, Candidate> found = new LinkedHashMap<>();
         // Waiting is always a legal input choice, without awarding it any hand-written priority.
@@ -204,7 +205,7 @@ public final class PolicyCandidates {
                 generated, visit.budgetExhausted(), recipeOptions, recipesChecked, recipeScanComplete, consumptionScan, miningScan);
         // Direct keys and budgeted registries are partial observations, even after every source was visited.
         return new Capture(new PolicyFrame(ai.getWorldId(), Integer.toUnsignedLong(Bukkit.getCurrentTick()), body,
-                candidates.stream().map(candidate -> option(candidate, feet, observed.eye())).toList(), false, evidence,
+                candidates.stream().map(candidate -> option(candidate, feet, observed.eye(), actionContext)).toList(), false, evidence,
                 taskView, observed.sight()), candidates, observed.body(), observed.stock());
     }
 
@@ -497,8 +498,15 @@ public final class PolicyCandidates {
         }
     }
 
-    private static PolicyFrame.Option option(Candidate candidate, BlockPoint feet, EnderEyeTrack.Observation eye) {
+    private static PolicyFrame.Option option(Candidate candidate, BlockPoint feet, EnderEyeTrack.Observation eye,
+                                             CandidateActionContext.Context context) {
         double[] features = candidate.encoded().features();
+        var block = candidate.encoded().blockEvidence();
+        String material = candidate.recipe() != null ? candidate.recipe().result() : block != null ? block.material()
+                : candidate.command() instanceof PrimitiveCommand.FurnaceTransfer transfer
+                        && transfer.slot() == PrimitiveCommand.FurnaceSlot.RESULT ? transfer.material() : null;
+        if (material != null && context.indirectIngredients().contains(material))
+            features[CandidateActionContext.OBJECTIVE_INDIRECT_INGREDIENT_MATCH] = 1;
         if (eye != null && candidate.command() instanceof PrimitiveCommand.MoveTo move) {
             double dx = move.target().x() - feet.x();
             double dz = move.target().z() - feet.z();
@@ -509,7 +517,7 @@ public final class PolicyCandidates {
                 features[282] = Math.clamp((dx * eye.dx() + dz * eye.dz()) / (displacement * flight), -1, 1);
             }
         }
-        return new PolicyFrame.Option(candidate.id(), features, candidate.encoded().blockEvidence(), candidate.inputId());
+        return new PolicyFrame.Option(candidate.id(), features, block, candidate.inputId());
     }
 
     private boolean movementInputs(AIPlayer ai, Map<String, Candidate> found) {

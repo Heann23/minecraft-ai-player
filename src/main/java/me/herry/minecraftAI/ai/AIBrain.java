@@ -42,6 +42,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.EnumSet;
 import java.util.Set;
+import org.bukkit.Material;
+import org.bukkit.Tag;
 import org.bukkit.World;
 
 /**
@@ -503,13 +505,21 @@ final class AIBrain {
                         long targetCraftCandidates = captured.candidates().stream()
                                 .filter(candidate -> candidate.recipe() != null && item.equals(candidate.recipe().result())).count();
                         boolean chosenTargetCraft = selected.recipe() != null && item.equals(selected.recipe().result());
+                        long knownRays = frame.sight() == null ? 0 : frame.sight().rays().stream()
+                                .filter(ray -> ray.distance() >= 0).count();
+                        long logRays = frame.sight() == null ? 0 : frame.sight().rays().stream()
+                                .filter(ray -> ray.block() != null && isLog(ray.block().material())).count();
+                        long logCandidates = frame.options().stream().filter(option -> option.blockEvidence() != null
+                                && isLog(option.blockEvidence().material())).count();
                         ai.debug("GoalSample world=" + captured.frame().world() + " goal=" + task.objective().id()
                                 + " tick=" + captured.frame().serverTick() + " item=" + task.objective().goal().item()
                                 + " required=" + task.objective().goal().count() + " owned=" + task.owned()
                                 + " matched=" + task.worldMatches() + " visibleRays=" + visibleRays
                                 + " candidates=" + candidates + " freshCandidates=" + freshCandidates + " chosenTarget=" + chosenTarget
                                 + " feet=" + ai.getPosition().encode()
-                                + " craftCandidates=" + targetCraftCandidates + " chosenCraft=" + chosenTargetCraft);
+                                + " craftCandidates=" + targetCraftCandidates + " chosenCraft=" + chosenTargetCraft
+                                + " knownLogRays=" + knownRays + " logRays=" + logRays + " logCandidates=" + logCandidates
+                                + " chosenLog=" + (chosenBlock != null && isLog(chosenBlock.material())));
                     }
                     if (activeLearned == null || !selected.inputId().equals(activeLearned.inputId()) || plan == null || plan.isFinished()) {
                         cancelLearnedForReplacement(ai, selected.id());
@@ -578,6 +588,11 @@ final class AIBrain {
                 active && action.getStatus() == ActionStatus.RUNNING, mining != null,
                 mining == null ? 0 : mining.progress(), mining == null ? 0 : mining.actionTicks(),
                 mining == null ? 0 : mining.aimTicks(), active ? activeLearned.inputId() : "");
+    }
+
+    private static boolean isLog(String name) {
+        Material material = Material.getMaterial(name);
+        return material != null && Tag.LOGS.isTagged(material);
     }
 
     private void cancelLearnedForReplacement(AIPlayer ai, String replacement) {
