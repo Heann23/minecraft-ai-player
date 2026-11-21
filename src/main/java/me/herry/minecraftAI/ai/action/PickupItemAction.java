@@ -5,11 +5,14 @@ import me.herry.minecraftAI.ai.AIPlayer;
 import me.herry.minecraftAI.ai.memory.MemoryType;
 import me.herry.minecraftAI.ai.navigation.NavigationSystem;
 import me.herry.minecraftAI.ai.navigation.PathGoal;
+import me.herry.minecraftAI.ai.perception.PerceptionSystem;
 import me.herry.minecraftAI.ai.primitive.PrimitiveAction;
 import me.herry.minecraftAI.ai.primitive.PrimitiveTarget;
 import me.herry.minecraftAI.ai.primitive.PrimitiveType;
+import me.herry.minecraftAI.ai.primitive.control.PrimitiveCommand;
 import me.herry.minecraftAI.ai.util.BlockPoint;
 import me.herry.minecraftAI.ai.util.Positions;
+import org.bukkit.Bukkit;
 import org.bukkit.FluidCollisionMode;
 import org.bukkit.Location;
 import org.bukkit.block.Block;
@@ -33,10 +36,12 @@ public final class PickupItemAction extends AbstractAction implements PrimitiveA
     private static final double EXACT_RADIUS = 0.5;
     // 아이템은 머리 위 반 칸, 옆으로 한 칸까지 주워지므로 이 정도까지만 다가가도 주울 수 있는 경우가 많다.
     private static final double LOOSE_RADIUS = 2.3;
+    public static final double EXACT_PICKUP_RANGE = 8;
 
     private final double radius;
     private final boolean requireItem;
     private final boolean allowClearing;
+    private final PrimitiveCommand.PickupExact selected;
     private Item current;
     private int itemTicks;
     private boolean walkingDirectly;
@@ -51,19 +56,41 @@ public final class PickupItemAction extends AbstractAction implements PrimitiveA
      *                    아이템을 주우려고 세운 계획이 헛돌았다는 것을 알려서 같은 목표가 반복되지 않게 한다.
      */
     public PickupItemAction(double radius, boolean requireItem) {
-        this(radius, requireItem, true);
+        this(radius, requireItem, true, null);
     }
 
-    private PickupItemAction(double radius, boolean requireItem, boolean allowClearing) {
+    private PickupItemAction(double radius, boolean requireItem, boolean allowClearing, PrimitiveCommand.PickupExact selected) {
         super("PickupItem", TIMEOUT);
         this.radius = radius;
         this.requireItem = requireItem;
         this.allowClearing = allowClearing;
+        this.selected = selected;
     }
 
     /** Controlled pickup never invents mining steps to reach a drop. */
     public static PickupItemAction direct(double radius, boolean requireItem) {
-        return new PickupItemAction(radius, requireItem, false);
+        return new PickupItemAction(radius, requireItem, false, null);
+    }
+
+    public static PickupItemAction exact(PrimitiveCommand.PickupExact selected) {
+        return new PickupItemAction(EXACT_PICKUP_RANGE, true, false, selected);
+    }
+
+    public static String checkExact(AIPlayer ai, PrimitiveCommand.PickupExact selection) {
+        if (!selection.world().equals(ai.getWorldId())) return "drop world changed";
+        if (!(Bukkit.getEntity(selection.entityId()) instanceof Item item) || !matches(ai, item, selection))
+            return "selected drop unavailable";
+        var player = ai.getPlayer();
+        if (!isInRange(player.getLocation(), item.getLocation(), EXACT_PICKUP_RANGE)
+                || !PerceptionSystem.canSee(player, item)) return "drop outside visible pickup range";
+        return ai.getBody().canStoreDrop(item) ? "" : "no compatible inventory space";
+    }
+
+    private static boolean matches(AIPlayer ai, Item item, PrimitiveCommand.PickupExact selection) {
+        var owner = item.getOwner();
+        return item.isValid() && item.getWorld().equals(ai.getPlayer().getWorld())
+                && item.getItemStack().getType().name().equals(selection.material()) && !DropJunkAction.isDiscarded(item)
+                && (owner == null || owner.equals(ai.getPlayer().getUniqueId()));
     }
 
     /**
@@ -79,12 +106,33 @@ public final class PickupItemAction extends AbstractAction implements PrimitiveA
     @Override
     protected void onStart(AIPlayer ai) {
         itemsBefore = ai.getInventory().count(material -> true);
+        if (selected != null) {
+            String blocked = checkExact(ai, selected);
+            if (!blocked.isEmpty()) { fail(blocked); return; }
+            current = (Item) Bukkit.getEntity(selected.entityId());
+            foundAny = true;
+            ai.getBody().watchItemPickup(selected.entityId());
+            approach(ai);
+        }
     }
 
     @Override
     protected void onTick(AIPlayer ai) {
         Player player = ai.getPlayer();
-        if (ai.getInventory().isFull()) {
+        if (selected != null) {
+            if (!selected.world().equals(ai.getWorldId()) || !ai.getBody().isUsable()) {
+                fail("pickup world or body changed"); return;
+            }
+            if (ai.getBody().pickedUpWatchedItem()) { succeed(); return; }
+            if (!matches(ai, current, selected) || !ai.getBody().canStoreDrop(current)) {
+                fail("selected drop no longer available"); return;
+            }
+            // A drop can fall into a different cell while navigation is still approaching it.
+            var goal = ai.getNavigation().getGoal();
+            if (!walkingDirectly && goal != null && !goal.target().equals(Positions.of(current.getLocation()))) {
+                ai.getNavigation().navigateTo(PathGoal.arrive(Positions.of(current.getLocation()), EXACT_RADIUS));
+            }
+        } else if (ai.getInventory().isFull()) {
             if (!allowClearing && ai.getInventory().count(material -> true) <= itemsBefore) fail("inventory full without collecting an item");
             else succeed();
             return;
@@ -190,9 +238,12 @@ public final class PickupItemAction extends AbstractAction implements PrimitiveA
 
     @Override
     protected void onEnd(AIPlayer ai) {
+        if (selected != null) ai.getBody().watchItemPickup(null);
         if (clearing != null) clearing.cancel(ai);
         ai.getNavigation().stop();
-        if (foundAny && itemsBefore >= 0) {
+        if (selected != null && getStatus() == ActionStatus.SUCCESS) {
+            ai.debug("Collected selected drop: entity=" + selected.entityId() + " material=" + selected.material());
+        } else if (selected == null && foundAny && itemsBefore >= 0) {
             ai.debug("Picked up " + (ai.getInventory().count(material -> true) - itemsBefore) + " item(s)");
         }
     }
@@ -249,6 +300,7 @@ public final class PickupItemAction extends AbstractAction implements PrimitiveA
 
     @Override
     public PrimitiveTarget getTarget() {
-        return new PrimitiveTarget.Area(radius);
+        return selected == null ? new PrimitiveTarget.Area(radius)
+                : new PrimitiveTarget.Entity("ITEM", selected.entityId().toString());
     }
 }

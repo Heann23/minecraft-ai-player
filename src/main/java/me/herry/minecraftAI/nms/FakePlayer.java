@@ -6,6 +6,10 @@ import net.minecraft.server.level.ClientInformation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.util.Mth;
+import net.minecraft.world.entity.item.ItemEntity;
+import org.jetbrains.annotations.Nullable;
+
+import java.util.UUID;
 
 /**
  * 클라이언트 없이 서버 안에서만 움직이는 플레이어.
@@ -21,6 +25,8 @@ final class FakePlayer extends ServerPlayer {
     private boolean inputSprint;
     private float targetYaw;
     private float targetPitch;
+    private UUID watchedPickup;
+    private boolean pickedUpWatchedItem;
 
     FakePlayer(MinecraftServer server, ServerLevel level, GameProfile profile, ClientInformation clientInformation) {
         super(server, level, profile, clientInformation);
@@ -30,6 +36,22 @@ final class FakePlayer extends ServerPlayer {
     @Override
     public boolean isClientAuthoritative() {
         return false;
+    }
+
+    void watchItemPickup(@Nullable UUID entityId) {
+        watchedPickup = entityId;
+        pickedUpWatchedItem = false;
+    }
+
+    boolean pickedUpWatchedItem() {
+        return pickedUpWatchedItem;
+    }
+
+    @Override
+    public void onItemPickup(ItemEntity item) {
+        super.onItemPickup(item);
+        // ItemEntity invokes this only after its normal inventory transfer.
+        if (item.getUUID().equals(watchedPickup)) pickedUpWatchedItem = true;
     }
 
     // 진짜 플레이어의 doTick() 은 접속(Connection)이 매 틱 불러 주는데, 가짜 접속은 틱이 돌지 않으므로 여기서 직접 부른다.

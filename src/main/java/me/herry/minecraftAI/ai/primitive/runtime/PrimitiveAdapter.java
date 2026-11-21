@@ -257,6 +257,7 @@ public final class PrimitiveAdapter {
             case PrimitiveCommand.ShootBow shot -> ShootBowAction.check(ai, shot);
             case PrimitiveCommand.Attack attack -> checkAttack(ai, attack);
             case PrimitiveCommand.Pickup pickup -> checkPickup(ai, pickup.radius());
+            case PrimitiveCommand.PickupExact pickup -> PickupItemAction.checkExact(ai, pickup);
             case PrimitiveCommand.Equip equip -> checkTool(ai, equip.tool());
             case PrimitiveCommand.SelectSlot select -> select.slot() < 0 || select.slot() > 8 ? "hotbar slot must be 0..8" : "";
             case PrimitiveCommand.Craft craft -> checkCraft(ai, craft);
@@ -301,6 +302,7 @@ public final class PrimitiveAdapter {
                         : AttackEntityAction.exactTarget((LivingEntity) target);
             }
             case PrimitiveCommand.Pickup pickup -> PickupItemAction.direct(pickup.radius(), true);
+            case PrimitiveCommand.PickupExact pickup -> PickupItemAction.exact(pickup);
             case PrimitiveCommand.Equip equip -> new SlotEquipAction(equip.tool());
             case PrimitiveCommand.SelectSlot select -> new SelectHotbarSlotAction(select.slot());
             case PrimitiveCommand.Craft craft -> new CraftItemAction(material(craft.material()), craft.amount());

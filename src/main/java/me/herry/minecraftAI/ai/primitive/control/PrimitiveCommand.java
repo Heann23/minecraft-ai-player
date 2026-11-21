@@ -109,6 +109,15 @@ public sealed interface PrimitiveCommand {
         @Override public PrimitiveType type() { return PrimitiveType.PICKUP_ITEM; }
     }
 
+    record PickupExact(UUID world, UUID entityId, String material) implements PrimitiveCommand {
+        public PickupExact {
+            Objects.requireNonNull(world, "world");
+            Objects.requireNonNull(entityId, "entityId");
+            material = ContractValues.material(material);
+        }
+        @Override public PrimitiveType type() { return PrimitiveType.PICKUP_ITEM; }
+    }
+
     record Equip(ToolChoice tool) implements PrimitiveCommand {
         public Equip { Objects.requireNonNull(tool, "tool"); }
         @Override public PrimitiveType type() { return PrimitiveType.EQUIP_ITEM; }

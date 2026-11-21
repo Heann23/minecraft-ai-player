@@ -34,10 +34,14 @@ import org.bukkit.block.BlockFace;
 import org.bukkit.craftbukkit.CraftWorld;
 import org.bukkit.craftbukkit.block.CraftBlock;
 import org.bukkit.craftbukkit.entity.CraftEnderDragon;
+import org.bukkit.craftbukkit.entity.CraftItem;
 import org.bukkit.entity.EnderDragon;
 import org.bukkit.entity.EnderDragonPart;
+import org.bukkit.entity.Item;
 import org.bukkit.entity.Player;
 import org.bukkit.event.player.PlayerRespawnEvent;
+
+import java.util.UUID;
 
 /**
  * FakePlayer 를 AIBody 로 감싼 구현체. 서버 내부 코드(NMS)를 쓰는 곳은 이 패키지뿐이다.
@@ -194,6 +198,21 @@ public final class FakePlayerBody implements AIBody {
     @Override
     public EnderDragonPart dragonHead(EnderDragon dragon) {
         return (EnderDragonPart) ((CraftEnderDragon) dragon).getHandle().head.getBukkitEntity();
+    }
+
+    @Override
+    public boolean canStoreDrop(Item drop) {
+        return isUsable() && handle.getInventory().canHold(((CraftItem) drop).getHandle().getItem()) > 0;
+    }
+
+    @Override
+    public void watchItemPickup(@Nullable UUID entityId) {
+        handle.watchItemPickup(entityId);
+    }
+
+    @Override
+    public boolean pickedUpWatchedItem() {
+        return handle.pickedUpWatchedItem();
     }
 
     @Override

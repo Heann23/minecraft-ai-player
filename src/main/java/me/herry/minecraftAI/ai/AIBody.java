@@ -6,7 +6,11 @@ import org.bukkit.Location;
 import org.bukkit.block.BlockFace;
 import org.bukkit.entity.EnderDragon;
 import org.bukkit.entity.EnderDragonPart;
+import org.bukkit.entity.Item;
 import org.bukkit.entity.Player;
+import org.jetbrains.annotations.Nullable;
+
+import java.util.UUID;
 
 /**
  * AI 가 조종하는 몸체. AI 로직은 이 인터페이스와 Bukkit Player 만 알고, 서버 내부 코드(NMS)는 구현체 안에 숨긴다.
@@ -50,6 +54,13 @@ public interface AIBody {
     boolean releaseBow();
 
     EnderDragonPart dragonHead(EnderDragon dragon);
+
+    boolean canStoreDrop(Item drop);
+
+    /** Track only the current action's item; null clears the tracking. */
+    void watchItemPickup(@Nullable UUID entityId);
+
+    boolean pickedUpWatchedItem();
 
     /**
      * 손에 든 아이템을 그 블록의 그 면에 대고 쓴다 (부싯돌과 부시로 불 붙이기 등). 진짜 플레이어가 블록을 우클릭한 것과 같다.

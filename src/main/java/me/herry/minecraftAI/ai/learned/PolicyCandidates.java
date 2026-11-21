@@ -84,6 +84,7 @@ public final class PolicyCandidates {
     private int placementCursor;
     private int movementCursor;
     private int movementInputCursor;
+    private int pickupCursor;
     private static final List<BlockPoint> MOVE_OFFSETS = movementOffsets();
 
     public record Observed(me.herry.minecraftAI.ai.primitive.control.PrimitiveSnapshot snapshot,
@@ -179,7 +180,7 @@ public final class PolicyCandidates {
                 case CONSUME -> consumables(ai, state.inventory(), found, actionContext);
                 case PLACE -> placement(ai, state.inventory(), found, actionContext);
                 case ATTACK -> attacks(ai, found, actionContext);
-                case PICKUP -> add(ai, found, "pickup:4", new PrimitiveCommand.Pickup(4), null, null, 0, 0, 0, "", true, actionContext);
+                case PICKUP -> pickups(ai, found, actionContext);
                 case CRAFT -> crafting(ai, found, actionContext);
                 case FURNACE -> furnaceTransfers(ai, observed.sight(), found, actionContext);
                 case IGNITE -> portalIgnitions(ai, observed.sight(), found, actionContext);
@@ -274,6 +275,21 @@ public final class PolicyCandidates {
             var target = new PrimitiveTarget.Point(eye.getX() - Math.sin(angle) * 4, eye.getY(), eye.getZ() + Math.cos(angle) * 4);
             add(ai, found, "look:" + yaw, new PrimitiveCommand.LookAt(target), null, null, -Math.sin(angle) * 4, 0, Math.cos(angle) * 4, "", true, actionContext);
         }
+    }
+
+    private void pickups(AIPlayer ai, Map<String, Candidate> found, CandidateActionContext.Context actionContext) {
+        var drops = ai.getPerception().getDrops();
+        var origin = ai.getPlayer().getLocation();
+        int offered = 0;
+        for (int scanned = 0; scanned < Math.min(16, drops.size()) && offered < 6 && !ai.getWorkBudget().isExhausted(); scanned++) {
+            var drop = drops.get(Math.floorMod(pickupCursor++, drops.size()));
+            var at = drop.getLocation();
+            var material = drop.getItemStack().getType().name();
+            var command = new PrimitiveCommand.PickupExact(ai.getWorldId(), drop.getUniqueId(), material);
+            if (add(ai, found, "pickup-exact:" + drop.getUniqueId(), command, null, null, at.getX() - origin.getX(),
+                    at.getY() - origin.getY(), at.getZ() - origin.getZ(), material, true, actionContext)) offered++;
+        }
+        add(ai, found, "pickup:4", new PrimitiveCommand.Pickup(4), null, null, 0, 0, 0, "", true, actionContext);
     }
 
     private void mining(AIPlayer ai, List<me.herry.minecraftAI.ai.primitive.control.PrimitiveSnapshot.ItemSlot> inventory,
@@ -550,6 +566,7 @@ public final class PolicyCandidates {
         double[] features = candidate.encoded().features();
         var block = candidate.encoded().blockEvidence();
         String material = candidate.recipe() != null ? candidate.recipe().result() : block != null ? block.material()
+                : candidate.command() instanceof PrimitiveCommand.PickupExact pickup ? pickup.material()
                 : candidate.command() instanceof PrimitiveCommand.FurnaceTransfer transfer
                         && transfer.slot() == PrimitiveCommand.FurnaceSlot.RESULT ? transfer.material() : null;
         if (material != null && context.indirectIngredients().contains(material))
@@ -753,15 +770,21 @@ public final class PolicyCandidates {
             features[57] = Math.clamp(observedBlock.getBlockData().getDestroySpeed(actualTool, true) / 32.0, 0, 16);
         }
         if (recipe != null) features[27] = recipe.resultAmount() / 64.0;
+        if (command instanceof PrimitiveCommand.PickupExact pickup && Bukkit.getEntity(pickup.entityId()) instanceof org.bukkit.entity.Item drop) {
+            features[27] = Math.min(16, drop.getItemStack().getAmount() / 64.0);
+            features[285] = 1;
+        }
         if (command instanceof PrimitiveCommand.FurnaceTransfer transfer) features[29] = transfer.inventorySlot() / 35.0;
         String directMaterial = recipe != null ? recipe.result()
                 : blockEvidence != null ? blockEvidence.material()
                 : command instanceof PrimitiveCommand.PlaceBlock place ? place.material()
                 : command instanceof PrimitiveCommand.FurnaceTransfer transfer ? transfer.material()
+                : command instanceof PrimitiveCommand.PickupExact pickup ? pickup.material()
                 : consumable != null ? consumable.material() : null;
-        boolean takesFurnaceResult = command instanceof PrimitiveCommand.FurnaceTransfer transfer
+        boolean takesObservedItem = command instanceof PrimitiveCommand.PickupExact
+                || command instanceof PrimitiveCommand.FurnaceTransfer transfer
                 && transfer.slot() == PrimitiveCommand.FurnaceSlot.RESULT;
-        CandidateActionContext.encode(features, type, directMaterial, recipe, actionContext, takesFurnaceResult);
+        CandidateActionContext.encode(features, type, directMaterial, recipe, actionContext, takesObservedItem);
         found.put(id, new Candidate(id, command, recipe, consumable, new PolicyFrame.Option(id, features, blockEvidence)));
         return true;
     }

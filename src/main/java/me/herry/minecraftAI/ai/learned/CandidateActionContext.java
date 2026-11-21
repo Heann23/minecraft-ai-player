@@ -82,7 +82,7 @@ final class CandidateActionContext {
     }
 
     static void encode(double[] features, PrimitiveType type, String directMaterial, RecipeOption recipe, Context context,
-                       boolean takesFurnaceResult) {
+                       boolean takesObservedItem) {
         if (features.length != PolicyFrame.ACTION_SIZE) throw new IllegalArgumentException("candidate action context shape");
         boolean hasMaterial = directMaterial != null && !directMaterial.isBlank();
         if (hasMaterial) {
@@ -95,7 +95,7 @@ final class CandidateActionContext {
         var task = context.task();
         if (context.objectiveVisible() && task != null && task.objective() != null && task.worldMatches()) {
             String goalItem = task.objective().goal().item();
-            boolean acquires = type == PrimitiveType.CRAFT_ITEM || type == PrimitiveType.BREAK_BLOCK || takesFurnaceResult;
+            boolean acquires = type == PrimitiveType.CRAFT_ITEM || type == PrimitiveType.BREAK_BLOCK || takesObservedItem;
             if (!task.currentlyAchieved() && acquires && hasMaterial) {
                 if (goalItem.equals(directMaterial)) features[OBJECTIVE_DIRECT_MATCH] = 1;
                 if (context.objectiveIngredients().contains(directMaterial)) features[OBJECTIVE_INGREDIENT_MATCH] = 1;
