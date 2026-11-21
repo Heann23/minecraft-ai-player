@@ -26,12 +26,14 @@ final class CandidateActionContext {
     static final int RECIPE_INGREDIENT_UNITS = 279;
     static final int RECIPE_INGREDIENT_GROUPS = 280;
     static final int OBJECTIVE_INDIRECT_INGREDIENT_MATCH = 283;
+    static final int ACQUIRES_REQUIRED_CRAFTING_TABLE = 286;
+    static final int PLACES_REQUIRED_CRAFTING_TABLE = 287;
 
     record Context(Map<String, Integer> stock, PolicyTaskMemory.View task, boolean objectiveVisible,
-                   Set<String> objectiveIngredients, Set<String> indirectIngredients) {
+                   Set<String> objectiveIngredients, Set<String> indirectIngredients, boolean requiresCraftingTable) {
         Context(Map<String, Integer> stock, PolicyTaskMemory.View task, boolean objectiveVisible,
                 Set<String> objectiveIngredients) {
-            this(stock, task, objectiveVisible, objectiveIngredients, Set.of());
+            this(stock, task, objectiveVisible, objectiveIngredients, Set.of(), false);
         }
 
         Context {
@@ -46,12 +48,16 @@ final class CandidateActionContext {
     private Material cachedTarget;
     private Set<String> direct = Set.of();
     private Set<String> indirect = Set.of();
+    private boolean requiresCraftingTable;
 
     Context capture(CraftingSystem crafting, Map<String, Integer> stock, PolicyTaskMemory.View task, boolean objectiveVisible) {
         Material target = objectiveVisible && task != null && task.objective() != null
                 && task.worldMatches() && !task.currentlyAchieved() ? Material.getMaterial(task.objective().goal().item()) : null;
         if (target == null) return new Context(stock, task, objectiveVisible, Set.of());
         if (crafting != cachedCrafting || crafting.revision() != cachedRevision || target != cachedTarget) {
+            var supportedRecipes = crafting.recipeOptions(target).stream()
+                    .filter(recipe -> !recipe.smelting() && recipe.countPlannable()).toList();
+            requiresCraftingTable = !supportedRecipes.isEmpty() && supportedRecipes.stream().allMatch(RecipeOption::needsTable);
             direct = Set.copyOf(ingredients(crafting, target));
             Set<String> second = new HashSet<>();
             for (String material : direct) {
@@ -65,7 +71,7 @@ final class CandidateActionContext {
             cachedCrafting = crafting;
             cachedRevision = crafting.revision();
         }
-        return new Context(stock, task, objectiveVisible, direct, indirect);
+        return new Context(stock, task, objectiveVisible, direct, indirect, requiresCraftingTable);
     }
 
     private static Set<String> ingredients(CraftingSystem crafting, Material target) {

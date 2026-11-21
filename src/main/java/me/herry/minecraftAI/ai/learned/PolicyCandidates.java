@@ -8,6 +8,7 @@ import me.herry.minecraftAI.ai.observation.SurvivalObservation;
 import me.herry.minecraftAI.ai.perception.EnderEyeTrack;
 import me.herry.minecraftAI.ai.perception.PerceptionSystem;
 import me.herry.minecraftAI.ai.perception.Visibility;
+import me.herry.minecraftAI.ai.perf.WorkBudget;
 import me.herry.minecraftAI.ai.plan.Progression;
 import me.herry.minecraftAI.ai.primitive.PrimitiveTarget;
 import me.herry.minecraftAI.ai.primitive.PrimitiveType;
@@ -20,8 +21,10 @@ import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.entity.EnderDragon;
 import org.bukkit.entity.Entity;
+import org.bukkit.entity.Player;
 
 import java.util.*;
+import java.util.function.BooleanSupplier;
 
 /** Enumerates supported concrete inputs. No Goal score, utility, progression order, best-food/tool or Teacher selection. */
 public final class PolicyCandidates {
@@ -86,6 +89,27 @@ public final class PolicyCandidates {
     private int movementInputCursor;
     private int pickupCursor;
     private static final List<BlockPoint> MOVE_OFFSETS = movementOffsets();
+
+    /** Candidate generation and workstation features share the same local reach check. */
+    private static final class TableAccess implements BooleanSupplier {
+        private final Player player;
+        private final WorkBudget budget;
+        private Boolean available;
+
+        TableAccess(AIPlayer ai) {
+            player = ai.getPlayer();
+            budget = ai.getWorkBudget();
+        }
+
+        @Override public boolean getAsBoolean() {
+            if (available == null) available = NearbyBlocks.find(player, Material.CRAFTING_TABLE, 4) != null;
+            return available;
+        }
+
+        boolean knownMissing() {
+            return available != null ? !available : !budget.isExhausted() && !getAsBoolean();
+        }
+    }
 
     public record Observed(me.herry.minecraftAI.ai.primitive.control.PrimitiveSnapshot snapshot,
                            SurvivalObservation.Body body, Map<String, Integer> stock, double[] features,
@@ -159,6 +183,7 @@ public final class PolicyCandidates {
         var taskView = ai.getPolicyTaskMemory().observe(ai.getWorldId(), observed.stock());
         var actionContext = candidateContext.capture(ai.getCrafting(), observed.stock(), taskView,
                 !ai.getConfig().maskObjectiveInput);
+        var tableAccess = new TableAccess(ai);
         Map<String, Candidate> found = new LinkedHashMap<>();
         // Waiting is always a legal input choice, without awarding it any hand-written priority.
         add(ai, found, "wait:5", new PrimitiveCommand.Wait(5), null, null, 0, 0, 0, "", false, actionContext);
@@ -181,7 +206,7 @@ public final class PolicyCandidates {
                 case PLACE -> placement(ai, state.inventory(), found, actionContext);
                 case ATTACK -> attacks(ai, found, actionContext);
                 case PICKUP -> pickups(ai, found, actionContext);
-                case CRAFT -> crafting(ai, found, actionContext);
+                case CRAFT -> crafting(ai, found, actionContext, tableAccess);
                 case FURNACE -> furnaceTransfers(ai, observed.sight(), found, actionContext);
                 case IGNITE -> portalIgnitions(ai, observed.sight(), found, actionContext);
                 case PORTAL -> portalEntries(ai, found, actionContext);
@@ -207,7 +232,7 @@ public final class PolicyCandidates {
                 generated, visit.budgetExhausted(), recipeOptions, recipesChecked, recipeScanComplete, consumptionScan, miningScan);
         // Direct keys and budgeted registries are partial observations, even after every source was visited.
         return new Capture(new PolicyFrame(ai.getWorldId(), Integer.toUnsignedLong(Bukkit.getCurrentTick()), body,
-                candidates.stream().map(candidate -> option(candidate, feet, observed.eye(), actionContext)).toList(), false, evidence,
+                candidates.stream().map(candidate -> option(candidate, feet, observed.eye(), actionContext, tableAccess)).toList(), false, evidence,
                 taskView, observed.sight()), candidates, observed.body(), observed.stock());
     }
 
@@ -410,12 +435,12 @@ public final class PolicyCandidates {
                 at.getY() - origin.getY(), at.getZ() - origin.getZ(), identity, true, actionContext);
     }
 
-    private void crafting(AIPlayer ai, Map<String, Candidate> found, CandidateActionContext.Context actionContext) {
+    private void crafting(AIPlayer ai, Map<String, Candidate> found, CandidateActionContext.Context actionContext,
+                          TableAccess tableAccess) {
         if (recipeRevision != ai.getCrafting().revision()) { recipeCursor = 0; recipeRevision = ai.getCrafting().revision(); }
         int crafted = 0;
         var stock = ai.getInventory().snapshot();
-        var recipes = ai.getCrafting().feasibleRecipeOptions(stock,
-                () -> NearbyBlocks.find(ai.getPlayer(), Material.CRAFTING_TABLE, 4) != null);
+        var recipes = ai.getCrafting().feasibleRecipeOptions(stock, tableAccess);
         recipeOptions = recipes.size(); recipesChecked = 0;
         while (recipesChecked < Math.min(64, recipes.size()) && crafted < 16 && !ai.getWorkBudget().isExhausted()) {
             var recipe = recipes.get(Math.floorMod(recipeCursor++, recipes.size())); recipesChecked++;
@@ -562,7 +587,7 @@ public final class PolicyCandidates {
     }
 
     private static PolicyFrame.Option option(Candidate candidate, BlockPoint feet, EnderEyeTrack.Observation eye,
-                                             CandidateActionContext.Context context) {
+                                             CandidateActionContext.Context context, TableAccess tableAccess) {
         double[] features = candidate.encoded().features();
         var block = candidate.encoded().blockEvidence();
         String material = candidate.recipe() != null ? candidate.recipe().result() : block != null ? block.material()
@@ -571,6 +596,15 @@ public final class PolicyCandidates {
                         && transfer.slot() == PrimitiveCommand.FurnaceSlot.RESULT ? transfer.material() : null;
         if (material != null && context.indirectIngredients().contains(material))
             features[CandidateActionContext.OBJECTIVE_INDIRECT_INGREDIENT_MATCH] = 1;
+        if (context.requiresCraftingTable()) {
+            String table = Material.CRAFTING_TABLE.name();
+            boolean acquiresTable = table.equals(material) && context.stock().getOrDefault(table, 0) == 0;
+            boolean placesTable = candidate.command() instanceof PrimitiveCommand.PlaceBlock place && table.equals(place.material());
+            if ((acquiresTable || placesTable) && tableAccess.knownMissing()) {
+                if (acquiresTable) features[CandidateActionContext.ACQUIRES_REQUIRED_CRAFTING_TABLE] = 1;
+                if (placesTable) features[CandidateActionContext.PLACES_REQUIRED_CRAFTING_TABLE] = 1;
+            }
+        }
         if (eye != null && candidate.command() instanceof PrimitiveCommand.MoveTo move) {
             double dx = move.target().x() - feet.x();
             double dz = move.target().z() - feet.z();
