@@ -48,6 +48,11 @@ public interface AIBody {
      */
     boolean useItem();
 
+    /** Uses the off-hand item through the same server right-click path (e.g. raising an off-hand shield). */
+    default boolean useOffHandItem() {
+        return false;
+    }
+
     boolean canShootBow();
 
     /** Releases an active main-hand bow through the normal server input path. */

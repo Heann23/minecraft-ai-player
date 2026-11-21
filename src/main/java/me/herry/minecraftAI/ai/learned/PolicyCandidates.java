@@ -119,6 +119,7 @@ public final class PolicyCandidates {
     private int placementCursor;
     private int placementOffsetCursor;
     private int bucketCursor;
+    private int dropCursor;
     private int movementCursor;
     private int movementInputCursor;
     private int pickupCursor;
@@ -287,6 +288,7 @@ public final class PolicyCandidates {
                 case FURNACE -> furnaceTransfers(ai, observed.sight(), found, actionContext);
                 case IGNITE -> portalIgnitions(ai, observed.sight(), found, actionContext);
                 case BUCKET -> buckets(ai, observed.sight(), found, actionContext);
+                case DROP -> drops(ai, state.inventory(), found, actionContext);
                 case PORTAL -> portalEntries(ai, found, actionContext);
                 case ENDER_EYE -> enderEyes(ai, observed.sight(), observed.eye(), found, actionContext);
                 case VISIBLE_APPROACH -> visibleApproaches(ai, observed.sight(), found, actionContext);
@@ -305,7 +307,9 @@ public final class PolicyCandidates {
                 expanded.addAll(compatibleReconsiderations(candidate));
             } else if (candidate.command() instanceof PrimitiveCommand.ShootBow)
                 expanded.add(candidate.committed(ShootBowAction.ACTION_TICKS));
-            else if (candidate.equipment() != null)
+            else if (candidate.command() instanceof PrimitiveCommand.ShieldBlock shield)
+                expanded.add(candidate.committed(shield.holdTicks()));
+            else if (candidate.equipment() != null || candidate.command() instanceof PrimitiveCommand.DropExact)
                 expanded.add(candidate.committed(5));
             else
                 for (int ticks : new int[] { 5, 20, 80, 600 })
@@ -571,6 +575,22 @@ public final class PolicyCandidates {
                     break;
                 addBow(ai, found, actionContext, origin, crystal, crystal, crystal.getType().name());
             }
+            for (var hostile : ai.getPerception().getHostiles()) {
+                if (ai.getWorkBudget().isExhausted())
+                    break;
+                if (hostile instanceof org.bukkit.entity.Enemy && !(hostile instanceof EnderDragon)) {
+                    addBow(ai, found, actionContext, origin, hostile, hostile, hostile.getType().name());
+                }
+            }
+        }
+        var inv = p.getInventory();
+        if (inv.getItemInMainHand().getType() == Material.SHIELD) {
+            add(ai, found, "shield-block:main", new PrimitiveCommand.ShieldBlock(ai.getWorldId(), false, 20),
+                    null, null, 0, 0, 0, "shield-block:main", true, actionContext);
+        }
+        if (inv.getItemInOffHand().getType() == Material.SHIELD) {
+            add(ai, found, "shield-block:off", new PrimitiveCommand.ShieldBlock(ai.getWorldId(), true, 20),
+                    null, null, 0, 0, 0, "shield-block:off", true, actionContext);
         }
         var targets = new LinkedHashMap<UUID, org.bukkit.entity.Entity>();
         for (var entity : ai.getPerception().getEndCrystals())
@@ -762,6 +782,31 @@ public final class PolicyCandidates {
                 offered++;
             }
         }
+    }
+
+    private void drops(AIPlayer ai,
+            List<me.herry.minecraftAI.ai.primitive.control.PrimitiveSnapshot.ItemSlot> inventory,
+            Map<String, Candidate> found, CandidateActionContext.Context actionContext) {
+        int offered = 0;
+        int inspected = 0;
+        int nextCursor = dropCursor;
+        boolean advanced = false;
+        while (inspected < inventory.size() && offered < 4 && !ai.getWorkBudget().isExhausted()) {
+            int idx = Math.floorMod(dropCursor + inspected++, inventory.size());
+            var slot = inventory.get(idx);
+            if (slot.slot() >= 36 || slot.amount() <= 0)
+                continue;
+            if (!advanced) {
+                nextCursor = Math.floorMod(idx + 1, inventory.size());
+                advanced = true;
+            }
+            var cmd = new PrimitiveCommand.DropExact(ai.getWorldId(), slot.slot(), slot.material());
+            if (add(ai, found, "drop-exact:" + slot.slot() + ":" + slot.material(), cmd, null, null, 0, 0, 0,
+                    slot.material(), true, actionContext)) {
+                offered++;
+            }
+        }
+        dropCursor = nextCursor;
     }
 
     private void portalEntries(AIPlayer ai, Map<String, Candidate> found,
@@ -1182,10 +1227,14 @@ public final class PolicyCandidates {
                                                                                 ? "ENDER_EYE"
                                                                                 : command instanceof PrimitiveCommand.ShootBow
                                                                                         ? "BOW"
-                                                                                        : command instanceof PrimitiveCommand.Equip equip
-                                                                                                ? equip.tool()
-                                                                                                        .material()
-                                                                                                : "";
+                                                                                        : command instanceof PrimitiveCommand.ShieldBlock
+                                                                                                ? "SHIELD"
+                                                                                                : command instanceof PrimitiveCommand.DropExact drop
+                                                                                                        ? drop.material()
+                                                                                                        : command instanceof PrimitiveCommand.Equip equip
+                                                                                                                ? equip.tool()
+                                                                                                                        .material()
+                                                                                                                : "";
         if (!semantic.isBlank())
             features[48 + bucket(semantic, 7)] = 1;
         if (consumable != null) {
@@ -1227,17 +1276,29 @@ public final class PolicyCandidates {
         }
         if (command instanceof PrimitiveCommand.FurnaceTransfer transfer)
             features[29] = transfer.inventorySlot() / 35.0;
+        if (command instanceof PrimitiveCommand.DropExact drop) {
+            var item = ai.getPlayer().getInventory().getItem(drop.slot());
+            if (item != null && !item.isEmpty())
+                features[27] = Math.min(16, item.getAmount() / 64.0);
+            features[29] = drop.slot() / 35.0;
+        }
+        if (command instanceof PrimitiveCommand.ShieldBlock shield)
+            features[56] = shield.offHand() ? 1 : 0;
         String directMaterial = recipe != null ? recipe.result()
                 : blockEvidence != null ? blockEvidence.material()
                         : command instanceof PrimitiveCommand.PlaceBlock place ? place.material()
                                 : command instanceof PrimitiveCommand.FillBucket fill
                                         ? ("LAVA".equals(fill.fluid()) ? "LAVA_BUCKET" : "WATER_BUCKET")
                                         : command instanceof PrimitiveCommand.PourBucket pour ? pour.bucket()
-                                                : command instanceof PrimitiveCommand.FurnaceTransfer transfer
-                                                        ? transfer.material()
-                                                        : command instanceof PrimitiveCommand.PickupExact pickup
-                                                                ? pickup.material()
-                                                                : consumable != null ? consumable.material() : null;
+                                                : command instanceof PrimitiveCommand.DropExact drop ? drop.material()
+                                                        : command instanceof PrimitiveCommand.ShieldBlock ? "SHIELD"
+                                                                : command instanceof PrimitiveCommand.FurnaceTransfer transfer
+                                                                        ? transfer.material()
+                                                                        : command instanceof PrimitiveCommand.PickupExact pickup
+                                                                                ? pickup.material()
+                                                                                : consumable != null
+                                                                                        ? consumable.material()
+                                                                                        : null;
         boolean takesObservedItem = command instanceof PrimitiveCommand.PickupExact
                 || command instanceof PrimitiveCommand.FillBucket
                 || command instanceof PrimitiveCommand.FurnaceTransfer transfer
@@ -1286,7 +1347,9 @@ public final class PolicyCandidates {
      */
     static List<Candidate> compatibleReconsiderations(Candidate active) {
         if (active.movement() != null || active.equipment() != null
-                || active.command() instanceof PrimitiveCommand.ShootBow)
+                || active.command() instanceof PrimitiveCommand.ShootBow
+                || active.command() instanceof PrimitiveCommand.ShieldBlock
+                || active.command() instanceof PrimitiveCommand.DropExact)
             return List.of();
         List<Candidate> result = new ArrayList<>();
         for (int ticks : new int[] { 5, 20, 80, 600 }) {

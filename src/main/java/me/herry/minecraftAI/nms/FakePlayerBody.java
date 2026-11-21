@@ -182,6 +182,14 @@ public final class FakePlayerBody implements AIBody {
     }
 
     @Override
+    public boolean useOffHandItem() {
+        if (!isUsable()) return false;
+        ItemStack stack = handle.getItemInHand(InteractionHand.OFF_HAND);
+        if (stack.isEmpty()) return false;
+        return handle.gameMode.useItem(handle, handle.level(), stack, InteractionHand.OFF_HAND).consumesAction();
+    }
+
+    @Override
     public boolean canShootBow() {
         if (!isUsable()) return false;
         ItemStack bow = handle.getMainHandItem();

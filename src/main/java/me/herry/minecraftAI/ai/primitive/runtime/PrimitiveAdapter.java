@@ -259,6 +259,8 @@ public final class PrimitiveAdapter {
             case PrimitiveCommand.ThrowEnderEye eye -> checkHeldEye(ai, eye.world());
             case PrimitiveCommand.SocketEnderEye eye -> checkEyeSocket(ai, eye);
             case PrimitiveCommand.ShootBow shot -> ShootBowAction.check(ai, shot);
+            case PrimitiveCommand.ShieldBlock shield -> me.herry.minecraftAI.ai.action.ShieldBlockAction.unavailableReason(ai, shield);
+            case PrimitiveCommand.DropExact drop -> me.herry.minecraftAI.ai.action.DropExactAction.unavailableReason(ai, drop);
             case PrimitiveCommand.Attack attack -> checkAttack(ai, attack);
             case PrimitiveCommand.Pickup pickup -> checkPickup(ai, pickup.radius());
             case PrimitiveCommand.PickupExact pickup -> PickupItemAction.checkExact(ai, pickup);
@@ -303,6 +305,8 @@ public final class PrimitiveAdapter {
             case PrimitiveCommand.ThrowEnderEye eye -> new EnderEyeAction(eye);
             case PrimitiveCommand.SocketEnderEye eye -> new EnderEyeAction(eye);
             case PrimitiveCommand.ShootBow shot -> new ShootBowAction(shot);
+            case PrimitiveCommand.ShieldBlock shield -> new me.herry.minecraftAI.ai.action.ShieldBlockAction(shield);
+            case PrimitiveCommand.DropExact drop -> new me.herry.minecraftAI.ai.action.DropExactAction(drop);
             case PrimitiveCommand.Attack attack -> {
                 Entity target = Bukkit.getEntity(attack.entityId());
                 yield target instanceof EnderCrystal || target instanceof EnderDragon

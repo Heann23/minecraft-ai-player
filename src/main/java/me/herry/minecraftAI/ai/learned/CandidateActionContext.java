@@ -237,6 +237,20 @@ public final class CandidateActionContext {
             if (storageStock.getOrDefault(transfer.material(), 0) <= 0) return MaterialDelta.EMPTY;
             return new MaterialDelta(Map.of(transfer.material(), 1), Map.of());
         }
+        if (type == PrimitiveType.DROP_ITEM && command instanceof PrimitiveCommand.DropExact drop
+                && drop.material() != null && !drop.material().isBlank()) {
+            int dropped = 0;
+            if (storageSlots != null) {
+                for (var s : storageSlots) {
+                    if (s.slot() == drop.slot() && drop.material().equals(s.material()) && s.amount() > 0) {
+                        dropped = s.amount();
+                        break;
+                    }
+                }
+            }
+            if (dropped <= 0) dropped = Math.min(64, Math.max(0, storageStock.getOrDefault(drop.material(), 0)));
+            return dropped > 0 ? new MaterialDelta(Map.of(drop.material(), dropped), Map.of()) : MaterialDelta.EMPTY;
+        }
         if (type == PrimitiveType.PICKUP_ITEM && command instanceof PrimitiveCommand.PickupExact pickup
                 && pickup.material() != null && !pickup.material().isBlank() && observedPickupAmount > 0) {
             return new MaterialDelta(Map.of(), Map.of(pickup.material(), observedPickupAmount));

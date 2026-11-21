@@ -130,6 +130,25 @@ public sealed interface PrimitiveCommand {
         @Override public PrimitiveType type() { return PrimitiveType.USE_ITEM; }
     }
 
+    /** Raise an already-held main-hand or off-hand shield through the normal item-use path. */
+    record ShieldBlock(UUID world, boolean offHand, int holdTicks) implements PrimitiveCommand {
+        public ShieldBlock {
+            Objects.requireNonNull(world, "world");
+            ContractValues.range(holdTicks, 1, 100, "holdTicks");
+        }
+        @Override public PrimitiveType type() { return PrimitiveType.USE_ITEM; }
+    }
+
+    /** Discard the exact selected storage slot stack via the normal inventory throw input. */
+    record DropExact(UUID world, int slot, String material) implements PrimitiveCommand {
+        public DropExact {
+            Objects.requireNonNull(world, "world");
+            ContractValues.range(slot, 0, 35, "slot");
+            material = ContractValues.material(material);
+        }
+        @Override public PrimitiveType type() { return PrimitiveType.DROP_ITEM; }
+    }
+
     record Pickup(double radius) implements PrimitiveCommand {
         public Pickup { ContractValues.finiteRange(radius, 0.1, 16, "radius"); }
         @Override public PrimitiveType type() { return PrimitiveType.PICKUP_ITEM; }

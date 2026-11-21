@@ -43,7 +43,7 @@ public final class ShootBowAction extends AbstractAction {
                 case BREATH_ATTACK, ROAR_BEFORE_ATTACK, SEARCH_FOR_BREATH_ATTACK_TARGET, DYING -> { return null; }
                 default -> contact = ai.getBody().dragonHead(dragon);
             }
-        } else if (target instanceof EnderCrystal) contact = target;
+        } else if (target instanceof EnderCrystal || target instanceof org.bukkit.entity.Enemy) contact = target;
         else return null;
         var eye = ai.getPlayer().getEyeLocation();
         return contact.getBoundingBox().getCenter().distanceSquared(eye.toVector()) <= RANGE * RANGE

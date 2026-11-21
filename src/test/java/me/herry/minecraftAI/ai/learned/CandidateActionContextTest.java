@@ -271,4 +271,37 @@ class CandidateActionContextTest {
         assertEquals(Map.of("WATER_BUCKET", 1), pourDelta.consumed());
         assertEquals(Map.of("BUCKET", 1), pourDelta.produced());
     }
+
+    @Test void exactDropFlagsObjectiveFeasibilityLossWithoutPenalizingUnrelatedSlots() {
+        UUID world = UUID.randomUUID();
+        var memory = new PolicyTaskMemory();
+        memory.acquire(world, "CRAFTING_TABLE", 1, 10);
+        var stock = Map.of("DIRT", 12, "BIRCH_PLANKS", 4);
+        var slots = List.of(
+                new CandidateActionContext.SlotAmount(0, "DIRT", 12),
+                new CandidateActionContext.SlotAmount(1, "BIRCH_PLANKS", 4));
+        var tableRecipe = new RecipeOption("minecraft:crafting_table", "CRAFTING_TABLE", 1, false, false,
+                List.of(new RecipeOption.Ingredient(4, List.of("BIRCH_PLANKS", "OAK_PLANKS"), false)));
+        var ctx = new CandidateActionContext.Context(stock, memory.observe(world, stock), true,
+                Set.of("BIRCH_PLANKS", "OAK_PLANKS"), Set.of("BIRCH_LOG"), false,
+                stock, slots, List.of(tableRecipe), List.of());
+
+        var dropPlanks = new me.herry.minecraftAI.ai.primitive.control.PrimitiveCommand.DropExact(world, 1, "BIRCH_PLANKS");
+        var planksDelta = CandidateActionContext.materialDelta(PrimitiveType.DROP_ITEM, null, dropPlanks, null, 0, stock, slots);
+        assertEquals(Map.of("BIRCH_PLANKS", 4), planksDelta.consumed());
+        double[] pf = new double[PolicyFrame.ACTION_SIZE];
+        CandidateActionContext.encodeMaterialImpact(pf, planksDelta, ctx, false);
+        assertEquals(1.0, pf[CandidateActionContext.CONSUMES_OBJECTIVE_INGREDIENT]);
+        assertEquals(1.0, pf[CandidateActionContext.BREAKS_OBJECTIVE_RECIPE_FEASIBILITY]);
+
+        var dropDirt = new me.herry.minecraftAI.ai.primitive.control.PrimitiveCommand.DropExact(world, 0, "DIRT");
+        var dirtDelta = CandidateActionContext.materialDelta(PrimitiveType.DROP_ITEM, null, dropDirt, null, 0, stock, slots);
+        assertEquals(Map.of("DIRT", 12), dirtDelta.consumed());
+        double[] df = new double[PolicyFrame.ACTION_SIZE];
+        CandidateActionContext.encodeMaterialImpact(df, dirtDelta, ctx, false);
+        for (int i = CandidateActionContext.CONSUMES_OBJECTIVE_INGREDIENT;
+             i <= CandidateActionContext.ENABLES_TABLE_AND_OBJECTIVE_FEASIBILITY; i++) {
+            assertEquals(0.0, df[i], "unrelated drop idx " + i);
+        }
+    }
 }
