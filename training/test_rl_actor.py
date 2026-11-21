@@ -110,6 +110,40 @@ class ActorTests(unittest.TestCase):
         self.assertEqual(restored.selection,SELECTION)
         self.assertEqual(restored.artifact(environment_steps=1,training_run='numerical-fixture',rollout_sha256='0'*64)['schema'],'minecraft-rl-actor/v2')
 
+    def test_v8_material_impact_upgrade_preserves_optimizer_goal_interaction_rng_and_old_outputs(self):
+        import copy
+        for with_goal in (False, True):
+            model = ActorCritic(37, hidden=4)
+            if with_goal:
+                model.enable_goal_interaction()
+            model.fit([row(model)])
+            legacy = copy.deepcopy(model.optimizer_state()); legacy["contract"] = "minecraft-primitive-candidates/v8"
+            for group in ("params", "first", "second"):
+                actor = np.asarray(legacy[group]["actor_w"])
+                legacy[group]["actor_w"] = actor[:, :STATE_SIZE + 288].tolist()
+                if with_goal:
+                    cross = np.asarray(legacy[group]["goal_action_w"])
+                    legacy[group]["goal_action_w"] = cross[:, :288].tolist()
+            with self.assertRaises(ValueError):
+                ActorCritic.from_optimizer_state(legacy)
+            upgraded = ActorCritic.upgrade_legacy_context(legacy)
+            for group in ("params", "first", "second"):
+                actor = getattr(upgraded, group)["actor_w"]
+                np.testing.assert_array_equal(actor[:, STATE_SIZE + 288:], 0)
+                np.testing.assert_array_equal(actor[:, :STATE_SIZE + 288], legacy[group]["actor_w"])
+                np.testing.assert_array_equal(getattr(upgraded, group)["value_w"], legacy[group]["value_w"])
+                if with_goal:
+                    cross = getattr(upgraded, group)["goal_action_w"]
+                    np.testing.assert_array_equal(cross[:, 288:], 0)
+                    np.testing.assert_array_equal(cross[:, :288], legacy[group]["goal_action_w"])
+            self.assertEqual(upgraded.rng.bit_generator.state, legacy["rng"])
+            observed = frame(); observed["state"][208] = observed["state"][217] = 1.0
+            before, value, _ = upgraded.evaluate(observed)
+            for option in observed["options"]:
+                option["features"][288:] = [0.75] * (ACTION_SIZE - 288)
+            after, next_value, _ = upgraded.evaluate(observed)
+            np.testing.assert_array_equal(before, after); self.assertEqual(value, next_value)
+
     def test_v7_candidate_action_upgrade_preserves_optimizer_goal_interaction_rng_and_old_outputs(self):
         import copy
         for with_goal in (False, True):

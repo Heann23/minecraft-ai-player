@@ -107,4 +107,115 @@ class CandidateActionContextTest {
         assertEquals(0, mineFeatures[CandidateActionContext.OBJECTIVE_INGREDIENT_MATCH]);
         assertEquals(0, mineFeatures[CandidateActionContext.CONSUMES_OBJECTIVE_ITEM]);
     }
+
+    @Test void materialImpactDetectsIngredientDepletionAndFeasibilityLossAcrossRecipesAndPlacements() {
+        UUID world = UUID.randomUUID();
+        var memory = new PolicyTaskMemory();
+        memory.acquire(world, "WOODEN_PICKAXE", 1, 10);
+
+        var planks = List.of("BIRCH_PLANKS", "OAK_PLANKS", "SPRUCE_PLANKS");
+        var pickaxeRecipe = new RecipeOption("minecraft:wooden_pickaxe", "WOODEN_PICKAXE", 1, true, false,
+                List.of(new RecipeOption.Ingredient(3, planks, false),
+                        new RecipeOption.Ingredient(2, List.of("STICK"), false)));
+        var tableRecipe = new RecipeOption("minecraft:crafting_table", "CRAFTING_TABLE", 1, false, false,
+                List.of(new RecipeOption.Ingredient(4, planks, false)));
+        var buttonRecipe = new RecipeOption("minecraft:birch_button", "BIRCH_BUTTON", 1, false, false,
+                List.of(new RecipeOption.Ingredient(1, List.of("BIRCH_PLANKS"), false)));
+        var stickRecipe = new RecipeOption("minecraft:stick", "STICK", 4, false, false,
+                List.of(new RecipeOption.Ingredient(2, planks, false)));
+        var planksRecipe = new RecipeOption("minecraft:birch_planks", "BIRCH_PLANKS", 4, false, false,
+                List.of(new RecipeOption.Ingredient(1, List.of("BIRCH_LOG"), false)));
+
+        // Case 1: 4 birch planks, 0 sticks, missing crafting table (exact v493 held-out bottleneck).
+        var fourPlanks = Map.of("BIRCH_PLANKS", 4);
+        var task4 = memory.observe(world, fourPlanks);
+        var ctx4 = new CandidateActionContext.Context(fourPlanks, task4, true,
+                Set.of("BIRCH_PLANKS", "OAK_PLANKS", "SPRUCE_PLANKS", "STICK"), Set.of("BIRCH_LOG"), true,
+                fourPlanks, List.of(new CandidateActionContext.SlotAmount(0, "BIRCH_PLANKS", 4)),
+                List.of(pickaxeRecipe), List.of(tableRecipe));
+
+        var buttonDelta = CandidateActionContext.materialDelta(PrimitiveType.CRAFT_ITEM, buttonRecipe, null, null, 0,
+                ctx4.storageStock(), ctx4.storageSlots());
+        assertEquals(Map.of("BIRCH_PLANKS", 1), buttonDelta.consumed());
+        assertEquals(Map.of("BIRCH_BUTTON", 1), buttonDelta.produced());
+        double[] buttonF = new double[PolicyFrame.ACTION_SIZE];
+        CandidateActionContext.encodeMaterialImpact(buttonF, buttonDelta, ctx4, true);
+        assertEquals(1, buttonF[CandidateActionContext.CONSUMES_OBJECTIVE_INGREDIENT]);
+        assertEquals(1 / 9.0, buttonF[CandidateActionContext.OBJECTIVE_INGREDIENT_CONSUMED_UNITS], 1e-12);
+        assertEquals(0.0, buttonF[CandidateActionContext.OBJECTIVE_RECIPE_COMPLETION_DELTA], 1e-12);
+        assertEquals(0, buttonF[CandidateActionContext.DEPLETES_OBJECTIVE_INGREDIENT_GROUP]);
+        assertEquals(1, buttonF[CandidateActionContext.CONSUMES_REQUIRED_TABLE_INGREDIENT]);
+        assertEquals(-0.25, buttonF[CandidateActionContext.REQUIRED_TABLE_COMPLETION_DELTA], 1e-12);
+        assertEquals(1, buttonF[CandidateActionContext.BREAKS_REQUIRED_TABLE_FEASIBILITY]);
+
+        var stickDelta = CandidateActionContext.materialDelta(PrimitiveType.CRAFT_ITEM, stickRecipe, null, null, 0,
+                ctx4.storageStock(), ctx4.storageSlots());
+        double[] stickF = new double[PolicyFrame.ACTION_SIZE];
+        CandidateActionContext.encodeMaterialImpact(stickF, stickDelta, ctx4, true);
+        assertEquals(1, stickF[CandidateActionContext.CONSUMES_OBJECTIVE_INGREDIENT]);
+        assertEquals(2 / 9.0, stickF[CandidateActionContext.OBJECTIVE_INGREDIENT_CONSUMED_UNITS], 1e-12);
+        assertEquals(0.20, stickF[CandidateActionContext.OBJECTIVE_RECIPE_COMPLETION_DELTA], 1e-12);
+        assertEquals(1, stickF[CandidateActionContext.DEPLETES_OBJECTIVE_INGREDIENT_GROUP]);
+        assertEquals(1, stickF[CandidateActionContext.CONSUMES_REQUIRED_TABLE_INGREDIENT]);
+        assertEquals(-0.50, stickF[CandidateActionContext.REQUIRED_TABLE_COMPLETION_DELTA], 1e-12);
+        assertEquals(1, stickF[CandidateActionContext.BREAKS_REQUIRED_TABLE_FEASIBILITY]);
+
+        // Case 2: 7 birch planks, 2 sticks, missing table — crafting button breaks combined table+pickaxe feasibility.
+        var sevenPlanks = Map.of("BIRCH_PLANKS", 7, "STICK", 2);
+        var ctx7 = new CandidateActionContext.Context(sevenPlanks, memory.observe(world, sevenPlanks), true,
+                Set.of("BIRCH_PLANKS", "OAK_PLANKS", "SPRUCE_PLANKS", "STICK"), Set.of("BIRCH_LOG"), true,
+                sevenPlanks, List.of(), List.of(pickaxeRecipe), List.of(tableRecipe));
+        double[] button7 = new double[PolicyFrame.ACTION_SIZE];
+        CandidateActionContext.encodeMaterialImpact(button7, buttonDelta, ctx7, true);
+        assertEquals(0, button7[CandidateActionContext.BREAKS_REQUIRED_TABLE_FEASIBILITY]);
+        assertEquals(0, button7[CandidateActionContext.BREAKS_OBJECTIVE_RECIPE_FEASIBILITY]);
+        assertEquals(1, button7[CandidateActionContext.BREAKS_TABLE_AND_OBJECTIVE_FEASIBILITY]);
+
+        var tableDelta = CandidateActionContext.materialDelta(PrimitiveType.CRAFT_ITEM, tableRecipe, null, null, 0,
+                ctx7.storageStock(), ctx7.storageSlots());
+        double[] table7 = new double[PolicyFrame.ACTION_SIZE];
+        CandidateActionContext.encodeMaterialImpact(table7, tableDelta, ctx7, true);
+        assertEquals(0, table7[CandidateActionContext.CONSUMES_REQUIRED_TABLE_INGREDIENT]);
+        assertEquals(0, table7[CandidateActionContext.BREAKS_REQUIRED_TABLE_FEASIBILITY]);
+        assertEquals(0, table7[CandidateActionContext.BREAKS_OBJECTIVE_RECIPE_FEASIBILITY]);
+        assertEquals(0, table7[CandidateActionContext.BREAKS_TABLE_AND_OBJECTIVE_FEASIBILITY]);
+
+        // Case 3: Union trap check — 4 planks + 5 sticks has 9 total items, but NOT 7 planks + 2 sticks.
+        assertFalse(CandidateActionContext.anyCombinedFeasible(
+                List.of(tableRecipe), List.of(pickaxeRecipe), Map.of("BIRCH_PLANKS", 4, "STICK", 5)));
+        assertTrue(CandidateActionContext.anyCombinedFeasible(
+                List.of(tableRecipe), List.of(pickaxeRecipe), Map.of("OAK_PLANKS", 3, "BIRCH_PLANKS", 4, "STICK", 2)));
+
+        // Case 4: Indirect ingredient crafting (log -> planks) enables table feasibility without indirect loss flag,
+        // whereas placing a log sets CONSUMES_INDIRECT_INGREDIENT.
+        var oneLog = Map.of("BIRCH_LOG", 1);
+        var ctxLog = new CandidateActionContext.Context(oneLog, memory.observe(world, oneLog), true,
+                Set.of("BIRCH_PLANKS", "OAK_PLANKS", "SPRUCE_PLANKS", "STICK"), Set.of("BIRCH_LOG"), true,
+                oneLog, List.of(), List.of(pickaxeRecipe), List.of(tableRecipe));
+        var planksDelta = CandidateActionContext.materialDelta(PrimitiveType.CRAFT_ITEM, planksRecipe, null, null, 0,
+                ctxLog.storageStock(), ctxLog.storageSlots());
+        double[] planksF = new double[PolicyFrame.ACTION_SIZE];
+        CandidateActionContext.encodeMaterialImpact(planksF, planksDelta, ctxLog, true);
+        assertEquals(0, planksF[CandidateActionContext.CONSUMES_INDIRECT_INGREDIENT]);
+        assertEquals(0.60, planksF[CandidateActionContext.OBJECTIVE_RECIPE_COMPLETION_DELTA], 1e-12);
+        assertEquals(1.0, planksF[CandidateActionContext.REQUIRED_TABLE_COMPLETION_DELTA], 1e-12);
+        assertEquals(1, planksF[CandidateActionContext.ENABLES_REQUIRED_TABLE_FEASIBILITY]);
+
+        var placeLogDelta = new CandidateActionContext.MaterialDelta(Map.of("BIRCH_LOG", 1), Map.of());
+        double[] placeLogF = new double[PolicyFrame.ACTION_SIZE];
+        CandidateActionContext.encodeMaterialImpact(placeLogF, placeLogDelta, ctxLog, true);
+        assertEquals(1, placeLogF[CandidateActionContext.CONSUMES_INDIRECT_INGREDIENT]);
+
+        // Case 5: Objective masking zeroes every material-impact index 288..300.
+        var maskedCtx = new CandidateActionContext.Context(fourPlanks, task4, false,
+                Set.of("BIRCH_PLANKS", "STICK"), Set.of("BIRCH_LOG"), true,
+                fourPlanks, List.of(), List.of(pickaxeRecipe), List.of(tableRecipe));
+        double[] maskedF = new double[PolicyFrame.ACTION_SIZE];
+        maskedF[CandidateActionContext.BREAKS_REQUIRED_TABLE_FEASIBILITY] = 1;
+        CandidateActionContext.encodeMaterialImpact(maskedF, buttonDelta, maskedCtx, true);
+        for (int i = CandidateActionContext.CONSUMES_OBJECTIVE_INGREDIENT;
+             i <= CandidateActionContext.ENABLES_TABLE_AND_OBJECTIVE_FEASIBILITY; i++) {
+            assertEquals(0.0, maskedF[i], "masked index " + i);
+        }
+    }
 }

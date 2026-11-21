@@ -181,8 +181,15 @@ public final class PolicyCandidates {
         var state = observed.snapshot();
         var body = observed.features();
         var taskView = ai.getPolicyTaskMemory().observe(ai.getWorldId(), observed.stock());
-        var actionContext = candidateContext.capture(ai.getCrafting(), observed.stock(), taskView,
-                !ai.getConfig().maskObjectiveInput);
+        Map<String, Integer> storageStock = new HashMap<>();
+        List<CandidateActionContext.SlotAmount> storageSlots = new ArrayList<>();
+        for (var slot : state.inventory()) {
+            if (slot.slot() >= 36 || slot.amount() <= 0) continue;
+            storageStock.merge(slot.material(), slot.amount(), Integer::sum);
+            storageSlots.add(new CandidateActionContext.SlotAmount(slot.slot(), slot.material(), slot.amount()));
+        }
+        var actionContext = candidateContext.capture(ai.getCrafting(), observed.stock(), storageStock, storageSlots,
+                taskView, !ai.getConfig().maskObjectiveInput);
         var tableAccess = new TableAccess(ai);
         Map<String, Candidate> found = new LinkedHashMap<>();
         // Waiting is always a legal input choice, without awarding it any hand-written priority.
@@ -596,15 +603,21 @@ public final class PolicyCandidates {
                         && transfer.slot() == PrimitiveCommand.FurnaceSlot.RESULT ? transfer.material() : null;
         if (material != null && context.indirectIngredients().contains(material))
             features[CandidateActionContext.OBJECTIVE_INDIRECT_INGREDIENT_MATCH] = 1;
+        boolean tableMissing = context.requiresCraftingTable() && tableAccess.knownMissing();
         if (context.requiresCraftingTable()) {
             String table = Material.CRAFTING_TABLE.name();
             boolean acquiresTable = table.equals(material) && context.stock().getOrDefault(table, 0) == 0;
             boolean placesTable = candidate.command() instanceof PrimitiveCommand.PlaceBlock place && table.equals(place.material());
-            if ((acquiresTable || placesTable) && tableAccess.knownMissing()) {
+            if ((acquiresTable || placesTable) && tableMissing) {
                 if (acquiresTable) features[CandidateActionContext.ACQUIRES_REQUIRED_CRAFTING_TABLE] = 1;
                 if (placesTable) features[CandidateActionContext.PLACES_REQUIRED_CRAFTING_TABLE] = 1;
             }
         }
+        int pickupAmount = candidate.command() instanceof PrimitiveCommand.PickupExact
+                ? Math.max(1, (int) Math.round(features[27] * 64.0)) : 0;
+        var delta = CandidateActionContext.materialDelta(candidate.type(), candidate.recipe(), candidate.command(),
+                candidate.consumable(), pickupAmount, context.storageStock(), context.storageSlots());
+        CandidateActionContext.encodeMaterialImpact(features, delta, context, tableMissing);
         if (eye != null && candidate.command() instanceof PrimitiveCommand.MoveTo move) {
             double dx = move.target().x() - feet.x();
             double dz = move.target().z() - feet.z();
