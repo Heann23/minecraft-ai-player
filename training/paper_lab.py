@@ -201,6 +201,17 @@ def validate_options(args, *, plan=None):
         raise ValueError("world seed is not assigned to this experiment split")
     if not 1024 <= args.port <= 65535 or not 10 <= args.seconds <= 86400:
         raise ValueError("invalid explicit port or finite wall-clock budget")
+    workers = getattr(args, "workers", 1)
+    if type(workers) is not int or not 1 <= workers <= 4:
+        raise ValueError("workers must be an integer 1..4")
+    if workers > 1:
+        if args.mode != "train" or getattr(args, "managed_backend", False) or getattr(args, "scenario", None) \
+                or getattr(args, "save_model_at_end", None) or getattr(args, "create_model_at_end", None):
+            raise ValueError("parallel workers require external-backend training mode without prepared scenarios or end-of-run model commands")
+        if not getattr(args, "random_world_seed", False) or getattr(args, "seed_campaign", None) is None:
+            raise ValueError("parallel workers require --random-world-seed and one shared --seed-campaign")
+        if args.port + workers - 1 > 65535:
+            raise ValueError("parallel worker port range exceeds 65535")
     if not 0 <= getattr(args, "start_time", 0) < 24000:
         raise ValueError("initial world time must be within one Minecraft day")
     if args.mode == "train" and (not 32 <= args.steps <= 10_000_000 or args.model is not None):
@@ -598,16 +609,27 @@ def run(args):
     if actual_commit != args.source_commit:
         raise ValueError("source commit does not match this tool checkout")
     objective = requested_objective(args)
+    workers = getattr(args, "workers", 1)
     random_seed = getattr(args, "random_world_seed", False)
     if random_seed:
         if args.world_seed is not None or args.seed_campaign is None:
             raise ValueError("random world selection requires one explicit shared seed campaign")
-        plan, args.world_seed = reserve_random_seed(args.seed_campaign, read_plan(args.plan), args.mode)
+        world_seeds = []
+        base_plan = read_plan(args.plan)
+        plan = base_plan
+        for _ in range(workers):
+            plan, reserved_seed = reserve_random_seed(args.seed_campaign, plan, args.mode)
+            world_seeds.append(reserved_seed)
+        args.world_seed = world_seeds[0]
         plan = validate_options(args, plan=plan)
     else:
         if getattr(args, "seed_campaign", None) is not None:
             raise ValueError("seed campaign requires random world selection")
         plan = validate_options(args)
+        world_seeds = [args.world_seed]
+    if workers > 1:
+        run_parallel(args, source, objective, plan, world_seeds)
+        return
     require_runtime_space(args.output, args.runtime_cache, args.paper, args.plugin)
     scenario = read_scenario(args.scenario) if args.scenario else []
     output = args.output.resolve()
@@ -944,6 +966,288 @@ def run(args):
     print(json.dumps(manifest, ensure_ascii=False), flush=True)
 
 
+def run_parallel(args, source: Path, objective, plan: dict, world_seeds: list[str]):
+    """Run 2..4 isolated Paper worlds synchronously sharing one external PPO backend."""
+    workers = len(world_seeds)
+    per_worker = require_runtime_space(args.output, args.runtime_cache, args.paper, args.plugin)
+    parent_dir = args.output.resolve().parent
+    while not parent_dir.exists() and parent_dir != parent_dir.parent:
+        parent_dir = parent_dir.parent
+    if shutil.disk_usage(parent_dir).free < per_worker * workers:
+        raise ValueError("insufficient disk space for parallel isolated runtimes; no servers started")
+    output = args.output.resolve()
+    output.mkdir(parents=True, exist_ok=False)
+    catalog_state = None
+    if args.catalog:
+        from model_catalog import ModelCatalog
+        import brain_session
+        catalog = ModelCatalog(args.catalog)
+        catalog_state = catalog.load(args.restore_model) if args.restore_model else catalog.selected()
+        brain_session.save(output / "catalog-source-session.json", named_session(catalog_state))
+        args.resume = Path(catalog_state["session"]["checkpoint"])
+    write_json(output / "seed-plan.json", plan)
+
+    base_config = (source / "src/main/resources/config.yml").read_text(encoding="utf-8")
+    base_config = base_config.replace("enabled: true", "enabled: false")
+    base_config = objective_input_config(base_config, getattr(args, "mask_objective_input", False))
+    base_config = base_config.replace("mode: learned", "mode: training").replace("allow-training: false", "allow-training: true")
+
+    worker_dirs, worker_ports, channels = [], [], []
+    for idx, seed in enumerate(world_seeds, start=1):
+        wdir = output / f"worker-{idx:02d}"
+        server = wdir / "server"
+        server.mkdir(parents=True)
+        for directory in ("cache", "libraries", "versions"):
+            origin = args.runtime_cache / directory
+            if origin.is_dir():
+                shutil.copytree(origin, server / directory)
+        shutil.copy2(args.paper, server / "paper.jar")
+        shutil.copy2(args.eula, server / "eula.txt")
+        plugin = server / "plugins/MinecraftAI"
+        plugin.mkdir(parents=True)
+        shutil.copy2(args.plugin, plugin.parent / "MinecraftAI.jar")
+        (plugin / "config.yml").write_text(base_config, encoding="utf-8")
+        (plugin / "discord.yml").write_text("enabled: false\n", encoding="utf-8")
+        port = args.port + idx - 1
+        (server / "server.properties").write_text(
+            f"server-ip=127.0.0.1\nserver-port={port}\nonline-mode=false\nenable-rcon=false\n"
+            f"level-name=world\nlevel-seed={seed}\nlevel-type=minecraft:normal\n"
+            "gamemode=survival\ndifficulty=normal\nspawn-protection=0\npause-when-empty-seconds=-1\n"
+            "view-distance=4\nsimulation-distance=4\nmax-players=2\n", encoding="ascii")
+        worker_dirs.append(wdir)
+        worker_ports.append(port)
+        channels.append(plugin / "training-session/channel")
+
+    from train_paper_ppo import resolve_learning_mode
+    learning_enabled = resolve_learning_mode(
+        None if catalog_state is None else catalog_state["session"],
+        learning=getattr(args, "learning", None), inference_only=args.inference_only)
+    if getattr(args, "rollout_size", None) is not None and not learning_enabled:
+        raise ValueError("explicit rollout size cannot be used with a learning-disabled snapshot")
+    rollout_size = getattr(args, "rollout_size", None) or 32
+    manifest = {
+        "schema": "minecraft-paper-lab/v1", "sourceCommit": args.source_commit, "mode": args.mode,
+        "workers": workers, "worldSeed": world_seeds[0], "worldSeeds": world_seeds,
+        "workerPorts": worker_ports, "seedPlanSha256": sha256(output / "seed-plan.json"),
+        "paperJarSha256": sha256(worker_dirs[0] / "server/paper.jar"),
+        "pluginSha256": sha256(worker_dirs[0] / "server/plugins/MinecraftAI.jar"),
+        "configurationSha256": sha256(worker_dirs[0] / "server/plugins/MinecraftAI/config.yml"),
+        "port": args.port, "maxSeconds": args.seconds, "maxTransitions": args.steps if learning_enabled else 0,
+        "backendLearningEnabled": learning_enabled, "requestedLearningOverride": getattr(args, "learning", None),
+        "requestedStartState": args.start_state, "maxDecisions": args.max_decisions,
+        "preEpisodeWorldTime": args.start_time,
+        "tools": {name: sha256(source / "training" / name) for name in ("paper_lab.py", "rl_actor.py", "continuation_policy.py", "train_paper_ppo.py", "checkpoint_store.py", "brain_session.py", "model_catalog.py")},
+        "teacherLabels": False, "grantedItems": False, "teleportDuringEpisode": False,
+        "allWorldAutonomyProven": False, "requestedObjective": objective,
+        "objectiveInputMode": "masked" if getattr(args, "mask_objective_input", False) else "visible",
+        "stopOnObjective": getattr(args, "stop_on_objective", False),
+        "workerObjectiveAdmissions": [None] * workers,
+        "backendOwner": "external-lab", "externalRolloutSize": rollout_size,
+        "seedSelection": "random-per-world-run", "playerPersistence": False,
+    }
+    if catalog_state:
+        manifest.update({"catalogName": catalog_state["name"], "catalogBrainId": catalog_state["session"]["brainId"],
+                         "catalogSessionSha256": sha256(output / "catalog-source-session.json")})
+    if args.resume:
+        selected_resume = args.resume.resolve()
+        parent_directory = resume_parent_directory(selected_resume)
+        parent = json.loads((parent_directory / "manifest.json").read_text(encoding="utf-8"))
+        if parent.get("mode") != "train" or parent.get("worldSeed") not in plan["trainSeeds"]:
+            raise ValueError("parent checkpoint does not belong to the same training campaign")
+        if parent.get("seedPlanSha256") != manifest["seedPlanSha256"]:
+            prior_plan = parent_directory / "seed-plan.json"
+            if not prior_plan.is_file() or sha256(prior_plan) != parent.get("seedPlanSha256"):
+                raise ValueError("parent campaign plan provenance is unavailable")
+            validate_plan_extension(read_plan(prior_plan), plan)
+            manifest["parentSeedPlanSha256"] = parent["seedPlanSha256"]
+        manifest["parentCheckpointSha256"] = sha256(selected_resume) if selected_resume.is_file() else None
+    write_json(output / "manifest.json", manifest)
+
+    trainer = None
+    procs, logs, readers = [None] * workers, [], []
+    started, gameplay_start, reason = time.monotonic(), None, "startup-failed"
+    server_ready = [False] * workers
+    spawn_dispatched = [False] * workers
+    worker_admitted = [False] * workers
+    events = queue.Queue()
+    with (output / "trainer.log").open("w", encoding="utf-8") as trainer_log:
+        try:
+            command = [sys.executable, "-u", str(source / "training/train_paper_ppo.py")]
+            for ch in channels:
+                command.extend(["--channel", str(ch)])
+            command.extend(["--output", str(output / "training"), "--max-transitions", str(args.steps),
+                            "--rollout-size", str(rollout_size), "--seed", str(args.policy_seed),
+                            "--stop-file", str(output / "trainer.stop.request")])
+            if catalog_state:
+                command.extend(["--restore-session", str(output / "catalog-source-session.json")])
+            elif args.resume:
+                command.extend(["--resume", str(args.resume.resolve())])
+            if args.upgrade_context:
+                command.append("--upgrade-context")
+            if args.inference_only:
+                command.append("--inference-only")
+            if getattr(args, "learning", None) is not None:
+                command.extend(["--learning", args.learning])
+            if args.start_state:
+                command.extend(["--start-state", args.start_state])
+            if args.max_decisions is not None:
+                command.extend(["--max-decisions", str(args.max_decisions)])
+            if args.model_catalog:
+                command.extend(["--model-catalog", str(args.model_catalog.resolve())])
+            env = dict(os.environ, OPENBLAS_NUM_THREADS="1", OMP_NUM_THREADS="1", MKL_NUM_THREADS="1")
+            trainer = subprocess.Popen(command, stdout=trainer_log, stderr=subprocess.STDOUT, env=env)
+            ready_deadline = time.monotonic() + 30
+            while not (output / "training/run.json").is_file():
+                if trainer.poll() is not None:
+                    raise RuntimeError("trainer initialization failed before parallel server startup; see trainer.log")
+                if time.monotonic() >= ready_deadline:
+                    raise RuntimeError("trainer initialization deadline exceeded before parallel server startup")
+                time.sleep(0.1)
+            initialized = json.loads((output / "training/run.json").read_text(encoding="utf-8"))
+            manifest["actualStartState"] = initialized.get("trainingStartState")
+            manifest["actualLearningEnabled"] = initialized.get("learningEnabled")
+            manifest["backendLearningEnabled"] = initialized["learningEnabled"]
+            manifest["maxTransitions"] = args.steps if initialized["learningEnabled"] else 0
+            write_json(output / "manifest.json", manifest)
+
+            for i, wdir in enumerate(worker_dirs):
+                wlog = (wdir / "server-console.log").open("w", encoding="utf-8")
+                logs.append(wlog)
+                proc = subprocess.Popen(
+                    [str(args.java), "-Xms512M", "-Xmx1536M", "--enable-native-access=ALL-UNNAMED",
+                     "-Dfile.encoding=UTF-8", "-jar", "paper.jar", "--nogui"],
+                    cwd=wdir / "server", stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace", bufsize=1)
+                procs[i] = proc
+                def make_reader(index, p, handle):
+                    def _read():
+                        for ln in p.stdout:
+                            handle.write(ln); handle.flush(); events.put((index, ln))
+                    return _read
+                t = threading.Thread(target=make_reader(i, proc, wlog), daemon=True)
+                t.start(); readers.append(t)
+            write_json(output / "processes.json", {"servers": [p.pid for p in procs], "trainer": trainer.pid})
+
+            def send_worker(idx, text):
+                if procs[idx] is not None and procs[idx].poll() is None:
+                    procs[idx].stdin.write(text + "\n"); procs[idx].stdin.flush()
+
+            reason, next_report = "server-exited", started
+            watchers = [ObjectiveCompletionWatcher() for _ in range(workers)]
+            while any(p.poll() is None for p in procs):
+                now = time.monotonic()
+                if any(p.poll() is not None for p in procs):
+                    reason = "worker-server-exited"; break
+                if (output / "stop.request").is_file():
+                    reason = "operator-stop-request"; break
+                if gameplay_start is not None and getattr(args, "stop_on_objective", False):
+                    completed = False
+                    for idx in range(workers):
+                        adm = manifest["workerObjectiveAdmissions"][idx]
+                        if adm is not None and watchers[idx].poll(output / "training/paper-rollouts.jsonl", adm):
+                            manifest["objectiveStopEvidence"] = {"worker": idx + 1, **watchers[idx].match}
+                            reason = "observed-objective-complete"; completed = True; break
+                    if completed:
+                        break
+                if gameplay_start is None and now - started >= 240:
+                    reason = "startup-time-budget"; break
+                if gameplay_start is not None and now - gameplay_start >= args.seconds:
+                    reason = "gameplay-time-budget"; break
+                try:
+                    idx, line = events.get(timeout=0.25)
+                    if "Done (" in line:
+                        server_ready[idx] = True
+                    if server_ready[idx] and not spawn_dispatched[idx]:
+                        spawn_dispatched[idx] = True
+                        for text in ("seed", "time set " + str(args.start_time), "ai spawn RLLearner"):
+                            send_worker(idx, text)
+                        if objective is not None:
+                            send_worker(idx, "ai stop RLLearner")
+                            send_worker(idx, "ai objective RLLearner acquire " + objective["item"] + " " + str(objective["count"]))
+                        else:
+                            worker_admitted[idx] = True
+                            send_worker(idx, "ai start RLLearner"); send_worker(idx, "ai debug on")
+                            if gameplay_start is None and all(worker_admitted):
+                                gameplay_start = time.monotonic()
+                                print(f"All {workers} parallel Paper worlds admitted", flush=True)
+                    if spawn_dispatched[idx] and objective is not None and not worker_admitted[idx]:
+                        admission = objective_acknowledgement(line, objective)
+                        if admission is not None:
+                            manifest["workerObjectiveAdmissions"][idx] = admission
+                            write_json(output / "manifest.json", manifest)
+                            worker_admitted[idx] = True
+                            send_worker(idx, "ai start RLLearner"); send_worker(idx, "ai debug on")
+                            if gameplay_start is None and all(worker_admitted):
+                                gameplay_start = time.monotonic()
+                                print(f"All {workers} parallel Paper worlds acknowledged objective", flush=True)
+                except queue.Empty:
+                    pass
+                if now >= next_report:
+                    next_report = now + 30
+                    for idx in range(workers):
+                        if worker_admitted[idx]:
+                            send_worker(idx, "ai status RLLearner"); send_worker(idx, "ai stats RLLearner")
+                    report = output / "training/training-report.json"
+                    status = json.loads(report.read_text()) if report.exists() else {}
+                    print(json.dumps({"elapsedSeconds": round(now - started), "workersReady": sum(worker_admitted),
+                                      "environmentSteps": status.get("environmentSteps", 0),
+                                      "modelVersion": status.get("modelVersion")}), flush=True)
+                if trainer.poll() is not None:
+                    reason = ("backend-inference-budget-complete" if not manifest["actualLearningEnabled"] else "trainer-budget-complete") if trainer.returncode == 0 else "trainer-failed"
+                    break
+        finally:
+            for idx, proc in enumerate(procs):
+                if proc is not None and proc.poll() is None:
+                    if not worker_admitted[idx]:
+                        proc.terminate()
+                    else:
+                        for text in ("ai status RLLearner", "ai stats RLLearner",
+                                     "data get entity RLLearner Health", "data get entity RLLearner Inventory", "ai stop RLLearner"):
+                            try:
+                                proc.stdin.write(text + "\n"); proc.stdin.flush()
+                            except OSError:
+                                pass
+            if any(worker_admitted):
+                time.sleep(2)
+            for idx, proc in enumerate(procs):
+                if proc is not None and proc.poll() is None and worker_admitted[idx]:
+                    try:
+                        proc.stdin.write("stop\n"); proc.stdin.flush()
+                    except OSError:
+                        pass
+            for idx, proc in enumerate(procs):
+                if proc is not None and proc.poll() is None:
+                    try:
+                        proc.wait(timeout=60)
+                    except subprocess.TimeoutExpired:
+                        proc.terminate(); proc.wait(timeout=20)
+                        reason += f":forced-worker-{idx+1}-termination"
+            if trainer and trainer.poll() is None:
+                (output / "trainer.stop.request").touch(exist_ok=True)
+                try:
+                    trainer.wait(timeout=20)
+                except subprocess.TimeoutExpired:
+                    trainer.terminate(); trainer.wait(timeout=20)
+                    reason += ":trainer-terminated"
+            for t in readers:
+                t.join(timeout=5)
+            for wlog in logs:
+                wlog.flush(); wlog.close()
+            worker_exit_codes = [p.returncode if p is not None else None for p in procs]
+            for idx, wdir in enumerate(worker_dirs):
+                write_json(wdir / "observed-gameplay.json", summarize_game_log(wdir / "server-console.log"))
+            manifest.update({
+                "stopReason": reason,
+                "serverExitCode": 0 if all(c == 0 for c in worker_exit_codes) else next((c for c in worker_exit_codes if c != 0), None),
+                "workerExitCodes": worker_exit_codes,
+                "trainerExitCode": trainer.returncode if trainer else None,
+                "elapsedSeconds": round(time.monotonic() - started),
+                "serverReady": all(worker_admitted),
+            })
+            write_json(output / "result.json", manifest)
+    print(json.dumps(manifest, ensure_ascii=False), flush=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("plan", "output", "paper", "plugin", "java", "eula", "runtime-cache"):
@@ -955,6 +1259,7 @@ def main():
     parser.add_argument("--seed-campaign", type=Path, help="shared private train/evaluation reservation registry, required for random worlds")
     parser.add_argument("--source-commit", required=True)
     parser.add_argument("--port", type=int, required=True)
+    parser.add_argument("--workers", type=int, default=1, help="1..4 parallel isolated Paper worlds sharing one external trainer (requires --random-world-seed and --seed-campaign)")
     parser.add_argument("--seconds", type=int, required=True)
     parser.add_argument("--steps", type=int, default=512)
     parser.add_argument("--rollout-size", type=int, help="external learning batch size, a multiple of 32; default 32")

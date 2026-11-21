@@ -923,6 +923,64 @@ class BridgeProtocolTests(unittest.TestCase):
             finally:
                 trainer.close()
 
+    def test_parallel_channels_drain_both_worlds_without_off_policy_discards(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            trainer = PaperTrainer(base / "run", seed=7, rollout_size=32, maximum=64, max_bytes=16 * 1024 * 1024)
+            session_a, session_b = str(uuid.uuid4()), str(uuid.uuid4())
+            release_update = threading.Event()
+
+            def req(channel_id, *transitions, active=False):
+                return trainer.handle({"schema": SCHEMA, "environment": "minecraft-paper", "id": str(uuid.uuid4()),
+                                       "frame": frame(), "transitions": list(transitions), "activeDecision": active},
+                                      channel_id=channel_id)
+
+            def fit_after_release(model, transitions):
+                release_update.wait()
+                return PaperTrainer.fit_snapshot(model, transitions)
+
+            try:
+                with mock.patch.object(trainer, "fit_snapshot", side_effect=fit_after_release):
+                    rows_a = [row(trainer.model, session=session_a, sequence=i, terminal=False) for i in range(16)]
+                    rows_b = [row(trainer.model, session=session_b, sequence=i, terminal=False) for i in range(16)]
+                    for t in rows_a + rows_b:
+                        t.pop("nextValue")
+                    # Both channels are active with 15 rows each -> 30 steps collected, 2 remaining, 2 in-flight.
+                    r_a = req("chan-a", *rows_a[:15], active=True)
+                    self.assertFalse(r_a["rolloutBoundary"])
+                    r_b = req("chan-b", *rows_b[:15], active=True)
+                    self.assertTrue(r_b["rolloutBoundary"])
+                    self.assertIsNone(trainer.training)
+                    self.assertEqual(trainer.steps, 30)
+                    # Channel A delivers slot 31 and becomes idle; channel B still has 1 in-flight -> hold A at boundary.
+                    self.assertTrue(req("chan-a", rows_a[15], active=False)["rolloutBoundary"])
+                    self.assertEqual(trainer.steps, 31)
+                    self.assertIsNone(trainer.training)
+                    # Channel B delivers slot 32 -> triggers synchronous PPO update with zero off-policy discards.
+                    self.assertTrue(req("chan-b", rows_b[15], active=False)["rolloutBoundary"])
+                    self.assertEqual(trainer.steps, 32)
+                    self.assertIsNotNone(trainer.training)
+                    release_update.set()
+                    trainer.poll_training(wait=True)
+                    self.assertEqual(req("chan-a", active=False)["modelVersion"], 1)
+                    self.assertEqual(req("chan-b", active=False)["modelVersion"], 1)
+                    self.assertEqual(trainer.discard_reasons, {})
+            finally:
+                release_update.set()
+                trainer.close()
+            # Also verify serve() accepts multiple distinct channels cleanly and rejects duplicate channels.
+            stopped = base / "stop.request"
+            stopped.touch()
+            t2 = PaperTrainer(base / "run2", seed=7, rollout_size=32, maximum=32, max_bytes=8 * 1024 * 1024)
+            serve([base / "c1", base / "c2"], t2, stopped)
+            self.assertTrue((base / "c1").is_dir() and (base / "c2").is_dir())
+            t3 = PaperTrainer(base / "run3", seed=7, rollout_size=32, maximum=32, max_bytes=8 * 1024 * 1024)
+            try:
+                with self.assertRaisesRegex(ValueError, "distinct"):
+                    serve([base / "c1", base / "c1"], t3, stopped)
+            finally:
+                t3.close()
+
 
 if __name__ == "__main__":
     unittest.main()

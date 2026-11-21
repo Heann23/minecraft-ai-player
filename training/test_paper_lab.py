@@ -424,6 +424,33 @@ class SeedPlanTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "cannot resume/update"):
                 validate_options(args)
 
+    def test_parallel_workers_validation_requires_train_random_campaign_and_valid_port_range(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            plan = directory / "plan.json"
+            plan.write_text(json.dumps({"schema": "minecraft-paper-seed-plan/v1", "trainSeeds": ["1"], "evaluationSeeds": ["2"]}))
+            artifact = directory / "runtime.fixture"
+            artifact.write_text("fixture only")
+            eula = directory / "eula.txt"
+            eula.write_text("eula=true\n")
+            args = argparse.Namespace(plan=plan, mode="train", world_seed="1", port=25601, seconds=120,
+                    steps=64, model=None, resume=None, source_commit="0"*40, paper=artifact, plugin=artifact,
+                    java=artifact, eula=eula, workers=2, random_world_seed=True, seed_campaign=directory / "camp")
+            self.assertIsNotNone(validate_options(args))
+            for bad_workers in (0, 5):
+                args.workers = bad_workers
+                with self.assertRaisesRegex(ValueError, "1..4"):
+                    validate_options(args)
+            args.workers, args.random_world_seed = 2, False
+            with self.assertRaisesRegex(ValueError, "random-world-seed"):
+                validate_options(args)
+            args.random_world_seed, args.port = True, 65535
+            with self.assertRaisesRegex(ValueError, "port range"):
+                validate_options(args)
+            args.port, args.mode, args.world_seed, args.model = 25601, "evaluate", "2", artifact
+            with self.assertRaisesRegex(ValueError, "external-backend training mode"):
+                validate_options(args)
+
 
 if __name__ == "__main__":
     unittest.main()

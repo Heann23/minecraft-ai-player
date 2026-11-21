@@ -276,6 +276,8 @@ class PaperTrainer:
         self.training_metadata = None
         self.discarded_during_update = 0
         self.last_sequence = {}
+        self.active_channel_decisions = {}
+        self.channel_last_seen = {}
         self.steps = self.ticks = self.bytes = self.discarded_off_policy = 0
         self.digest = hashlib.sha256()
         self.raw = (output / "paper-rollouts.jsonl").open("ab")
@@ -463,7 +465,7 @@ class PaperTrainer:
         self.saved_checkpoint_sha = hashlib.sha256(checkpoint_store.encoded(initial)).hexdigest()
         self.saved_checkpoint_rng = copy.deepcopy(self.model.rng.bit_generator.state)
 
-    def handle(self, packet: dict) -> dict:
+    def handle(self, packet: dict, *, channel_id: str | None = None) -> dict:
         self.poll_training()
         if packet.get("schema") != SCHEMA or packet.get("environment") != "minecraft-paper":
             raise ValueError("only actual Paper bridge schema accepted")
@@ -521,14 +523,24 @@ class PaperTrainer:
                 else:
                     self.preserve_discard(previous, "transition-budget-complete")
         # The request carries the prior closed transition while Java may still be executing
-        # one already-issued decision. Drain that action into the last slot before fitting.
+        # one already-issued decision. Across 1..N channels, drain all active in-flight actions
+        # into the remaining rollout slots before fitting so parallel worlds stay on-policy.
+        now = time.monotonic()
+        cid = "default" if channel_id is None else channel_id
+        if boundary_protocol:
+            self.active_channel_decisions[cid] = active_decision
+            self.channel_last_seen[cid] = now
+        in_flight = sum(1 for key, active in self.active_channel_decisions.items()
+                        if active and now - self.channel_last_seen.get(key, 0.0) <= 15.0)
         remaining = min(self.rollout_size - len(self.rows), self.maximum - self.steps)
         if boundary_protocol and self.learning_enabled and (
-                self.training is not None or remaining == 0 or active_decision and remaining == 1):
+                self.training is not None or remaining == 0 or remaining <= in_flight):
             result = {"rolloutBoundary": True, "index": -1, "logProbability": 0.0, "value": 0.0}
         else:
             result = self.model.sample(frame)
             self.decisions += 1
+            if boundary_protocol:
+                self.active_channel_decisions[cid] = True
         if time.monotonic() - self.last_session_save >= self.session_save_seconds:
             self.persist_session()
         return {"schema": SCHEMA, "id": packet["id"], **result, **self.status()}
@@ -671,7 +683,7 @@ class BrainRuntime:
         self.decisions += after[1]-before[1]
         self.bytes += after[2]-before[2]
 
-    def handle(self, packet):
+    def handle(self, packet, *, channel_id: str | None = None):
         if self.require_identity and (packet.get("brainId") != self.active.brain_id or packet.get("controlEpoch") != self.control_epoch):
             if packet.get("transitions"):
                 evidence = (json.dumps({"reason": "brain-or-load-epoch-mismatch", "query": packet},
@@ -685,7 +697,7 @@ class BrainRuntime:
         trainer = self.active
         before = self.counters(trainer)
         try:
-            return trainer.handle(packet)
+            return trainer.handle(packet, channel_id=channel_id)
         finally:
             self.account(trainer, before)
 
@@ -757,7 +769,7 @@ class BrainRuntime:
         self.active.close()
 
 
-def exchange_request(request: Path, channel: Path, trainer: PaperTrainer, pending: dict):
+def exchange_request(request: Path, channel: Path, trainer: PaperTrainer, pending: dict, *, channel_id: str | None = None):
     """Windows can temporarily deny rename/unlink. Retry the SAME result; never resample/relearn on cleanup failure."""
     handling = False
     try:
@@ -770,7 +782,7 @@ def exchange_request(request: Path, channel: Path, trainer: PaperTrainer, pendin
             if request.name != str(uuid.UUID(packet["id"])) + ".request.json":
                 raise ValueError("request identity mismatch")
             handling = True
-            result = trainer.handle(packet)
+            result = trainer.handle(packet) if channel_id is None else trainer.handle(packet, channel_id=channel_id)
             handling = False
             pending[request] = {"response": result, "published": False}
         saved = pending[request]
@@ -831,10 +843,17 @@ def exchange_control(request: Path, channel: Path, trainer: PaperTrainer, pendin
             pending[request] = {"response": None, "published": True}
 
 
-def serve(channel: Path, trainer: PaperTrainer, stop_file: Path | None = None, max_decisions: int | None = None):
+def serve(channels: Path | list[Path] | tuple[Path, ...], trainer: PaperTrainer, stop_file: Path | None = None, max_decisions: int | None = None):
     if max_decisions is not None and (type(max_decisions) is not int or max_decisions < 1):
         raise ValueError("max-decisions must be positive")
-    channel.mkdir(parents=True, exist_ok=True)
+    channel_list = [channels] if isinstance(channels, Path) else list(channels)
+    if not channel_list or any(not isinstance(path, Path) for path in channel_list):
+        raise ValueError("at least one valid bridge channel directory is required")
+    resolved = [path.resolve() for path in channel_list]
+    if len(set(resolved)) != len(resolved):
+        raise ValueError("parallel bridge channels must be distinct directories")
+    for channel in channel_list:
+        channel.mkdir(parents=True, exist_ok=True)
     pending = {}
     controls = {}
     max_decisions = max_decisions or max(1000, trainer.maximum * 16)
@@ -847,12 +866,18 @@ def serve(channel: Path, trainer: PaperTrainer, stop_file: Path | None = None, m
             trainer.poll_training()
             for disappeared in [path for path in controls if not path.exists()]:
                 controls.pop(disappeared, None)
-            for request in sorted(channel.glob("*.control.json")):
-                exchange_control(request, channel, trainer, controls)
+            for channel in channel_list:
+                for request in sorted(channel.glob("*.control.json")):
+                    exchange_control(request, channel, trainer, controls)
             for disappeared in [path for path in pending if not path.exists()]:
                 pending.pop(disappeared, None)
-            for request in sorted(channel.glob("*.request.json")):
-                exchange_request(request, channel, trainer, pending)
+            multi = len(channel_list) > 1
+            for channel in channel_list:
+                cid = str(channel.resolve()) if multi else None
+                for request in sorted(channel.glob("*.request.json")):
+                    exchange_request(request, channel, trainer, pending, channel_id=cid)
+                    if trainer.steps >= trainer.maximum:
+                        break
                 if trainer.steps >= trainer.maximum:
                     break
             time.sleep(0.01)
@@ -862,7 +887,7 @@ def serve(channel: Path, trainer: PaperTrainer, stop_file: Path | None = None, m
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--channel", type=Path, required=True, help="dedicated plugin development bridge directory")
+    parser.add_argument("--channel", type=Path, action="append", required=True, help="dedicated plugin development bridge directory (repeatable for parallel worlds)")
     parser.add_argument("--output", type=Path, required=True, help="new private training-run directory")
     parser.add_argument("--max-transitions", type=int, required=True, help="explicit finite training budget")
     parser.add_argument("--rollout-size", type=int, default=512)
@@ -916,7 +941,7 @@ def main():
         print("Recovered exact committed runtime session; damaged original preserved:",
               recovery["source"], "brain", recovery["brainId"], flush=True)
     print("Waiting for real Paper transitions. No Teacher or synthetic game environment. Run:", trainer.run, flush=True)
-    serve(args.channel, BrainRuntime(trainer), args.stop_file, args.max_decisions)
+    serve(args.channel[0] if len(args.channel) == 1 else args.channel, BrainRuntime(trainer), args.stop_file, args.max_decisions)
 
 
 if __name__ == "__main__":
