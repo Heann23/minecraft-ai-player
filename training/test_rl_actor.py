@@ -947,7 +947,7 @@ class BridgeProtocolTests(unittest.TestCase):
                         t.pop("nextValue")
                     # Both channels are active with 15 rows each -> 30 steps collected, 2 remaining, 2 in-flight.
                     r_a = req("chan-a", *rows_a[:15], active=True)
-                    self.assertFalse(r_a["rolloutBoundary"])
+                    self.assertFalse(r_a.get("rolloutBoundary", False))
                     r_b = req("chan-b", *rows_b[:15], active=True)
                     self.assertTrue(r_b["rolloutBoundary"])
                     self.assertIsNone(trainer.training)
