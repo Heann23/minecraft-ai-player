@@ -451,6 +451,82 @@ class SeedPlanTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "external-backend training mode"):
                 validate_options(args)
 
+    def test_objective_chain_parsing_validation_and_tracker_progression(self):
+        from paper_lab import requested_objective_chain, requested_objectives, ObjectiveChainTracker
+        chain = requested_objective_chain(argparse.Namespace(
+            objective_chain="WOODEN_PICKAXE:1, STONE_PICKAXE:1, IRON_INGOT:3"))
+        self.assertEqual(chain, [
+            {"item": "WOODEN_PICKAXE", "count": 1},
+            {"item": "STONE_PICKAXE", "count": 1},
+            {"item": "IRON_INGOT", "count": 3},
+        ])
+        self.assertEqual(requested_objectives(argparse.Namespace(objective_chain="FURNACE:1")),
+                         [{"item": "FURNACE", "count": 1}])
+        for bad in ("", "OAK_LOG", "OAK_LOG:0", "OAK_LOG:4097", "AIR:1", "OAK_LOG:1:2",
+                    ",".join(f"STONE:{i}" for i in range(1, 18))):
+            with self.assertRaises(ValueError):
+                requested_objective_chain(argparse.Namespace(objective_chain=bad))
+        with self.assertRaisesRegex(ValueError, "cannot be combined"):
+            requested_objective_chain(argparse.Namespace(objective_chain="OAK_LOG:1", objective_item="OAK_LOG"))
+
+        world_a = "11111111-1111-1111-1111-111111111111"
+        world_b = "22222222-2222-2222-2222-222222222222"
+        id1 = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+        id2 = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+        tracker = ObjectiveChainTracker([{"item": "WOODEN_PICKAXE", "count": 1}, {"item": "STONE_PICKAXE", "count": 1}])
+        self.assertEqual(tracker.begin_initial(), {"item": "WOODEN_PICKAXE", "count": 1})
+        ack1 = tracker.on_console_line(f"[INFO] [AIObjective] name=RLLearner item=WOODEN_PICKAXE count=1 id={id1} world={world_a}")
+        self.assertEqual(ack1["id"], id1)
+        with tempfile.TemporaryDirectory() as directory:
+            rollouts = Path(directory) / "paper-rollouts.jsonl"
+            # Another world's completion must never advance this worker's chain.
+            rollouts.write_text(json.dumps({
+                "session": "s1", "sequence": 1,
+                "taskCompletion": {"objectiveId": id1, "world": world_b, "item": "WOODEN_PICKAXE",
+                                   "required": 1, "beforeOwned": 0, "afterOwned": 1}
+            }) + "\n", encoding="utf-8")
+            self.assertEqual(tracker.poll_completion(rollouts), (False, None))
+            with rollouts.open("a", encoding="utf-8") as stream:
+                stream.write(json.dumps({
+                    "session": "s1", "sequence": 2,
+                    "taskCompletion": {"objectiveId": id1, "world": world_a, "item": "WOODEN_PICKAXE",
+                                       "required": 1, "beforeOwned": 0, "afterOwned": 1}
+                }) + "\n")
+            self.assertEqual(tracker.poll_completion(rollouts), (False, {"item": "STONE_PICKAXE", "count": 1}))
+            self.assertEqual(len(tracker.completions), 1)
+            # Duplicate id1 acknowledgement is ignored; matching id2 advances active admission.
+            self.assertIsNone(tracker.on_console_line(
+                f"[INFO] [AIObjective] name=RLLearner item=STONE_PICKAXE count=1 id={id1} world={world_a}"))
+            ack2 = tracker.on_console_line(
+                f"[INFO] [AIObjective] name=RLLearner item=STONE_PICKAXE count=1 id={id2} world={world_a}")
+            self.assertEqual(ack2["id"], id2)
+            with rollouts.open("a", encoding="utf-8") as stream:
+                stream.write(json.dumps({
+                    "session": "s1", "sequence": 3,
+                    "taskCompletion": {"objectiveId": id2, "world": world_a, "item": "STONE_PICKAXE",
+                                       "required": 1, "beforeOwned": 0, "afterOwned": 1}
+                }) + "\n")
+            self.assertEqual(tracker.poll_completion(rollouts), (True, None))
+            self.assertTrue(tracker.finished)
+            self.assertEqual(len(tracker.completions), 2)
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plan = root / "plan.json"
+            plan.write_text(json.dumps({"schema": "minecraft-paper-seed-plan/v1", "trainSeeds": ["1"], "evaluationSeeds": ["2"]}))
+            artifact = root / "runtime.fixture"
+            artifact.write_text("fixture")
+            eula = root / "eula.txt"
+            eula.write_text("eula=true\n")
+            args = argparse.Namespace(plan=plan, mode="train", world_seed="1", port=25601, seconds=120,
+                    steps=64, model=None, resume=None, source_commit="0"*40, paper=artifact, plugin=artifact,
+                    java=artifact, eula=eula, objective_chain="WOODEN_PICKAXE:1,STONE_PICKAXE:1",
+                    stop_on_objective=True)
+            self.assertIsNotNone(validate_options(args))
+            args.mode, args.world_seed, args.model, args.stop_on_objective = "evaluate", "2", artifact, False
+            with self.assertRaisesRegex(ValueError, "external backend rollout log"):
+                validate_options(args)
+
 
 if __name__ == "__main__":
     unittest.main()

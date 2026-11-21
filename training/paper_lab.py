@@ -161,11 +161,14 @@ def validate_plan_extension(parent: dict, current: dict):
 def validate_options(args, *, plan=None):
     plan = read_plan(args.plan) if plan is None else validate_plan(plan)
     inference_seed(args)
-    if getattr(args, "stop_on_objective", False) and (args.mode != "train" or requested_objective(args) is None
+    objectives = requested_objectives(args)
+    if len(objectives) > 1 and (args.mode != "train" or getattr(args, "managed_backend", False)):
+        raise ValueError("multi-step objective-chain requires the external backend rollout log")
+    if getattr(args, "stop_on_objective", False) and (args.mode != "train" or not objectives
             or getattr(args, "inference_only", False) or getattr(args, "managed_backend", False)
             or getattr(args, "learning", None) == "off"):
         raise ValueError("stop-on-objective requires an actual objective and the external learning backend")
-    if getattr(args, "mask_objective_input", False) and requested_objective(args) is None:
+    if getattr(args, "mask_objective_input", False) and not objectives:
         raise ValueError("objective-input ablation requires an explicit actual objective")
     learning = getattr(args, "learning", None)
     if learning not in (None, "on", "off") or learning is not None and (args.mode != "train"
@@ -578,14 +581,105 @@ def inference_seed_config(config, args):
     return changed
 
 
-def requested_objective(args):
-    item, count = getattr(args, "objective_item", None), getattr(args, "objective_count", None)
-    if item is None and count is None:
-        return None
+def _validate_objective_entry(item, count):
     if not isinstance(item, str) or not re.fullmatch(r"[A-Z][A-Z0-9_]{0,127}", item) \
             or item in {"AIR", "CAVE_AIR", "VOID_AIR"} or type(count) is not int or not 1 <= count <= 4096:
         raise ValueError("objective requires an exact canonical item and count 1..4096")
     return {"item": item, "count": count}
+
+
+def requested_objective(args):
+    item, count = getattr(args, "objective_item", None), getattr(args, "objective_count", None)
+    if item is None and count is None:
+        return None
+    return _validate_objective_entry(item, count)
+
+
+def requested_objective_chain(args):
+    raw = getattr(args, "objective_chain", None)
+    if raw is None:
+        return None
+    if getattr(args, "objective_item", None) is not None or getattr(args, "objective_count", None) is not None:
+        raise ValueError("objective-chain cannot be combined with objective-item or objective-count")
+    if not isinstance(raw, str) or not raw.strip():
+        raise ValueError("objective-chain requires 1..16 comma-separated ITEM:COUNT entries")
+    parts = [part.strip() for part in raw.split(",")]
+    if not 1 <= len(parts) <= 16:
+        raise ValueError("objective-chain requires 1..16 comma-separated ITEM:COUNT entries")
+    chain = []
+    for entry in parts:
+        if entry.count(":") != 1:
+            raise ValueError("each objective-chain entry must have the form ITEM:COUNT")
+        item, count_text = (token.strip() for token in entry.split(":", 1))
+        if not re.fullmatch(r"[1-9][0-9]*", count_text):
+            raise ValueError("objective-chain count must be an integer 1..4096")
+        chain.append(_validate_objective_entry(item, int(count_text)))
+    return chain
+
+
+def requested_objectives(args):
+    chain = requested_objective_chain(args)
+    if chain is not None:
+        return chain
+    single = requested_objective(args)
+    return [] if single is None else [single]
+
+
+class ObjectiveChainTracker:
+    """Advance researcher-configured objectives only after observing real server-acknowledged completions."""
+    def __init__(self, objectives):
+        self.objectives = [dict(entry) for entry in objectives]
+        self.step_index = 0
+        self.pending_objective = None
+        self.current_admission = None
+        self.admissions = []
+        self.completions = []
+        self.finished = False
+        self.watcher = ObjectiveCompletionWatcher()
+
+    def has_objectives(self):
+        return bool(self.objectives)
+
+    def begin_initial(self):
+        if not self.objectives:
+            return None
+        self.step_index = 0
+        self.pending_objective = dict(self.objectives[0])
+        return self.pending_objective
+
+    def on_console_line(self, line):
+        if self.pending_objective is None:
+            return None
+        ack = objective_acknowledgement(line, self.pending_objective)
+        if ack is None:
+            return None
+        if any(prev["id"] == ack["id"] for prev in self.admissions):
+            return None
+        self.current_admission = ack
+        self.pending_objective = None
+        self.admissions.append({"stepIndex": self.step_index, **ack})
+        return ack
+
+    def poll_completion(self, rollouts_path):
+        if self.finished or self.current_admission is None or self.pending_objective is not None:
+            return False, None
+        if not self.watcher.poll(rollouts_path, self.current_admission):
+            return False, None
+        evidence = dict(self.watcher.match)
+        self.completions.append({
+            "stepIndex": self.step_index,
+            "objective": dict(self.objectives[self.step_index]),
+            "admission": dict(self.current_admission),
+            "evidence": evidence,
+        })
+        self.current_admission = None
+        self.watcher.match = None
+        if self.step_index + 1 < len(self.objectives):
+            self.step_index += 1
+            self.pending_objective = dict(self.objectives[self.step_index])
+            return False, self.pending_objective
+        self.finished = True
+        return True, None
 
 
 def objective_acknowledgement(line, requested):
@@ -608,7 +702,9 @@ def run(args):
                                               "rev-parse", "HEAD"], cwd=source, text=True).strip()
     if actual_commit != args.source_commit:
         raise ValueError("source commit does not match this tool checkout")
-    objective = requested_objective(args)
+    objectives = requested_objectives(args)
+    objective_chain = requested_objective_chain(args)
+    objective = objectives[0] if len(objectives) == 1 and objective_chain is None else None
     workers = getattr(args, "workers", 1)
     random_seed = getattr(args, "random_world_seed", False)
     if random_seed:
@@ -628,7 +724,7 @@ def run(args):
         plan = validate_options(args)
         world_seeds = [args.world_seed]
     if workers > 1:
-        run_parallel(args, source, objective, plan, world_seeds)
+        run_parallel(args, source, objectives, objective_chain, plan, world_seeds)
         return
     require_runtime_space(args.output, args.runtime_cache, args.paper, args.plugin)
     scenario = read_scenario(args.scenario) if args.scenario else []
@@ -711,10 +807,14 @@ def run(args):
                 "teacherLabels": False, "grantedItems": False, "teleportDuringEpisode": False,
                 "allWorldAutonomyProven": False}
     manifest["requestedObjective"] = objective
+    manifest["requestedObjectiveChain"] = objective_chain
     manifest["objectiveInputMode"] = "masked" if getattr(args, "mask_objective_input", False) else "visible"
     manifest["inferenceSamplingSeed"] = inference_seed(args)
     manifest["stopOnObjective"] = getattr(args, "stop_on_objective", False)
     manifest["objectiveAdmission"] = None
+    if objective_chain is not None:
+        manifest["objectiveChainAdmissions"] = []
+        manifest["objectiveChainCompletions"] = []
     manifest["backendOwner"] = "plugin" if args.managed_backend else "external-lab"
     rollout_size = getattr(args, "rollout_size", None) or 32
     if args.mode == "train" and not args.managed_backend:
@@ -818,7 +918,7 @@ def run(args):
                     process.stdin.write(text + "\n"); process.stdin.flush()
             reason, next_report = "server-exited", started
             scenario_index = 0
-            completion_watcher = ObjectiveCompletionWatcher()
+            tracker = ObjectiveChainTracker(objectives)
             while process.poll() is None:
                 now = time.monotonic()
                 while gameplay_start is not None and scenario_index < len(scenario) \
@@ -839,10 +939,20 @@ def run(args):
                     scenario_index += 1
                 if (output / "stop.request").is_file():
                     reason = "operator-stop-request"; break
-                if gameplay_start is not None and getattr(args, "stop_on_objective", False) \
-                        and completion_watcher.poll(output / "training/paper-rollouts.jsonl", manifest["objectiveAdmission"]):
-                    manifest["objectiveStopEvidence"] = completion_watcher.match
-                    reason = "observed-objective-complete"; break
+                if gameplay_start is not None and args.mode == "train" and not args.managed_backend \
+                        and (getattr(args, "stop_on_objective", False) or len(objectives) > 1):
+                    final_done, next_obj = tracker.poll_completion(output / "training/paper-rollouts.jsonl")
+                    if next_obj is not None:
+                        manifest["objectiveChainCompletions"] = list(tracker.completions)
+                        write_json(output / "manifest.json", manifest)
+                        send("ai objective RLLearner acquire " + next_obj["item"] + " " + str(next_obj["count"]))
+                    elif final_done:
+                        if objective_chain is not None:
+                            manifest["objectiveChainCompletions"] = list(tracker.completions)
+                            write_json(output / "manifest.json", manifest)
+                        if getattr(args, "stop_on_objective", False):
+                            manifest["objectiveStopEvidence"] = tracker.completions[-1]["evidence"]
+                            reason = "observed-objective-complete"; break
                 if gameplay_start is None and now - started >= 180:
                     reason = "startup-time-budget"; break
                 if gameplay_start is not None and now - gameplay_start >= args.seconds:
@@ -859,21 +969,27 @@ def run(args):
                         spawn_dispatched = True
                         for text in ("seed", "time set " + str(args.start_time), "ai spawn RLLearner"):
                             send(text)
-                        if objective is not None:
+                        if tracker.has_objectives():
+                            first_obj = tracker.begin_initial()
                             send("ai stop RLLearner")
-                            send("ai objective RLLearner acquire " + objective["item"] + " " + str(objective["count"]))
+                            send("ai objective RLLearner acquire " + first_obj["item"] + " " + str(first_obj["count"]))
                         else:
                             gameplay_start = time.monotonic()
                             send("ai start RLLearner"); send("ai debug on")
                             print("Paper ready; actual survival episode admitted", flush=True)
-                    if spawn_dispatched and objective is not None and gameplay_start is None:
-                        admission = objective_acknowledgement(line, objective)
+                    if spawn_dispatched and tracker.has_objectives():
+                        admission = tracker.on_console_line(line)
                         if admission is not None:
                             manifest["objectiveAdmission"] = admission
+                            if objective_chain is not None:
+                                manifest["objectiveChainAdmissions"] = list(tracker.admissions)
                             write_json(output / "manifest.json", manifest)
-                            gameplay_start = time.monotonic()
-                            send("ai start RLLearner"); send("ai debug on")
-                            print("Paper objective acknowledged; actual survival episode admitted", flush=True)
+                            if gameplay_start is None:
+                                gameplay_start = time.monotonic()
+                                send("ai start RLLearner"); send("ai debug on")
+                                print("Paper objective acknowledged; actual survival episode admitted", flush=True)
+                            else:
+                                print(f"Paper chain objective {tracker.step_index + 1}/{len(objectives)} acknowledged: {admission['item']} x{admission['count']}", flush=True)
                 except queue.Empty:
                     pass
                 if now >= next_report:
@@ -966,8 +1082,9 @@ def run(args):
     print(json.dumps(manifest, ensure_ascii=False), flush=True)
 
 
-def run_parallel(args, source: Path, objective, plan: dict, world_seeds: list[str]):
+def run_parallel(args, source: Path, objectives: list[dict], objective_chain, plan: dict, world_seeds: list[str]):
     """Run 2..4 isolated Paper worlds synchronously sharing one external PPO backend."""
+    objective = objectives[0] if len(objectives) == 1 and objective_chain is None else None
     workers = len(world_seeds)
     per_worker = require_runtime_space(args.output, args.runtime_cache, args.paper, args.plugin)
     parent_dir = args.output.resolve().parent
@@ -1039,12 +1156,16 @@ def run_parallel(args, source: Path, objective, plan: dict, world_seeds: list[st
         "tools": {name: sha256(source / "training" / name) for name in ("paper_lab.py", "rl_actor.py", "continuation_policy.py", "train_paper_ppo.py", "checkpoint_store.py", "brain_session.py", "model_catalog.py")},
         "teacherLabels": False, "grantedItems": False, "teleportDuringEpisode": False,
         "allWorldAutonomyProven": False, "requestedObjective": objective,
+        "requestedObjectiveChain": objective_chain,
         "objectiveInputMode": "masked" if getattr(args, "mask_objective_input", False) else "visible",
         "stopOnObjective": getattr(args, "stop_on_objective", False),
         "workerObjectiveAdmissions": [None] * workers,
         "backendOwner": "external-lab", "externalRolloutSize": rollout_size,
         "seedSelection": "random-per-world-run", "playerPersistence": False,
     }
+    if objective_chain is not None:
+        manifest["workerObjectiveChainAdmissions"] = [[] for _ in range(workers)]
+        manifest["workerObjectiveChainCompletions"] = [[] for _ in range(workers)]
     if catalog_state:
         manifest.update({"catalogName": catalog_state["name"], "catalogBrainId": catalog_state["session"]["brainId"],
                          "catalogSessionSha256": sha256(output / "catalog-source-session.json")})
@@ -1133,20 +1254,28 @@ def run_parallel(args, source: Path, objective, plan: dict, world_seeds: list[st
                     procs[idx].stdin.write(text + "\n"); procs[idx].stdin.flush()
 
             reason, next_report = "server-exited", started
-            watchers = [ObjectiveCompletionWatcher() for _ in range(workers)]
+            trackers = [ObjectiveChainTracker(objectives) for _ in range(workers)]
             while any(p.poll() is None for p in procs):
                 now = time.monotonic()
                 if any(p.poll() is not None for p in procs):
                     reason = "worker-server-exited"; break
                 if (output / "stop.request").is_file():
                     reason = "operator-stop-request"; break
-                if gameplay_start is not None and getattr(args, "stop_on_objective", False):
+                if gameplay_start is not None and (getattr(args, "stop_on_objective", False) or len(objectives) > 1):
                     completed = False
                     for idx in range(workers):
-                        adm = manifest["workerObjectiveAdmissions"][idx]
-                        if adm is not None and watchers[idx].poll(output / "training/paper-rollouts.jsonl", adm):
-                            manifest["objectiveStopEvidence"] = {"worker": idx + 1, **watchers[idx].match}
-                            reason = "observed-objective-complete"; completed = True; break
+                        final_done, next_obj = trackers[idx].poll_completion(output / "training/paper-rollouts.jsonl")
+                        if next_obj is not None:
+                            manifest["workerObjectiveChainCompletions"][idx] = list(trackers[idx].completions)
+                            write_json(output / "manifest.json", manifest)
+                            send_worker(idx, "ai objective RLLearner acquire " + next_obj["item"] + " " + str(next_obj["count"]))
+                        elif final_done:
+                            if objective_chain is not None:
+                                manifest["workerObjectiveChainCompletions"][idx] = list(trackers[idx].completions)
+                                write_json(output / "manifest.json", manifest)
+                            if getattr(args, "stop_on_objective", False):
+                                manifest["objectiveStopEvidence"] = {"worker": idx + 1, **trackers[idx].completions[-1]["evidence"]}
+                                reason = "observed-objective-complete"; completed = True; break
                     if completed:
                         break
                 if gameplay_start is None and now - started >= 240:
@@ -1161,25 +1290,31 @@ def run_parallel(args, source: Path, objective, plan: dict, world_seeds: list[st
                         spawn_dispatched[idx] = True
                         for text in ("seed", "time set " + str(args.start_time), "ai spawn RLLearner"):
                             send_worker(idx, text)
-                        if objective is not None:
+                        if trackers[idx].has_objectives():
+                            first_obj = trackers[idx].begin_initial()
                             send_worker(idx, "ai stop RLLearner")
-                            send_worker(idx, "ai objective RLLearner acquire " + objective["item"] + " " + str(objective["count"]))
+                            send_worker(idx, "ai objective RLLearner acquire " + first_obj["item"] + " " + str(first_obj["count"]))
                         else:
                             worker_admitted[idx] = True
                             send_worker(idx, "ai start RLLearner"); send_worker(idx, "ai debug on")
                             if gameplay_start is None and all(worker_admitted):
                                 gameplay_start = time.monotonic()
                                 print(f"All {workers} parallel Paper worlds admitted", flush=True)
-                    if spawn_dispatched[idx] and objective is not None and not worker_admitted[idx]:
-                        admission = objective_acknowledgement(line, objective)
+                    if spawn_dispatched[idx] and trackers[idx].has_objectives():
+                        admission = trackers[idx].on_console_line(line)
                         if admission is not None:
                             manifest["workerObjectiveAdmissions"][idx] = admission
+                            if objective_chain is not None:
+                                manifest["workerObjectiveChainAdmissions"][idx] = list(trackers[idx].admissions)
                             write_json(output / "manifest.json", manifest)
-                            worker_admitted[idx] = True
-                            send_worker(idx, "ai start RLLearner"); send_worker(idx, "ai debug on")
-                            if gameplay_start is None and all(worker_admitted):
-                                gameplay_start = time.monotonic()
-                                print(f"All {workers} parallel Paper worlds acknowledged objective", flush=True)
+                            if not worker_admitted[idx]:
+                                worker_admitted[idx] = True
+                                send_worker(idx, "ai start RLLearner"); send_worker(idx, "ai debug on")
+                                if gameplay_start is None and all(worker_admitted):
+                                    gameplay_start = time.monotonic()
+                                    print(f"All {workers} parallel Paper worlds acknowledged objective", flush=True)
+                            else:
+                                print(f"Worker {idx + 1} chain objective {trackers[idx].step_index + 1}/{len(objectives)} acknowledged: {admission['item']} x{admission['count']}", flush=True)
                 except queue.Empty:
                     pass
                 if now >= next_report:
@@ -1267,6 +1402,7 @@ def main():
     parser.add_argument("--inference-seed", type=int, help="development Java evaluation sampling stream; independent of world/training RNG, resets on brain creation")
     parser.add_argument("--objective-item", help="exact canonical item; server acknowledgement is required before play")
     parser.add_argument("--objective-count", type=int, help="current ownership target 1..4096; requires --objective-item")
+    parser.add_argument("--objective-chain", help="comma-separated ITEM:COUNT milestones (1..16) advanced only after observed real taskCompletion")
     parser.add_argument("--stop-on-objective", action="store_true", help="cooperatively finish a learning world run after its own real accepted completion; preserve pending experience normally")
     parser.add_argument("--mask-objective-input", action="store_true", help="development control: zero only goal state columns 208..231 in actor/critic observations; actual reward accounting is unchanged")
     parser.add_argument("--start-time", type=int, default=0, help="explicit world time prepared before spawning; no time changes during play")
