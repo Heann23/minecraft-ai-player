@@ -124,6 +124,9 @@ public final class PolicyCandidates {
     private int bucketCursor;
     private int dropCursor;
     private int interactCursor;
+    private int furnaceScanCursor;
+    private int igniteCursor;
+    private int eyeFrameCursor;
     private int movementCursor;
     private int movementInputCursor;
     private int pickupCursor;
@@ -318,7 +321,13 @@ public final class PolicyCandidates {
                 expanded.add(candidate.committed(shield.holdTicks()));
             else if (candidate.command() instanceof PrimitiveCommand.UseBed)
                 expanded.add(candidate.committed(ExactUseBedAction.ACTION_TICKS));
-            else if (candidate.command() instanceof PrimitiveCommand.LootChest)
+            else if (candidate.command() instanceof PrimitiveCommand.LootChest
+                    || candidate.command() instanceof PrimitiveCommand.FurnaceTransfer
+                    || candidate.command() instanceof PrimitiveCommand.IgnitePortal
+                    || candidate.command() instanceof PrimitiveCommand.FillBucket
+                    || candidate.command() instanceof PrimitiveCommand.PourBucket
+                    || candidate.command() instanceof PrimitiveCommand.ThrowEnderEye
+                    || candidate.command() instanceof PrimitiveCommand.SocketEnderEye)
                 expanded.add(candidate.committed(20));
             else if (candidate.equipment() != null || candidate.command() instanceof PrimitiveCommand.DropExact
                     || candidate.command() instanceof PrimitiveCommand.ToggleBlock)
@@ -683,20 +692,29 @@ public final class PolicyCandidates {
 
     private void furnaceTransfers(AIPlayer ai, PolicyFrame.SightObservation sight, Map<String, Candidate> found,
             CandidateActionContext.Context actionContext) {
-        if (sight == null)
-            return;
+        var player = ai.getPlayer();
+        var world = player.getWorld();
+        var feet = ai.getPosition();
         var targets = new LinkedHashSet<BlockPoint>();
-        for (var ray : sight.rays()) {
-            var block = ray.block();
-            if (block != null && "FURNACE".equals(block.material()))
-                targets.add(new BlockPoint(block.x(), block.y(), block.z()));
+        if (sight != null) {
+            for (var ray : sight.rays()) {
+                var block = ray.block();
+                if (block != null && "FURNACE".equals(block.material()))
+                    targets.add(new BlockPoint(block.x(), block.y(), block.z()));
+            }
+        }
+        var nearby = nearbyTargets(feet);
+        for (int checked = 0; checked < 24 && targets.size() < 4 && !ai.getWorkBudget().isExhausted(); checked++) {
+            var cell = nearby.get(Math.floorMod(furnaceScanCursor++, nearby.size()));
+            if (cell.y() < world.getMinHeight() || cell.y() >= world.getMaxHeight() || !Positions.isLoaded(world, cell))
+                continue;
+            if (Positions.block(world, cell).getType() == Material.FURNACE)
+                targets.add(cell);
         }
         if (targets.isEmpty())
             return;
         int start = furnaceStorageCursor;
         furnaceStorageCursor = (furnaceStorageCursor + 8) % 36;
-        var player = ai.getPlayer();
-        var world = player.getWorld();
         var eye = player.getEyeLocation();
         for (var target : targets) {
             if (ai.getWorkBudget().isExhausted())
@@ -737,19 +755,41 @@ public final class PolicyCandidates {
 
     private void portalIgnitions(AIPlayer ai, PolicyFrame.SightObservation sight, Map<String, Candidate> found,
             CandidateActionContext.Context actionContext) {
-        if (sight == null || ai.getPlayer().getInventory().getItemInMainHand().getType() != Material.FLINT_AND_STEEL)
+        if (ai.getPlayer().getInventory().getItemInMainHand().getType() != Material.FLINT_AND_STEEL)
             return;
         var feet = ai.getPosition();
-        for (var ray : sight.rays()) {
-            if (ai.getWorkBudget().isExhausted())
-                return;
-            var observed = ray.block();
-            if (observed == null || !observed.material().equals("OBSIDIAN"))
+        var world = ai.getPlayer().getWorld();
+        int offered = 0;
+        if (sight != null) {
+            for (var ray : sight.rays()) {
+                if (offered >= 6 || ai.getWorkBudget().isExhausted())
+                    return;
+                var observed = ray.block();
+                if (observed == null || !observed.material().equals("OBSIDIAN"))
+                    continue;
+                var floor = new BlockPoint(observed.x(), observed.y(), observed.z());
+                if (add(ai, found, "ignite-portal:" + floor.encode(),
+                        new PrimitiveCommand.IgnitePortal(ai.getWorldId(), floor),
+                        null, null, floor.x() - feet.x(), floor.y() - feet.y(), floor.z() - feet.z(), "ignite-portal",
+                        true, actionContext)) {
+                    offered++;
+                }
+            }
+        }
+        var nearby = nearbyTargets(feet);
+        for (int checked = 0; checked < 24 && offered < 6 && !ai.getWorkBudget().isExhausted(); checked++) {
+            var floor = nearby.get(Math.floorMod(igniteCursor++, nearby.size()));
+            if (floor.y() < world.getMinHeight() || floor.y() + 1 >= world.getMaxHeight()
+                    || !Positions.isLoaded(world, floor))
                 continue;
-            var floor = new BlockPoint(observed.x(), observed.y(), observed.z());
-            add(ai, found, "ignite-portal:" + floor.encode(), new PrimitiveCommand.IgnitePortal(ai.getWorldId(), floor),
-                    null, null, floor.x() - feet.x(), floor.y() - feet.y(), floor.z() - feet.z(), "ignite-portal", true,
-                    actionContext);
+            if (Positions.block(world, floor).getType() != Material.OBSIDIAN)
+                continue;
+            if (add(ai, found, "ignite-portal:" + floor.encode(),
+                    new PrimitiveCommand.IgnitePortal(ai.getWorldId(), floor),
+                    null, null, floor.x() - feet.x(), floor.y() - feet.y(), floor.z() - feet.z(), "ignite-portal",
+                    true, actionContext)) {
+                offered++;
+            }
         }
     }
 
@@ -955,20 +995,39 @@ public final class PolicyCandidates {
             return;
         add(ai, found, "throw-ender-eye", new PrimitiveCommand.ThrowEnderEye(ai.getWorldId()), null, null,
                 0, 0, 0, "throw-ender-eye", true, actionContext);
-        if (sight == null)
-            return;
         var feet = ai.getPosition();
-        for (var ray : sight.rays()) {
-            if (ai.getWorkBudget().isExhausted())
-                break;
-            var block = ray.block();
-            if (block == null || !block.material().equals("END_PORTAL_FRAME"))
+        var world = player.getWorld();
+        int offered = 0;
+        if (sight != null) {
+            for (var ray : sight.rays()) {
+                if (offered >= 6 || ai.getWorkBudget().isExhausted())
+                    return;
+                var block = ray.block();
+                if (block == null || !block.material().equals("END_PORTAL_FRAME"))
+                    continue;
+                var frame = new BlockPoint(block.x(), block.y(), block.z());
+                if (add(ai, found, "socket-ender-eye:" + frame.encode(),
+                        new PrimitiveCommand.SocketEnderEye(ai.getWorldId(), frame), null, null,
+                        frame.x() - feet.x(), frame.y() - feet.y(), frame.z() - feet.z(), "socket-ender-eye", true,
+                        actionContext)) {
+                    offered++;
+                }
+            }
+        }
+        var nearby = nearbyTargets(feet);
+        for (int checked = 0; checked < 24 && offered < 6 && !ai.getWorkBudget().isExhausted(); checked++) {
+            var frame = nearby.get(Math.floorMod(eyeFrameCursor++, nearby.size()));
+            if (frame.y() < world.getMinHeight() || frame.y() >= world.getMaxHeight()
+                    || !Positions.isLoaded(world, frame))
                 continue;
-            var frame = new BlockPoint(block.x(), block.y(), block.z());
-            add(ai, found, "socket-ender-eye:" + frame.encode(),
+            if (Positions.block(world, frame).getType() != Material.END_PORTAL_FRAME)
+                continue;
+            if (add(ai, found, "socket-ender-eye:" + frame.encode(),
                     new PrimitiveCommand.SocketEnderEye(ai.getWorldId(), frame), null, null,
                     frame.x() - feet.x(), frame.y() - feet.y(), frame.z() - feet.z(), "socket-ender-eye", true,
-                    actionContext);
+                    actionContext)) {
+                offered++;
+            }
         }
     }
 
@@ -1445,7 +1504,13 @@ public final class PolicyCandidates {
                 || active.command() instanceof PrimitiveCommand.DropExact
                 || active.command() instanceof PrimitiveCommand.LootChest
                 || active.command() instanceof PrimitiveCommand.UseBed
-                || active.command() instanceof PrimitiveCommand.ToggleBlock)
+                || active.command() instanceof PrimitiveCommand.ToggleBlock
+                || active.command() instanceof PrimitiveCommand.FurnaceTransfer
+                || active.command() instanceof PrimitiveCommand.IgnitePortal
+                || active.command() instanceof PrimitiveCommand.FillBucket
+                || active.command() instanceof PrimitiveCommand.PourBucket
+                || active.command() instanceof PrimitiveCommand.ThrowEnderEye
+                || active.command() instanceof PrimitiveCommand.SocketEnderEye)
             return List.of();
         List<Candidate> result = new ArrayList<>();
         for (int ticks : new int[] { 5, 20, 80, 600 }) {
