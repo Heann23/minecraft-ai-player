@@ -113,6 +113,7 @@ public final class PolicyCandidates {
     private int recipesChecked;
     private boolean recipeScanComplete;
     private int miningCursor;
+    private int floorMiningCursor;
     private int miningObservationCursor;
     private PolicyFrame.MiningScan miningScan;
     private int equipmentCursor;
@@ -475,19 +476,37 @@ public final class PolicyCandidates {
                         && !block.material().equals("AIR") && !block.material().equals("CAVE_AIR")
                         && !block.material().equals("VOID_AIR"))
                 .toList();
-        int mined = 0, attempted = 0, pairs = tools.size() * blocks.size();
-        while (pairs > 0 && attempted < Math.min(pairs, 64) && mined < 32 && !ai.getWorkBudget().isExhausted()) {
+        var aboveFloor = blocks.stream().filter(block -> block.point().y() >= feet.y()).toList();
+        var belowFloor = blocks.stream().filter(block -> block.point().y() < feet.y()).toList();
+        // Pure geometric balance: keep eye/horizon-level targets ahead of the 24 ever-present dy=-1 floor tiles
+        // while still rotating downward mining candidates every tick (no material preference).
+        int mined = 0, attempted = 0, pairs = tools.size() * aboveFloor.size();
+        while (pairs > 0 && attempted < Math.min(pairs, 48) && mined < 24 && !ai.getWorkBudget().isExhausted()) {
             int pair = Math.floorMod(miningCursor + attempted++, pairs);
             var slot = tools.get(pair % tools.size());
-            var block = blocks.get(pair / tools.size());
+            var block = aboveFloor.get(pair / tools.size());
             ToolChoice tool = new ToolChoice(slot.slot(), slot.material(), slot.enchantments());
-            var delta = block.point().offset(-ai.getPosition().x(), -ai.getPosition().y(), -ai.getPosition().z());
+            var delta = block.point().offset(-feet.x(), -feet.y(), -feet.z());
             String id = "mine:" + block.point().encode() + ":" + slot.slot();
             if (add(ai, found, id, new PrimitiveCommand.BreakBlock(block.point(), tool), null, null,
                     delta.x(), delta.y(), delta.z(), block.material() + ":" + slot.material(), true, actionContext))
                 mined++;
         }
         miningCursor = pairs == 0 ? 0 : Math.floorMod(miningCursor + (attempted < pairs ? attempted : Math.max(1, tools.size())), pairs);
+        int floorMined = 0, floorAttempted = 0, floorPairs = tools.size() * belowFloor.size();
+        while (floorPairs > 0 && floorAttempted < Math.min(floorPairs, 16) && floorMined < 2 && !ai.getWorkBudget().isExhausted()) {
+            int pair = Math.floorMod(floorMiningCursor + floorAttempted++, floorPairs);
+            var slot = tools.get(pair % tools.size());
+            var block = belowFloor.get(pair / tools.size());
+            ToolChoice tool = new ToolChoice(slot.slot(), slot.material(), slot.enchantments());
+            var delta = block.point().offset(-feet.x(), -feet.y(), -feet.z());
+            String id = "mine:" + block.point().encode() + ":" + slot.slot();
+            if (add(ai, found, id, new PrimitiveCommand.BreakBlock(block.point(), tool), null, null,
+                    delta.x(), delta.y(), delta.z(), block.material() + ":" + slot.material(), true, actionContext))
+                floorMined++;
+        }
+        floorMiningCursor = floorPairs == 0 ? 0
+                : Math.floorMod(floorMiningCursor + (floorAttempted < floorPairs ? floorAttempted : Math.max(1, tools.size())), floorPairs);
     }
 
     private void consumables(AIPlayer ai,
