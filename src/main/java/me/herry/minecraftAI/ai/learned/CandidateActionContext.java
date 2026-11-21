@@ -213,6 +213,15 @@ public final class CandidateActionContext {
             if (storageStock.getOrDefault(place.material(), 0) <= 0) return MaterialDelta.EMPTY;
             return new MaterialDelta(Map.of(place.material(), 1), Map.of());
         }
+        if (type == PrimitiveType.USE_ITEM && command instanceof PrimitiveCommand.FillBucket fill) {
+            if (storageStock.getOrDefault(Material.BUCKET.name(), 0) <= 0) return MaterialDelta.EMPTY;
+            String producedBucket = "LAVA".equals(fill.fluid()) ? Material.LAVA_BUCKET.name() : Material.WATER_BUCKET.name();
+            return new MaterialDelta(Map.of(Material.BUCKET.name(), 1), Map.of(producedBucket, 1));
+        }
+        if (type == PrimitiveType.USE_ITEM && command instanceof PrimitiveCommand.PourBucket pour) {
+            if (storageStock.getOrDefault(pour.bucket(), 0) <= 0) return MaterialDelta.EMPTY;
+            return new MaterialDelta(Map.of(pour.bucket(), 1), Map.of(Material.BUCKET.name(), 1));
+        }
         if (type == PrimitiveType.USE_ITEM && consumable != null
                 && consumable.material() != null && !consumable.material().isBlank()) {
             if (storageStock.getOrDefault(consumable.material(), 0) <= 0) return MaterialDelta.EMPTY;

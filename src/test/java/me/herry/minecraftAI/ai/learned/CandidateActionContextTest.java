@@ -247,4 +247,28 @@ class CandidateActionContextTest {
         assertEquals(1.0, fuelF[CandidateActionContext.CONSUMES_REQUIRED_TABLE_INGREDIENT]);
         assertEquals(1.0, fuelF[CandidateActionContext.BREAKS_REQUIRED_TABLE_FEASIBILITY]);
     }
+
+    @Test void bucketFillAndPourProduceExactMaterialDeltasAndObjectiveDirectMatch() {
+        UUID world = UUID.randomUUID();
+        var memory = new PolicyTaskMemory();
+        memory.acquire(world, "WATER_BUCKET", 1, 10);
+        var stock = Map.of("BUCKET", 1);
+        var ctx = new CandidateActionContext.Context(stock, memory.observe(world, stock), true, Set.of());
+        var fill = new me.herry.minecraftAI.ai.primitive.control.PrimitiveCommand.FillBucket(
+                world, new me.herry.minecraftAI.ai.util.BlockPoint(1, 64, 0), "WATER");
+        var delta = CandidateActionContext.materialDelta(PrimitiveType.USE_ITEM, null, fill, null, 0, stock, List.of());
+        assertEquals(Map.of("BUCKET", 1), delta.consumed());
+        assertEquals(Map.of("WATER_BUCKET", 1), delta.produced());
+
+        double[] fillF = new double[PolicyFrame.ACTION_SIZE];
+        CandidateActionContext.encode(fillF, PrimitiveType.USE_ITEM, "WATER_BUCKET", null, ctx, true);
+        assertEquals(1.0, fillF[CandidateActionContext.OBJECTIVE_DIRECT_MATCH]);
+
+        var pourStock = Map.of("WATER_BUCKET", 1);
+        var pour = new me.herry.minecraftAI.ai.primitive.control.PrimitiveCommand.PourBucket(
+                world, new me.herry.minecraftAI.ai.util.BlockPoint(1, 63, 0), "WATER_BUCKET");
+        var pourDelta = CandidateActionContext.materialDelta(PrimitiveType.USE_ITEM, null, pour, null, 0, pourStock, List.of());
+        assertEquals(Map.of("WATER_BUCKET", 1), pourDelta.consumed());
+        assertEquals(Map.of("BUCKET", 1), pourDelta.produced());
+    }
 }

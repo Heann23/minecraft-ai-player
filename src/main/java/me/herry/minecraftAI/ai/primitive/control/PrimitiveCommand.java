@@ -59,6 +59,32 @@ public sealed interface PrimitiveCommand {
         @Override public PrimitiveType type() { return PrimitiveType.USE_ITEM; }
     }
 
+    /** Scoop a visible, reachable water or lava source block using the already-held empty bucket. */
+    record FillBucket(UUID world, BlockPoint source, String fluid) implements PrimitiveCommand {
+        public FillBucket {
+            Objects.requireNonNull(world, "world");
+            source = ContractValues.block(source);
+            fluid = ContractValues.material(fluid);
+            if (!fluid.equals("WATER") && !fluid.equals("LAVA"))
+                throw new IllegalArgumentException("bucket fill requires WATER or LAVA source");
+        }
+
+        @Override public PrimitiveType type() { return PrimitiveType.USE_ITEM; }
+    }
+
+    /** Pour the already-held water or lava bucket onto the top face of the selected solid support block. */
+    record PourBucket(UUID world, BlockPoint support, String bucket) implements PrimitiveCommand {
+        public PourBucket {
+            Objects.requireNonNull(world, "world");
+            support = ContractValues.block(support);
+            bucket = ContractValues.material(bucket);
+            if (!bucket.equals("WATER_BUCKET") && !bucket.equals("LAVA_BUCKET"))
+                throw new IllegalArgumentException("bucket pour requires WATER_BUCKET or LAVA_BUCKET");
+        }
+
+        @Override public PrimitiveType type() { return PrimitiveType.USE_ITEM; }
+    }
+
     /** Walk into the selected active Nether portal cell and wait for normal dimension travel. */
     record EnterNetherPortal(UUID world, BlockPoint portal) implements PrimitiveCommand {
         public EnterNetherPortal {

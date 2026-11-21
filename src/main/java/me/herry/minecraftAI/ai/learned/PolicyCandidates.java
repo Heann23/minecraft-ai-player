@@ -118,6 +118,7 @@ public final class PolicyCandidates {
     private PolicyFrame.ConsumptionScan consumptionScan;
     private int placementCursor;
     private int placementOffsetCursor;
+    private int bucketCursor;
     private int movementCursor;
     private int movementInputCursor;
     private int pickupCursor;
@@ -285,6 +286,7 @@ public final class PolicyCandidates {
                 case CRAFT -> crafting(ai, found, actionContext, tableAccess);
                 case FURNACE -> furnaceTransfers(ai, observed.sight(), found, actionContext);
                 case IGNITE -> portalIgnitions(ai, observed.sight(), found, actionContext);
+                case BUCKET -> buckets(ai, observed.sight(), found, actionContext);
                 case PORTAL -> portalEntries(ai, found, actionContext);
                 case ENDER_EYE -> enderEyes(ai, observed.sight(), observed.eye(), found, actionContext);
                 case VISIBLE_APPROACH -> visibleApproaches(ai, observed.sight(), found, actionContext);
@@ -701,6 +703,67 @@ public final class PolicyCandidates {
         }
     }
 
+    private void buckets(AIPlayer ai, PolicyFrame.SightObservation sight, Map<String, Candidate> found,
+            CandidateActionContext.Context actionContext) {
+        Material held = ai.getPlayer().getInventory().getItemInMainHand().getType();
+        if (held != Material.BUCKET && held != Material.WATER_BUCKET && held != Material.LAVA_BUCKET)
+            return;
+        var feet = ai.getPosition();
+        var world = ai.getPlayer().getWorld();
+        var targets = nearbyTargets(feet);
+        int offered = 0;
+        if (held == Material.BUCKET) {
+            for (int checked = 0; checked < 24 && offered < 6 && !ai.getWorkBudget().isExhausted(); checked++) {
+                var cell = targets.get(Math.floorMod(bucketCursor++, targets.size()));
+                if (cell.y() < world.getMinHeight() || cell.y() >= world.getMaxHeight()
+                        || !Positions.isLoaded(world, cell))
+                    continue;
+                var block = Positions.block(world, cell);
+                if (!FillBucketAction.isFillableSource(block))
+                    continue;
+                String fluid = block.getType().name();
+                if (add(ai, found, "fill-bucket:" + cell.encode() + ":" + fluid,
+                        new PrimitiveCommand.FillBucket(ai.getWorldId(), cell, fluid), null, null,
+                        cell.x() - feet.x(), cell.y() - feet.y(), cell.z() - feet.z(), "fill-bucket:" + fluid, true,
+                        actionContext)) {
+                    offered++;
+                }
+            }
+            return;
+        }
+        String bucketName = held.name();
+        if (sight != null) {
+            for (var ray : sight.rays()) {
+                if (offered >= 6 || ai.getWorkBudget().isExhausted())
+                    return;
+                var observed = ray.block();
+                if (observed == null)
+                    continue;
+                var support = new BlockPoint(observed.x(), observed.y(), observed.z());
+                if (add(ai, found, "pour-bucket:" + support.encode() + ":" + bucketName,
+                        new PrimitiveCommand.PourBucket(ai.getWorldId(), support, bucketName), null, null,
+                        support.x() - feet.x(), support.y() - feet.y(), support.z() - feet.z(),
+                        "pour-bucket:" + bucketName, true, actionContext)) {
+                    offered++;
+                }
+            }
+        }
+        for (int checked = 0; checked < 24 && offered < 6 && !ai.getWorkBudget().isExhausted(); checked++) {
+            var support = targets.get(Math.floorMod(bucketCursor++, targets.size()));
+            if (support.y() < world.getMinHeight() || support.y() + 1 >= world.getMaxHeight()
+                    || !Positions.isLoaded(world, support))
+                continue;
+            if (!Positions.block(world, support).getType().isSolid())
+                continue;
+            if (add(ai, found, "pour-bucket:" + support.encode() + ":" + bucketName,
+                    new PrimitiveCommand.PourBucket(ai.getWorldId(), support, bucketName), null, null,
+                    support.x() - feet.x(), support.y() - feet.y(), support.z() - feet.z(),
+                    "pour-bucket:" + bucketName, true, actionContext)) {
+                offered++;
+            }
+        }
+    }
+
     private void portalEntries(AIPlayer ai, Map<String, Candidate> found,
             CandidateActionContext.Context actionContext) {
         var feet = ai.getPosition();
@@ -1108,6 +1171,8 @@ public final class PolicyCandidates {
                         : command instanceof PrimitiveCommand.BreakBlock mine ? mine.tool().material()
                                 : command instanceof PrimitiveCommand.FurnaceTransfer transfer ? transfer.material()
                                         : command instanceof PrimitiveCommand.IgnitePortal ? "FLINT_AND_STEEL"
+                : command instanceof PrimitiveCommand.FillBucket fill ? ("LAVA".equals(fill.fluid()) ? "LAVA_BUCKET" : "WATER_BUCKET")
+                : command instanceof PrimitiveCommand.PourBucket pour ? pour.bucket()
                                                 : command instanceof PrimitiveCommand.EnterNetherPortal
                                                         ? "NETHER_PORTAL"
                                                         : command instanceof PrimitiveCommand.EnterEndPortal
@@ -1165,10 +1230,16 @@ public final class PolicyCandidates {
         String directMaterial = recipe != null ? recipe.result()
                 : blockEvidence != null ? blockEvidence.material()
                         : command instanceof PrimitiveCommand.PlaceBlock place ? place.material()
-                                : command instanceof PrimitiveCommand.FurnaceTransfer transfer ? transfer.material()
-                                        : command instanceof PrimitiveCommand.PickupExact pickup ? pickup.material()
-                                                : consumable != null ? consumable.material() : null;
+                                : command instanceof PrimitiveCommand.FillBucket fill
+                                        ? ("LAVA".equals(fill.fluid()) ? "LAVA_BUCKET" : "WATER_BUCKET")
+                                        : command instanceof PrimitiveCommand.PourBucket pour ? pour.bucket()
+                                                : command instanceof PrimitiveCommand.FurnaceTransfer transfer
+                                                        ? transfer.material()
+                                                        : command instanceof PrimitiveCommand.PickupExact pickup
+                                                                ? pickup.material()
+                                                                : consumable != null ? consumable.material() : null;
         boolean takesObservedItem = command instanceof PrimitiveCommand.PickupExact
+                || command instanceof PrimitiveCommand.FillBucket
                 || command instanceof PrimitiveCommand.FurnaceTransfer transfer
                         && transfer.slot() == PrimitiveCommand.FurnaceSlot.RESULT;
         CandidateActionContext.encode(features, type, directMaterial, recipe, actionContext, takesObservedItem);

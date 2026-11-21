@@ -250,6 +250,10 @@ public final class PrimitiveAdapter {
             case PrimitiveCommand.Eat ignored -> ai.getPlayer().getFoodLevel() >= 20 ? "not hungry"
                     : ai.getInventory().bestFoodSlot() < 0 ? "no safe food" : "";
             case PrimitiveCommand.IgnitePortal ignite -> IgniteAction.heldToolUnavailable(ai.getPlayer(), ignite.world(), ignite.floor());
+            case PrimitiveCommand.FillBucket fill -> me.herry.minecraftAI.ai.action.FillBucketAction.heldBucketUnavailable(
+                    ai.getPlayer(), fill.world(), fill.source(), material(fill.fluid()));
+            case PrimitiveCommand.PourBucket pour -> me.herry.minecraftAI.ai.action.PourBucketAction.heldBucketUnavailable(
+                    ai.getPlayer(), pour.world(), pour.support(), material(pour.bucket()));
             case PrimitiveCommand.EnterNetherPortal enter -> checkPortalEntry(ai, enter.world(), enter.portal(), Material.NETHER_PORTAL);
             case PrimitiveCommand.EnterEndPortal enter -> checkPortalEntry(ai, enter.world(), enter.portal(), Material.END_PORTAL);
             case PrimitiveCommand.ThrowEnderEye eye -> checkHeldEye(ai, eye.world());
@@ -290,6 +294,10 @@ public final class PrimitiveAdapter {
             case PrimitiveCommand.PlaceBlock place -> new ExactPlaceBlockAction(place.target(), material(place.material()));
             case PrimitiveCommand.Eat ignored -> new EatFoodAction();
             case PrimitiveCommand.IgnitePortal ignite -> new IgniteAction(ignite.floor(), ignite.world());
+            case PrimitiveCommand.FillBucket fill -> new me.herry.minecraftAI.ai.action.FillBucketAction(
+                    fill.source(), fill.world(), material(fill.fluid()));
+            case PrimitiveCommand.PourBucket pour -> new me.herry.minecraftAI.ai.action.PourBucketAction(
+                    pour.support(), pour.world(), material(pour.bucket()));
             case PrimitiveCommand.EnterNetherPortal enter -> new EnterPortalAction(enter.portal());
             case PrimitiveCommand.EnterEndPortal enter -> new EnterPortalAction(enter.portal(), Material.END_PORTAL);
             case PrimitiveCommand.ThrowEnderEye eye -> new EnderEyeAction(eye);
