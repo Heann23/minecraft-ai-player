@@ -6,8 +6,8 @@ import copy
 import numpy as np
 import continuation_policy
 
-CONTRACT = "minecraft-primitive-candidates/v9"
-STATE_SIZE, ACTION_SIZE, MAX_OPTIONS = 432, 304, 128
+CONTRACT = "minecraft-primitive-candidates/v10"
+STATE_SIZE, ACTION_SIZE, MAX_OPTIONS = 448, 304, 128
 INPUT_SIZE = STATE_SIZE + ACTION_SIZE
 
 
@@ -191,7 +191,7 @@ class ActorCritic:
 
     @classmethod
     def upgrade_legacy_context(cls, state: dict):
-        """Explicit legacy->v9 migration. New context/action features have zero influence; no invented learning."""
+        """Explicit legacy->v10 migration. New context/action features have zero influence; no invented learning."""
         legacy = {
             "minecraft-primitive-candidates/v1": (64, 256),
             "minecraft-primitive-candidates/v2": (128, 256),
@@ -201,9 +201,10 @@ class ActorCritic:
             "minecraft-primitive-candidates/v6": (400, 256),
             "minecraft-primitive-candidates/v7": (432, 256),
             "minecraft-primitive-candidates/v8": (432, 288),
+            "minecraft-primitive-candidates/v9": (432, 304),
         }.get(state.get("contract"))
         if state.get("schema") != "minecraft-ppo-optimizer/v1" or legacy is None:
-            raise ValueError("context upgrade requires a v1 through v8 optimizer checkpoint")
+            raise ValueError("context upgrade requires a v1 through v9 optimizer checkpoint")
         old_state, old_action = legacy
         upgraded = copy.deepcopy(state)
         for group in ("params", "first", "second"):

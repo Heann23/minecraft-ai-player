@@ -247,6 +247,7 @@ public final class PolicyCandidates {
             body[413] = Math.clamp(eye.dy() / 16, -1, 1);
             body[414] = Math.clamp(eye.dz() / 16, -1, 1);
         }
+        WorldPolicyContext.capture(ai, body);
         return new Observed(state, survival, counts, body, sight, eye);
     }
 
