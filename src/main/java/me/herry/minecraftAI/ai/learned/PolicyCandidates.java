@@ -185,6 +185,7 @@ public final class PolicyCandidates {
                 case IGNITE -> portalIgnitions(ai, observed.sight(), found, actionContext);
                 case PORTAL -> portalEntries(ai, found, actionContext);
                 case ENDER_EYE -> enderEyes(ai, observed.sight(), observed.eye(), found, actionContext);
+                case VISIBLE_APPROACH -> visibleApproaches(ai, observed.sight(), found, actionContext);
             }
             generated.put(source.name(), found.size() - before);
         });
@@ -217,6 +218,52 @@ public final class PolicyCandidates {
                     delta.x(), delta.y(), delta.z(), "", true, actionContext);
         }
         movementCursor = Math.floorMod(movementCursor + 1, MOVE_OFFSETS.size());
+    }
+
+    private void visibleApproaches(AIPlayer ai, PolicyFrame.SightObservation sight, Map<String, Candidate> found,
+                                   CandidateActionContext.Context actionContext) {
+        if (sight == null) return;
+        var origin = ai.getPosition();
+        var opacity = PerceptionSystem.opacityOf(ai.getPlayer().getWorld());
+        var visited = new HashSet<BlockPoint>();
+        for (var ray : sight.rays()) {
+            if (ai.getWorkBudget().isExhausted()) return;
+            var observed = ray.block();
+            if (observed == null || ray.distance() <= PrimitiveAdapter.BLOCK_REACH) continue;
+            var material = Material.getMaterial(observed.material());
+            if (material == null || !material.isSolid()) continue;
+            var block = new BlockPoint(observed.x(), observed.y(), observed.z());
+            if (!visited.add(block)) continue;
+            double dx = block.x() - origin.x();
+            double dz = block.z() - origin.z();
+            double distance = Math.hypot(dx, dz);
+            if (distance <= PrimitiveAdapter.BLOCK_REACH) continue;
+            // Stop short of the observed face. The move executor still plans and walks the actual route.
+            double fraction = (distance - 2.5) / distance;
+            int standX = origin.x() + (int) Math.round(dx * fraction);
+            int standZ = origin.z() + (int) Math.round(dz * fraction);
+            int sideX = (int) Math.round(-dz / distance);
+            int sideZ = (int) Math.round(dx / distance);
+            boolean offered = false;
+            for (int side : new int[]{0, -1, 1}) {
+                for (int dy : new int[]{0, 1, -1}) {
+                    if (ai.getWorkBudget().isExhausted()) return;
+                    var stand = new BlockPoint(standX + side * sideX, origin.y() + dy, standZ + side * sideZ);
+                    if (!visibleStandingPoint(sight, opacity, stand)) continue;
+                    if (add(ai, found, "approach:" + block.encode() + ":" + stand.encode(), new PrimitiveCommand.MoveTo(stand, 0.5),
+                            null, null, stand.x() - origin.x(), dy, stand.z() - origin.z(), observed.material(), true, actionContext)) {
+                        offered = true;
+                        break;
+                    }
+                }
+                if (offered) break;
+            }
+        }
+    }
+
+    private static boolean visibleStandingPoint(PolicyFrame.SightObservation sight, Visibility.Opacity opacity, BlockPoint stand) {
+        return Visibility.canSeePoint(opacity, sight.eyeX(), sight.eyeY(), sight.eyeZ(),
+                stand.x() + 0.5, stand.y() + 0.25, stand.z() + 0.5);
     }
 
     private void look(AIPlayer ai, Map<String, Candidate> found, CandidateActionContext.Context actionContext) {
@@ -668,6 +715,7 @@ public final class PolicyCandidates {
         double[] features = new double[PolicyFrame.ACTION_SIZE];
         PrimitiveType type = recipe != null ? PrimitiveType.CRAFT_ITEM : consumable != null ? PrimitiveType.USE_ITEM : command.type();
         features[type.ordinal()] = 1;
+        if (id.startsWith("approach:")) features[284] = 1;
         double range = command instanceof PrimitiveCommand.ShootBow ? ShootBowAction.RANGE : 16;
         features[24] = Math.clamp(dx / range, -1, 1); features[25] = Math.clamp(dy / range, -1, 1); features[26] = Math.clamp(dz / range, -1, 1);
         features[32 + bucket(identity, 16)] = 1;
