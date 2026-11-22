@@ -11,6 +11,32 @@ from paper_lab import read_plan, validate_options, summarize_game_log, validate_
 
 
 class SeedPlanTests(unittest.TestCase):
+    def test_game_summary_uses_only_the_named_players_saved_milestones(self):
+        with tempfile.TemporaryDirectory() as directory:
+            server = Path(directory)
+            console = server / "console.log"
+            console.touch()
+            self.assertIsNone(summarize_game_log(console, saved_server=server)["savedPlayerProgress"])
+            identity = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+            other = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+            (server / "usercache.json").write_text(json.dumps(
+                [{"name": "AnotherPlayer", "uuid": other}, {"name": "RLLearner", "uuid": identity}]))
+            advancements = server / "world" / "players" / "advancements"
+            advancements.mkdir(parents=True)
+            (advancements / f"{other}.json").write_text('{"minecraft:end/kill_dragon": {"done": true}}')
+            (advancements / f"{identity}.json").write_text(json.dumps({
+                "minecraft:story/enter_the_nether": {"done": True},
+                "minecraft:end/kill_dragon": {"done": False},
+                "minecraft:recipes/tools/wooden_pickaxe": {"done": True},
+            }))
+            stats = server / "world" / "players" / "stats"
+            stats.mkdir()
+            (stats / f"{identity}.json").write_text('{"stats":{"minecraft:crafted":{"minecraft:wooden_pickaxe":1}}}')
+            progress = summarize_game_log(console, saved_server=server)["savedPlayerProgress"]
+            self.assertEqual(progress["playerUuid"], identity)
+            self.assertEqual(progress["completedAdvancements"], ["minecraft:story/enter_the_nether"])
+            self.assertEqual(progress["stats"], {"minecraft:crafted": {"minecraft:wooden_pickaxe": 1}})
+
     def test_goal_craft_opportunity_is_separate_from_selection_and_ownership(self):
         world = "12345678-1234-1234-1234-123456789abc"
         goal = "22345678-1234-1234-1234-123456789abc"

@@ -284,7 +284,42 @@ VANILLA_CRAFT_RESULT = re.compile(
 )
 
 
-def summarize_game_log(path: Path):
+def summarize_saved_player_progress(server: Path):
+    """Read the isolated world's vanilla records for the admitted fake player."""
+    def read(path):
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except (ValueError, OSError):
+            return None
+
+    cache = read(server / "usercache.json")
+    if not isinstance(cache, list):
+        return None
+    entries = [entry for entry in cache if isinstance(entry, dict) and entry.get("name") == "RLLearner"]
+    if len(entries) != 1 or not isinstance(entries[0].get("uuid"), str):
+        return None
+    try:
+        player = str(uuid.UUID(entries[0]["uuid"]))
+    except ValueError:
+        return None
+
+    players = server / "world" / "players"
+    advancements = read(players / "advancements" / f"{player}.json")
+    record = read(players / "stats" / f"{player}.json")
+    stats = record.get("stats") if isinstance(record, dict) else None
+    return {
+        "playerUuid": player,
+        "completedAdvancements": sorted(key for key, item in advancements.items()
+                                        if not key.startswith("minecraft:recipes/")
+                                        and isinstance(item, dict) and item.get("done") is True)
+        if isinstance(advancements, dict) else None,
+        "stats": {name: stats[name] for name in ("minecraft:mined", "minecraft:picked_up", "minecraft:crafted",
+                                                "minecraft:killed", "minecraft:custom")
+                  if isinstance(stats.get(name), dict)} if isinstance(stats, dict) else None,
+    }
+
+
+def summarize_game_log(path: Path, *, saved_server: Path | None = None):
     """Observed diagnostics, never an inferred task success or an invented missing sample."""
     choices, endings, cancellations = Counter(), Counter(), Counter()
     mining_progress = {}
@@ -475,6 +510,7 @@ def summarize_game_log(path: Path):
             ],
             "vanillaCraftResultScope": "Real recipe output taken from the result slot; ownership and final inventory are separate observations.",
             "finalInventoryNbt": inventory, "allWorldAutonomyProven": False,
+            "savedPlayerProgress": summarize_saved_player_progress(saved_server) if saved_server is not None else None,
             "goalObservationSummaries": list(goal_samples.values()), "unaggregatedGoalSamples": unaggregated_goal_samples,
             "firstNativePolicyInputs": list(first_policy_inputs.values()), "unaggregatedFirstPolicyInputs": unaggregated_policy_inputs,
             "limitations": "Periodic diagnostics are partial; input success is not task completion or proof of learned competence."}
@@ -1133,7 +1169,9 @@ def run(args):
             write_json(output / "result.json", manifest)
             # Paper rotates latest.log at midnight. The captured console covers the whole lab round.
             log.flush()
-            write_json(output / "observed-gameplay.json", summarize_game_log(output / "server-console.log"))
+            saved_server = server if process and process.returncode == 0 and gameplay_start is not None else None
+            write_json(output / "observed-gameplay.json",
+                       summarize_game_log(output / "server-console.log", saved_server=saved_server))
     print(json.dumps(manifest, ensure_ascii=False), flush=True)
 
 
@@ -1430,7 +1468,9 @@ def run_parallel(args, source: Path, objectives: list[dict], objective_chain, pl
                 wlog.flush(); wlog.close()
             worker_exit_codes = [p.returncode if p is not None else None for p in procs]
             for idx, wdir in enumerate(worker_dirs):
-                write_json(wdir / "observed-gameplay.json", summarize_game_log(wdir / "server-console.log"))
+                saved_server = wdir / "server" if worker_exit_codes[idx] == 0 and worker_admitted[idx] else None
+                write_json(wdir / "observed-gameplay.json",
+                           summarize_game_log(wdir / "server-console.log", saved_server=saved_server))
             manifest.update({
                 "stopReason": reason,
                 "serverExitCode": 0 if all(c == 0 for c in worker_exit_codes) else next((c for c in worker_exit_codes if c != 0), None),
