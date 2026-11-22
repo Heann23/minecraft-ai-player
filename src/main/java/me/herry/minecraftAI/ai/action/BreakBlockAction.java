@@ -58,7 +58,7 @@ public final class BreakBlockAction extends AbstractAction implements PrimitiveA
     // 지금 실제로 캐고 있는 블록. 목표 블록이 다른 블록에 가려져 있으면 가리고 있는 블록이 된다.
     private BlockPoint current;
     private Material currentType;
-    private float progress;
+    private double progress;
     private int aimTicks;
     private int obstructionsCleared;
     private boolean crackShown;
@@ -74,7 +74,12 @@ public final class BreakBlockAction extends AbstractAction implements PrimitiveA
     public MiningProgress miningProgress() {
         return new MiningProgress(target.encode(), expected == null ? "UNKNOWN" : expected.name(),
                 current == null ? "UNKNOWN" : current.encode(), currentType == null ? "UNKNOWN" : currentType.name(),
-                progress, aimTicks, getElapsed());
+                (float) progress, aimTicks, getElapsed());
+    }
+
+    /** Round the accumulated game speed once, as with a constant speed multiplied by elapsed ticks. */
+    static boolean completedMining(double accumulatedProgress) {
+        return (float) accumulatedProgress >= 1.0F;
     }
 
     public BreakBlockAction(BlockPoint target) {
@@ -233,8 +238,8 @@ public final class BreakBlockAction extends AbstractAction implements PrimitiveA
         if (exactTarget && progress == 0) ai.debug("MiningExecution progress-start target=" + target.encode() + " material=" + currentType.name());
         progress += speed;
         if (getElapsed() % SWING_INTERVAL == 0) player.swingMainHand();
-        showCrack(player, center, Math.min(progress, 1.0F));
-        if (progress < 1.0F) return;
+        showCrack(player, center, Math.min((float) progress, 1.0F));
+        if (!completedMining(progress)) return;
 
         if (!player.breakBlock(block) || block.getType() == currentType) {
             // 다른 플러그인이 막은 경우
@@ -341,7 +346,7 @@ public final class BreakBlockAction extends AbstractAction implements PrimitiveA
         if (!next.equals(target)) ai.debug("Clearing " + block.getType() + " at " + next + " that hides " + target);
         current = next;
         currentType = block.getType();
-        progress = 0.0F;
+        progress = 0;
         aimTicks = 0;
         if (exactTarget) {
             if (chosenTool.slot() < 0 || chosenTool.slot() >= 36
