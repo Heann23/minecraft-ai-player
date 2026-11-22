@@ -628,6 +628,7 @@ def requested_objectives(args):
 GOAL_SAMPLE = re.compile(
     r"\[AI:RLLearner\] GoalSample world=([0-9a-f-]{36}) goal=([0-9a-f-]{36}) tick=(\d+) "
     r"item=([A-Z][A-Z0-9_]*) required=(\d+) owned=(\d+) matched=(true|false)(?:\s|$)")
+STOPPED_STATUS = re.compile(r"(?:^|\]: )AI 상태: STOPPED$")
 
 
 class ObjectiveChainTracker:
@@ -636,6 +637,8 @@ class ObjectiveChainTracker:
         self.objectives = [dict(entry) for entry in objectives]
         self.step_index = 0
         self.pending_objective = None
+        self.next_stop_check = None
+        self.awaiting_stop = False
         self.current_admission = None
         self.admissions = []
         self.completions = []
@@ -652,8 +655,30 @@ class ObjectiveChainTracker:
         self.pending_objective = dict(self.objectives[0])
         return self.pending_objective
 
+    def stop_for_next_objective(self, send):
+        self.awaiting_stop = True
+        send("ai stop RLLearner")
+        self.next_stop_check = 0
+
+    def poll_stop(self, now, send):
+        if self.awaiting_stop and now >= self.next_stop_check:
+            send("ai status RLLearner")
+            self.next_stop_check = now + 1
+
+    def dispatch_after_stop(self, line, send):
+        if not self.awaiting_stop:
+            return
+        plain = re.sub(r"\x1b\[[0-9;]*m", "", line).strip()
+        if STOPPED_STATUS.search(plain):
+            self.awaiting_stop = False
+            self.send_pending_objective(send)
+
+    def send_pending_objective(self, send):
+        objective = self.pending_objective
+        send(f"ai objective RLLearner acquire {objective['item']} {objective['count']}")
+
     def on_console_line(self, line):
-        if self.pending_objective is None:
+        if self.pending_objective is None or self.awaiting_stop:
             return None
         ack = objective_acknowledgement(line, self.pending_objective)
         if ack is None:
@@ -966,7 +991,7 @@ def run(args):
                     if next_obj is not None:
                         manifest["objectiveChainCompletions"] = list(tracker.completions)
                         write_json(output / "manifest.json", manifest)
-                        send("ai objective RLLearner acquire " + next_obj["item"] + " " + str(next_obj["count"]))
+                        tracker.stop_for_next_objective(send)
                     elif final_done:
                         if objective_chain is not None:
                             manifest["objectiveChainCompletions"] = list(tracker.completions)
@@ -978,6 +1003,7 @@ def run(args):
                     reason = "startup-time-budget"; break
                 if gameplay_start is not None and now - gameplay_start >= args.seconds:
                     reason = "gameplay-time-budget"; break
+                tracker.poll_stop(now, send)
                 try:
                     line = events.get(timeout=0.5)
                     if "Done (" in line:
@@ -991,23 +1017,24 @@ def run(args):
                         for text in ("seed", "time set " + str(args.start_time), "ai spawn RLLearner"):
                             send(text)
                         if tracker.has_objectives():
-                            first_obj = tracker.begin_initial()
-                            send("ai stop RLLearner")
-                            send("ai objective RLLearner acquire " + first_obj["item"] + " " + str(first_obj["count"]))
+                            tracker.begin_initial()
+                            tracker.stop_for_next_objective(send)
                         else:
                             gameplay_start = time.monotonic()
                             send("ai start RLLearner"); send("ai debug on")
                             print("Paper ready; actual survival episode admitted", flush=True)
                     if spawn_dispatched and tracker.has_objectives():
+                        tracker.dispatch_after_stop(line, send)
                         admission = tracker.on_console_line(line)
                         if admission is not None:
                             manifest["objectiveAdmission"] = admission
                             if objective_chain is not None:
                                 manifest["objectiveChainAdmissions"] = list(tracker.admissions)
                             write_json(output / "manifest.json", manifest)
+                            send("ai start RLLearner")
                             if gameplay_start is None:
                                 gameplay_start = time.monotonic()
-                                send("ai start RLLearner"); send("ai debug on")
+                                send("ai debug on")
                                 print("Paper objective acknowledged; actual survival episode admitted", flush=True)
                             else:
                                 print(f"Paper chain objective {tracker.step_index + 1}/{len(objectives)} acknowledged: {admission['item']} x{admission['count']}", flush=True)
@@ -1017,7 +1044,7 @@ def run(args):
                                 manifest["objectiveChainCompletions"] = list(tracker.completions)
                                 write_json(output / "manifest.json", manifest)
                                 if next_obj is not None:
-                                    send("ai objective RLLearner acquire " + next_obj["item"] + " " + str(next_obj["count"]))
+                                    tracker.stop_for_next_objective(send)
                 except queue.Empty:
                     pass
                 if now >= next_report:
@@ -1283,6 +1310,8 @@ def run_parallel(args, source: Path, objectives: list[dict], objective_chain, pl
 
             reason, next_report = "server-exited", started
             trackers = [ObjectiveChainTracker(objectives) for _ in range(workers)]
+            from functools import partial
+            senders = [partial(send_worker, idx) for idx in range(workers)]
             while any(p.poll() is None for p in procs):
                 now = time.monotonic()
                 if any(p.poll() is not None for p in procs):
@@ -1296,7 +1325,7 @@ def run_parallel(args, source: Path, objectives: list[dict], objective_chain, pl
                         if next_obj is not None:
                             manifest["workerObjectiveChainCompletions"][idx] = list(trackers[idx].completions)
                             write_json(output / "manifest.json", manifest)
-                            send_worker(idx, "ai objective RLLearner acquire " + next_obj["item"] + " " + str(next_obj["count"]))
+                            trackers[idx].stop_for_next_objective(senders[idx])
                         elif final_done:
                             if objective_chain is not None:
                                 manifest["workerObjectiveChainCompletions"][idx] = list(trackers[idx].completions)
@@ -1310,6 +1339,8 @@ def run_parallel(args, source: Path, objectives: list[dict], objective_chain, pl
                     reason = "startup-time-budget"; break
                 if gameplay_start is not None and now - gameplay_start >= args.seconds:
                     reason = "gameplay-time-budget"; break
+                for tracker, send in zip(trackers, senders):
+                    tracker.poll_stop(now, send)
                 try:
                     idx, line = events.get(timeout=0.25)
                     if "Done (" in line:
@@ -1319,9 +1350,8 @@ def run_parallel(args, source: Path, objectives: list[dict], objective_chain, pl
                         for text in ("seed", "time set " + str(args.start_time), "ai spawn RLLearner"):
                             send_worker(idx, text)
                         if trackers[idx].has_objectives():
-                            first_obj = trackers[idx].begin_initial()
-                            send_worker(idx, "ai stop RLLearner")
-                            send_worker(idx, "ai objective RLLearner acquire " + first_obj["item"] + " " + str(first_obj["count"]))
+                            trackers[idx].begin_initial()
+                            trackers[idx].stop_for_next_objective(senders[idx])
                         else:
                             worker_admitted[idx] = True
                             send_worker(idx, "ai start RLLearner"); send_worker(idx, "ai debug on")
@@ -1329,15 +1359,17 @@ def run_parallel(args, source: Path, objectives: list[dict], objective_chain, pl
                                 gameplay_start = time.monotonic()
                                 print(f"All {workers} parallel Paper worlds admitted", flush=True)
                     if spawn_dispatched[idx] and trackers[idx].has_objectives():
+                        trackers[idx].dispatch_after_stop(line, senders[idx])
                         admission = trackers[idx].on_console_line(line)
                         if admission is not None:
                             manifest["workerObjectiveAdmissions"][idx] = admission
                             if objective_chain is not None:
                                 manifest["workerObjectiveChainAdmissions"][idx] = list(trackers[idx].admissions)
                             write_json(output / "manifest.json", manifest)
+                            send_worker(idx, "ai start RLLearner")
                             if not worker_admitted[idx]:
                                 worker_admitted[idx] = True
-                                send_worker(idx, "ai start RLLearner"); send_worker(idx, "ai debug on")
+                                send_worker(idx, "ai debug on")
                                 if gameplay_start is None and all(worker_admitted):
                                     gameplay_start = time.monotonic()
                                     print(f"All {workers} parallel Paper worlds acknowledged objective", flush=True)
