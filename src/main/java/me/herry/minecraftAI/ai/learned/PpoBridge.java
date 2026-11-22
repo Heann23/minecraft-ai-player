@@ -39,7 +39,10 @@ public final class PpoBridge implements AutoCloseable {
                              int elapsedTicks, boolean terminated, boolean truncated, long appliedTick, String nextWorld, double[] nextState,
                              String rewardContract, java.util.List<String> objectiveEvents, RewardEvidence rewardEvidence,
                              PolicyTaskMemory.View nextTaskMemory, PolicyTaskMemory.Completion taskCompletion) {
-        static final String RECIPE_PROGRESS = "survival-progress/v4";
+        static final String RECIPE_PROGRESS = "survival-progress/v5";
+        private static final String INGREDIENT_PROGRESS = "survival-progress/v4";
+        private static final java.util.Set<String> EVIDENCE_CONTRACTS =
+                java.util.Set.of("survival-progress/v2", "survival-progress/v3", INGREDIENT_PROGRESS, RECIPE_PROGRESS);
         public Transition(String session, long sequence, PolicyFrame frame, int index,
                           double logProbability, double value, long modelVersion, double reward,
                           int elapsedTicks, boolean terminated, boolean truncated, long appliedTick, String nextWorld, double[] nextState,
@@ -69,13 +72,16 @@ public final class PpoBridge implements AutoCloseable {
                     terminated, truncated, appliedTick, nextWorld, nextState, "survival-progress/v1", java.util.List.of());
         }
         public Transition {
-            if (rewardEvidence != null && (!java.util.Set.of("survival-progress/v2", "survival-progress/v3", RECIPE_PROGRESS).contains(rewardContract)
+            if (rewardEvidence != null && (!EVIDENCE_CONTRACTS.contains(rewardContract)
                     || Math.abs(Math.clamp(rewardEvidence.total(elapsedTicks, terminated) + (taskCompletion == null ? 0 : 1), -100, 100) - reward) > 1e-9))
                 throw new IllegalArgumentException("actual reward evidence mismatch");
-            if (!java.util.Set.of("survival-progress/v1", "survival-progress/v2", "survival-progress/v3", RECIPE_PROGRESS).contains(rewardContract))
+            if (!"survival-progress/v1".equals(rewardContract) && !EVIDENCE_CONTRACTS.contains(rewardContract))
                 throw new IllegalArgumentException("unsupported actual reward contract");
             var preparation = rewardEvidence == null ? null : rewardEvidence.recipePreparation();
-            if (RECIPE_PROGRESS.equals(rewardContract) != (preparation != null)
+            boolean recipeContract = RECIPE_PROGRESS.equals(rewardContract) || INGREDIENT_PROGRESS.equals(rewardContract);
+            if (recipeContract != (preparation != null)
+                    || INGREDIENT_PROGRESS.equals(rewardContract) && preparation != null
+                    && Math.max(preparation.before().required(), preparation.after().required()) > 9
                     || preparation != null && (frame.taskMemory() == null || !frame.taskMemory().worldMatches()
                     || frame.taskMemory().objective() == null || nextTaskMemory == null || !nextTaskMemory.worldMatches()
                     || !frame.taskMemory().objective().equals(nextTaskMemory.objective())
@@ -85,9 +91,9 @@ public final class PpoBridge implements AutoCloseable {
             objectiveEvents = java.util.List.copyOf(objectiveEvents);
             if (objectiveEvents.size() > 32 || objectiveEvents.stream().distinct().count() != objectiveEvents.size()
                     || objectiveEvents.stream().anyMatch(key -> key.length() > 268 || !key.matches("advancement:[a-z0-9_.-]+:[a-z0-9_./-]+"))
-                    || !objectiveEvents.isEmpty() && !java.util.Set.of("survival-progress/v2", "survival-progress/v3", RECIPE_PROGRESS).contains(rewardContract))
+                    || !objectiveEvents.isEmpty() && !EVIDENCE_CONTRACTS.contains(rewardContract))
                 throw new IllegalArgumentException("invalid observed objective events");
-            if (taskCompletion != null && (!java.util.Set.of("survival-progress/v3", RECIPE_PROGRESS).contains(rewardContract) || rewardEvidence == null
+            if (taskCompletion != null && (!"survival-progress/v3".equals(rewardContract) && !recipeContract || rewardEvidence == null
                     || frame.taskMemory() == null || frame.taskMemory().objective() == null
                     || nextTaskMemory == null || nextTaskMemory.objective() == null || !nextTaskMemory.worldMatches()
                     || !frame.taskMemory().objective().equals(nextTaskMemory.objective())
@@ -117,7 +123,7 @@ public final class PpoBridge implements AutoCloseable {
     public record RecipeStock(String recipe, int filled, int required) {
         public RecipeStock {
             if (recipe == null || recipe.length() > 256 || !recipe.matches("[a-z0-9_.-]+:[a-z0-9_./-]+")
-                    || required < 1 || required > 9 || filled < 0 || filled > required)
+                    || required < 1 || required > 18 || filled < 0 || filled > required)
                 throw new IllegalArgumentException("invalid observed recipe stock");
         }
         double fraction() { return filled / (double) required; }

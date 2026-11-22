@@ -372,6 +372,12 @@ class ActorTests(unittest.TestCase):
                                         item="WOODEN_PICKAXE", required=1, beforeOwned=0, afterOwned=1)
         sample["reward"] = sample["elapsedTicks"] * 0.0001 + 0.5 * (discount - 1) + 1
         validate_transition(sample)
+        sample["rewardContract"] = "survival-progress/v5"
+        preparation["before"].update(filled=13, required=13)
+        preparation["after"].update(filled=4, required=13)
+        validate_transition(sample)
+        with self.assertRaisesRegex(ValueError, "observed recipe stock"):
+            validate_transition(dict(sample, rewardContract="survival-progress/v4"))
 
     def test_reward_versions_preserve_legacy_rows_and_validate_actual_progress_event_metadata(self):
         model = ActorCritic(7, hidden=4)

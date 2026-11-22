@@ -23,9 +23,12 @@ final class RecipePreparation {
         for (var slot : observed.snapshot().inventory()) {
             if (slot.slot() < 36 && slot.amount() > 0) stock.merge(slot.material(), slot.amount(), Integer::sum);
         }
+        boolean hasTable = observed.features()[WorldPolicyContext.TABLE_REACHABLE] == 1
+                || stock.getOrDefault(Material.CRAFTING_TABLE.name(), 0) > 0;
+        var tableOptions = crafting.recipeOptions(Material.CRAFTING_TABLE);
         PpoBridge.RecipeStock best = null;
         for (var recipe : crafting.recipeOptions(target)) {
-            var candidate = measure(recipe, stock);
+            var candidate = recipe.needsTable() ? withTable(recipe, tableOptions, stock, hasTable) : measure(recipe, stock);
             if (candidate != null && (best == null || candidate.fraction() > best.fraction()))
                 best = candidate;
         }
@@ -34,12 +37,35 @@ final class RecipePreparation {
 
     static PpoBridge.RecipeStock measure(RecipeOption recipe, Map<String, Integer> stock) {
         if (recipe.smelting() || !recipe.countPlannable()) return null;
+        return measure(recipe.id(), recipe.ingredients(), List.of(), stock, 0);
+    }
+
+    static PpoBridge.RecipeStock withTable(RecipeOption recipe, List<RecipeOption> tableOptions,
+                                          Map<String, Integer> stock, boolean hasTable) {
+        if (recipe.smelting() || !recipe.countPlannable()) return null;
+        PpoBridge.RecipeStock best = null;
+        for (var table : tableOptions) {
+            if (table.smelting() || table.needsTable() || !table.countPlannable()) continue;
+            int tableUnits = table.ingredients().stream().mapToInt(RecipeOption.Ingredient::amount).sum();
+            var candidate = measure(recipe.id(), recipe.ingredients(), hasTable ? List.of() : table.ingredients(),
+                    stock, hasTable ? tableUnits : 0);
+            if (candidate != null && (best == null || candidate.fraction() > best.fraction()))
+                best = candidate;
+        }
+        return best;
+    }
+
+    private static PpoBridge.RecipeStock measure(String recipe, List<RecipeOption.Ingredient> ingredients,
+                                                List<RecipeOption.Ingredient> extra, Map<String, Integer> stock,
+                                                int securedUnits) {
         Map<List<String>, Integer> groups = new LinkedHashMap<>();
-        for (var ingredient : recipe.ingredients())
+        for (var ingredient : ingredients)
+            groups.merge(ingredient.alternatives(), ingredient.amount(), Integer::sum);
+        for (var ingredient : extra)
             groups.merge(ingredient.alternatives(), ingredient.amount(), Integer::sum);
         var seen = new HashSet<String>();
-        int required = 0;
-        int filled = 0;
+        int required = securedUnits;
+        int filled = securedUnits;
         for (var group : groups.entrySet()) {
             int available = 0;
             for (String material : group.getKey()) {
@@ -50,6 +76,6 @@ final class RecipePreparation {
             required += group.getValue();
             filled += Math.min(group.getValue(), available);
         }
-        return required <= 9 ? new PpoBridge.RecipeStock(recipe.id(), filled, required) : null;
+        return required <= 18 ? new PpoBridge.RecipeStock(recipe, filled, required) : null;
     }
 }

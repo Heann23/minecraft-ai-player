@@ -20,6 +20,7 @@ import java.util.Arrays;
 final class WorldPolicyContext {
     static final int OFFSET = 432;
     static final int WIDTH = 16;
+    static final int TABLE_REACHABLE = 439;
 
     private WorldPolicyContext() {}
 
@@ -109,7 +110,7 @@ final class WorldPolicyContext {
         state[436] = Math.clamp(blockLight / 15.0, 0, 1);
         state[437] = Math.clamp(skyLight / 15.0, 0, 1);
         state[438] = hasRespawnInWorld ? 1 : 0;
-        state[439] = tableReachable ? 1 : 0;
+        state[TABLE_REACHABLE] = tableReachable ? 1 : 0;
         state[440] = furnaceReachable ? 1 : 0;
         if (dragonPresent) {
             state[441] = 1;

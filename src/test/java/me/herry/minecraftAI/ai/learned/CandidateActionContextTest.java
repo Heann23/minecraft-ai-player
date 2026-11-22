@@ -28,6 +28,22 @@ class CandidateActionContextTest {
         assertNull(RecipePreparation.measure(overlapping, Map.of("BIRCH_PLANKS", 1)));
     }
 
+    @Test void securingATablePreservesProgressAndSharedPlanksAreNotCountedTwice() {
+        var woods = List.of("BIRCH_PLANKS", "OAK_PLANKS");
+        var pickaxe = new RecipeOption("minecraft:wooden_pickaxe", "WOODEN_PICKAXE", 1, true, false, List.of(
+                new RecipeOption.Ingredient(3, woods, false),
+                new RecipeOption.Ingredient(2, List.of("STICK"), false)));
+        var table = new RecipeOption("minecraft:crafting_table", "CRAFTING_TABLE", 1, false, false,
+                List.of(new RecipeOption.Ingredient(4, woods, false)));
+        var materialBefore = RecipePreparation.withTable(pickaxe, List.of(table), Map.of("OAK_PLANKS", 4, "STICK", 2), false);
+        var materialAfter = RecipePreparation.withTable(pickaxe, List.of(table), Map.of("STICK", 2), true);
+        assertEquals(9, materialBefore.required());
+        assertEquals(6, materialBefore.filled());
+        assertEquals(materialBefore, materialAfter);
+        assertEquals(9, RecipePreparation.withTable(pickaxe, List.of(table),
+                Map.of("BIRCH_PLANKS", 3, "STICK", 2), true).filled());
+    }
+
     @Test void craftingCandidatesSeparateTableFromCollidingButtonAndExposeObjectiveMatch() {
         UUID world = UUID.randomUUID();
         var memory = new PolicyTaskMemory();
