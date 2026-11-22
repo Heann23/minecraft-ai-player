@@ -345,6 +345,34 @@ class ActorTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             validate_transition(dict(sample, rewardContract="survival-progress/v2"))
 
+    def test_recipe_preparation_uses_actual_stock_and_keeps_completion_credit(self):
+        sample = row(ActorCritic(7, hidden=4), session=str(uuid.uuid4()), terminal=False)
+        sample.pop("nextValue")
+        objective = {"id": str(uuid.uuid4()), "world": sample["nextWorld"],
+                     "goal": {"item": "WOODEN_PICKAXE", "count": 1}, "startedTick": 1}
+        sample["frame"]["taskMemory"] = {"objective": objective, "worldMatches": True}
+        endpoint = {"recipe": "minecraft:wooden_pickaxe", "required": 5}
+        preparation = {"before": dict(endpoint, filled=5), "after": dict(endpoint, filled=3), "achieved": False}
+        sample.update(rewardContract="survival-progress/v4", nextTaskMemory=dict(
+            objective=objective, worldMatches=True, currentlyAchieved=False), rewardEvidence={
+            "schema": "actual-reward-evidence/v1", "healthBefore": 20, "healthAfter": 20,
+            "foodBefore": 20, "foodAfter": 20, "saturationBefore": 0, "saturationAfter": 0,
+            "airBefore": 300, "airAfter": 300, "discoveries": 0, "objectiveReward": 0,
+            "recipePreparation": preparation})
+        discount = 0.99997 ** sample["elapsedTicks"]
+        sample["reward"] = sample["elapsedTicks"] * 0.0001 + 0.5 * (discount * 0.6 - 1)
+        validate_transition(sample)
+        with self.assertRaisesRegex(ValueError, "reward evidence mismatch"):
+            validate_transition(dict(sample, reward=0))
+        preparation["achieved"] = True
+        with self.assertRaisesRegex(ValueError, "preparation endpoints"):
+            validate_transition(sample)
+        sample["nextTaskMemory"].update(currentlyAchieved=True, owned=1)
+        sample["taskCompletion"] = dict(objectiveId=objective["id"], world=sample["nextWorld"],
+                                        item="WOODEN_PICKAXE", required=1, beforeOwned=0, afterOwned=1)
+        sample["reward"] = sample["elapsedTicks"] * 0.0001 + 0.5 * (discount - 1) + 1
+        validate_transition(sample)
+
     def test_reward_versions_preserve_legacy_rows_and_validate_actual_progress_event_metadata(self):
         model = ActorCritic(7, hidden=4)
         sample = row(model, session=str(uuid.uuid4()))

@@ -44,12 +44,15 @@ def validate_transition(row: dict):
                 "elapsedTicks", "terminated", "truncated", "appliedTick", "nextWorld", "nextState"}
     if set(row) - {"rewardContract", "objectiveEvents", "rewardEvidence", "nextTaskMemory", "taskCompletion"} != required:
         raise ValueError("transition schema mismatch; Teacher labels are not accepted")
-    if row.get("rewardContract", "survival-progress/v1") not in ("survival-progress/v1", "survival-progress/v2", "survival-progress/v3"):
+    contract = row.get("rewardContract", "survival-progress/v1")
+    recipe_progress = contract == "survival-progress/v4"
+    evidence_contracts = ("survival-progress/v2", "survival-progress/v3", "survival-progress/v4")
+    if contract not in ("survival-progress/v1", *evidence_contracts):
         raise ValueError("unsupported observed reward contract")
     events = row.get("objectiveEvents", [])
     if not isinstance(events, list) or len(events) > 32 or any(not isinstance(key, str) or len(key) > 268
             or not re.fullmatch(r"advancement:[a-z0-9_.-]+:[a-z0-9_./-]+", key) for key in events) \
-            or len(set(events)) != len(events) or events and row.get("rewardContract") not in ("survival-progress/v2", "survival-progress/v3"):
+            or len(set(events)) != len(events) or events and contract not in evidence_contracts:
         raise ValueError("invalid observed progress events")
     uuid.UUID(row["session"])
     uuid.UUID(row["nextWorld"])
@@ -72,7 +75,7 @@ def validate_transition(row: dict):
     completion = row.get("taskCompletion")
     if completion is not None:
         fields = {"objectiveId", "world", "item", "required", "beforeOwned", "afterOwned"}
-        if not isinstance(completion, dict) or set(completion) != fields or row.get("rewardContract") != "survival-progress/v3" \
+        if not isinstance(completion, dict) or set(completion) != fields or contract not in ("survival-progress/v3", "survival-progress/v4") \
                 or "rewardEvidence" not in row:
             raise ValueError("invalid task completion schema")
         uuid.UUID(completion["objectiveId"]); uuid.UUID(completion["world"])
@@ -91,12 +94,12 @@ def validate_transition(row: dict):
                 or (not isinstance(goal.get("goal"), dict) or goal["goal"].get("item") != completion["item"] or goal["goal"].get("count") != completion["required"]) \
                 or after.get("owned") != completion["afterOwned"] or after.get("currentlyAchieved") is not True:
             raise ValueError("task completion endpoint mismatch")
-    if "rewardEvidence" in row:
-        evidence = row["rewardEvidence"]
+    if "rewardEvidence" in row or recipe_progress:
+        evidence = row.get("rewardEvidence")
         fields = {"schema", "healthBefore", "healthAfter", "foodBefore", "foodAfter", "saturationBefore",
                   "saturationAfter", "airBefore", "airAfter", "discoveries", "objectiveReward"}
-        if not isinstance(evidence, dict) or set(evidence) != fields \
-                or evidence["schema"] != "actual-reward-evidence/v1" or row.get("rewardContract") not in ("survival-progress/v2", "survival-progress/v3"):
+        if not isinstance(evidence, dict) or set(evidence) != (fields | {"recipePreparation"} if recipe_progress else fields) \
+                or evidence["schema"] != "actual-reward-evidence/v1" or contract not in evidence_contracts:
             raise ValueError("invalid reward evidence schema")
         for key in fields - {"schema"}:
             if type(evidence[key]) not in (int, float) or not math.isfinite(evidence[key]):
@@ -107,12 +110,41 @@ def validate_transition(row: dict):
         if any(evidence[key] < 0 for key in ("healthBefore", "healthAfter", "saturationBefore", "saturationAfter", "discoveries")) \
                 or any(not 0 <= evidence[key] <= 20 for key in ("foodBefore", "foodAfter")):
             raise ValueError("invalid reward evidence range")
+        preparation_reward = validate_recipe_preparation(row, evidence["recipePreparation"]) if recipe_progress else 0
         expected = max(-100, min(100, row["elapsedTicks"] * 0.0001
                        + (evidence["healthAfter"] - evidence["healthBefore"]) * 0.05
-                       + evidence["discoveries"] * 0.2 + evidence["objectiveReward"] - (10 if row["terminated"] else 0)))
+                       + evidence["discoveries"] * 0.2 + evidence["objectiveReward"] - (10 if row["terminated"] else 0)
+                       + preparation_reward))
         expected = max(-100, min(100, expected + (1 if completion is not None else 0)))
         if not math.isclose(expected, row["reward"], rel_tol=0, abs_tol=1e-9):
             raise ValueError("actual reward evidence mismatch")
+
+
+def validate_recipe_preparation(row, preparation):
+    if not isinstance(preparation, dict) or set(preparation) != {"before", "after", "achieved"}:
+        raise ValueError("invalid recipe preparation schema")
+    for endpoint in (preparation["before"], preparation["after"]):
+        if not isinstance(endpoint, dict) or set(endpoint) != {"recipe", "filled", "required"} \
+                or not isinstance(endpoint["recipe"], str) or len(endpoint["recipe"]) > 256 \
+                or not re.fullmatch(r"[a-z0-9_.-]+:[a-z0-9_./-]+", endpoint["recipe"]) \
+                or type(endpoint["filled"]) is not int or type(endpoint["required"]) is not int \
+                or not 1 <= endpoint["required"] <= 9 or not 0 <= endpoint["filled"] <= endpoint["required"]:
+            raise ValueError("invalid observed recipe stock")
+    before = row["frame"].get("taskMemory")
+    after = row.get("nextTaskMemory")
+    if not isinstance(before, dict) or not isinstance(after, dict) or not isinstance(before.get("objective"), dict) \
+            or before["objective"] != after.get("objective") or before.get("worldMatches") is not True \
+            or after.get("worldMatches") is not True or before["objective"].get("world") != row["frame"]["world"] \
+            or row["nextWorld"] != row["frame"]["world"] or type(preparation["achieved"]) is not bool \
+            or preparation["achieved"] is not after.get("currentlyAchieved"):
+        raise ValueError("invalid recipe preparation endpoints")
+    previous = preparation["before"]["filled"] / preparation["before"]["required"]
+    current = preparation["after"]["filled"] / preparation["after"]["required"]
+    if row["terminated"]:
+        current = 0
+    elif preparation["achieved"]:
+        current = 1
+    return 0.5 * (0.99997 ** row["elapsedTicks"] * current - previous)
 
 
 def resume_checkpoint(path: Path, *, upgrade_context=False, allow_initial=False):

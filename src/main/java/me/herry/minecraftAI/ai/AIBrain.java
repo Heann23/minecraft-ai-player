@@ -556,7 +556,7 @@ final class AIBrain {
                         activeLearned = selected; learnedStartedAt = now;
                     }
                     activeLearned = selected; learnedNextChoiceAt = now + selected.reconsiderAfterTicks();
-                    trainingControl.applied(decision);
+                    trainingControl.applied(ai, decision);
                 } catch (RuntimeException failure) {
                     if (plan != null) plan.cancel(ai);
                     plan = null; activeLearned = null; ai.getBody().clearInputs();

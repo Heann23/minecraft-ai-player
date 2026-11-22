@@ -39,6 +39,7 @@ public final class PpoBridge implements AutoCloseable {
                              int elapsedTicks, boolean terminated, boolean truncated, long appliedTick, String nextWorld, double[] nextState,
                              String rewardContract, java.util.List<String> objectiveEvents, RewardEvidence rewardEvidence,
                              PolicyTaskMemory.View nextTaskMemory, PolicyTaskMemory.Completion taskCompletion) {
+        static final String RECIPE_PROGRESS = "survival-progress/v4";
         public Transition(String session, long sequence, PolicyFrame frame, int index,
                           double logProbability, double value, long modelVersion, double reward,
                           int elapsedTicks, boolean terminated, boolean truncated, long appliedTick, String nextWorld, double[] nextState,
@@ -68,17 +69,25 @@ public final class PpoBridge implements AutoCloseable {
                     terminated, truncated, appliedTick, nextWorld, nextState, "survival-progress/v1", java.util.List.of());
         }
         public Transition {
-            if (rewardEvidence != null && (!java.util.Set.of("survival-progress/v2", "survival-progress/v3").contains(rewardContract)
+            if (rewardEvidence != null && (!java.util.Set.of("survival-progress/v2", "survival-progress/v3", RECIPE_PROGRESS).contains(rewardContract)
                     || Math.abs(Math.clamp(rewardEvidence.total(elapsedTicks, terminated) + (taskCompletion == null ? 0 : 1), -100, 100) - reward) > 1e-9))
                 throw new IllegalArgumentException("actual reward evidence mismatch");
-            if (!java.util.Set.of("survival-progress/v1", "survival-progress/v2", "survival-progress/v3").contains(rewardContract))
+            if (!java.util.Set.of("survival-progress/v1", "survival-progress/v2", "survival-progress/v3", RECIPE_PROGRESS).contains(rewardContract))
                 throw new IllegalArgumentException("unsupported actual reward contract");
+            var preparation = rewardEvidence == null ? null : rewardEvidence.recipePreparation();
+            if (RECIPE_PROGRESS.equals(rewardContract) != (preparation != null)
+                    || preparation != null && (frame.taskMemory() == null || !frame.taskMemory().worldMatches()
+                    || frame.taskMemory().objective() == null || nextTaskMemory == null || !nextTaskMemory.worldMatches()
+                    || !frame.taskMemory().objective().equals(nextTaskMemory.objective())
+                    || !frame.world().toString().equals(nextWorld)
+                    || preparation.achieved() != nextTaskMemory.currentlyAchieved()))
+                throw new IllegalArgumentException("invalid recipe preparation endpoints");
             objectiveEvents = java.util.List.copyOf(objectiveEvents);
             if (objectiveEvents.size() > 32 || objectiveEvents.stream().distinct().count() != objectiveEvents.size()
                     || objectiveEvents.stream().anyMatch(key -> key.length() > 268 || !key.matches("advancement:[a-z0-9_.-]+:[a-z0-9_./-]+"))
-                    || !objectiveEvents.isEmpty() && !java.util.Set.of("survival-progress/v2", "survival-progress/v3").contains(rewardContract))
+                    || !objectiveEvents.isEmpty() && !java.util.Set.of("survival-progress/v2", "survival-progress/v3", RECIPE_PROGRESS).contains(rewardContract))
                 throw new IllegalArgumentException("invalid observed objective events");
-            if (taskCompletion != null && (!"survival-progress/v3".equals(rewardContract) || rewardEvidence == null
+            if (taskCompletion != null && (!java.util.Set.of("survival-progress/v3", RECIPE_PROGRESS).contains(rewardContract) || rewardEvidence == null
                     || frame.taskMemory() == null || frame.taskMemory().objective() == null
                     || nextTaskMemory == null || nextTaskMemory.objective() == null || !nextTaskMemory.worldMatches()
                     || !frame.taskMemory().objective().equals(nextTaskMemory.objective())
@@ -105,10 +114,37 @@ public final class PpoBridge implements AutoCloseable {
         }
         @Override public double[] nextState() { return nextState.clone(); }
     }
+    public record RecipeStock(String recipe, int filled, int required) {
+        public RecipeStock {
+            if (recipe == null || recipe.length() > 256 || !recipe.matches("[a-z0-9_.-]+:[a-z0-9_./-]+")
+                    || required < 1 || required > 9 || filled < 0 || filled > required)
+                throw new IllegalArgumentException("invalid observed recipe stock");
+        }
+        double fraction() { return filled / (double) required; }
+    }
+
+    public record RecipeProgress(RecipeStock before, RecipeStock after, boolean achieved) {
+        public RecipeProgress {
+            java.util.Objects.requireNonNull(before);
+            java.util.Objects.requireNonNull(after);
+        }
+        double reward(int elapsedTicks, boolean terminated) {
+            double afterPotential = terminated ? 0 : achieved ? 1 : after.fraction();
+            return 0.5 * (Math.pow(0.99997, elapsedTicks) * afterPotential - before.fraction());
+        }
+    }
+
     /** Admission-time observations, independent of the earlier policy request snapshot. No policy features. */
     public record RewardEvidence(String schema, double healthBefore, double healthAfter,
                                  int foodBefore, int foodAfter, double saturationBefore, double saturationAfter,
-                                 int airBefore, int airAfter, int discoveries, double objectiveReward) {
+                                 int airBefore, int airAfter, int discoveries, double objectiveReward,
+                                 RecipeProgress recipePreparation) {
+        public RewardEvidence(String schema, double healthBefore, double healthAfter,
+                              int foodBefore, int foodAfter, double saturationBefore, double saturationAfter,
+                              int airBefore, int airAfter, int discoveries, double objectiveReward) {
+            this(schema, healthBefore, healthAfter, foodBefore, foodAfter, saturationBefore, saturationAfter,
+                    airBefore, airAfter, discoveries, objectiveReward, null);
+        }
         public RewardEvidence {
             if (!"actual-reward-evidence/v1".equals(schema) || discoveries < 0
                     || foodBefore < 0 || foodBefore > 20 || foodAfter < 0 || foodAfter > 20
@@ -119,7 +155,8 @@ public final class PpoBridge implements AutoCloseable {
         }
         public double total(int elapsedTicks, boolean terminated) {
             return Math.clamp(elapsedTicks * 0.0001 + (healthAfter - healthBefore) * 0.05
-                    + discoveries * 0.2 + objectiveReward - (terminated ? 10 : 0), -100, 100);
+                    + discoveries * 0.2 + objectiveReward - (terminated ? 10 : 0)
+                    + (recipePreparation == null ? 0 : recipePreparation.reward(elapsedTicks, terminated)), -100, 100);
         }
     }
     public record Query(String schema, String environment, String id, PolicyFrame frame, java.util.List<Transition> transitions,

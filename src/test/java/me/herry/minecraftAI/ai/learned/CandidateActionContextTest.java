@@ -12,6 +12,22 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.*;
 
 class CandidateActionContextTest {
+    @Test void actualRecipeStockCapsSurplusAndCountsMixedPlanksOnlyOnce() {
+        var planks = new RecipeOption.Ingredient(1, List.of("BIRCH_PLANKS", "OAK_PLANKS"), false);
+        var sticks = new RecipeOption.Ingredient(2, List.of("STICK"), false);
+        var pickaxe = new RecipeOption("minecraft:wooden_pickaxe", "WOODEN_PICKAXE", 1, true, false,
+                List.of(planks, planks, planks, sticks));
+        var before = RecipePreparation.measure(pickaxe, Map.of("BIRCH_PLANKS", 1, "OAK_PLANKS", 2, "STICK", 4));
+        var after = RecipePreparation.measure(pickaxe, Map.of("OAK_PLANKS", 1, "STICK", 8));
+        assertEquals(5, before.filled());
+        assertEquals(3, after.filled());
+        assertEquals(-0.2, new PpoBridge.RecipeProgress(before, after, false).reward(0, false), 1e-9);
+        assertEquals(0, new PpoBridge.RecipeProgress(before, after, true).reward(0, false), 1e-9);
+        var overlapping = new RecipeOption("test:overlap", "WOODEN_PICKAXE", 1, true, false,
+                List.of(planks, new RecipeOption.Ingredient(1, List.of("BIRCH_PLANKS"), false)));
+        assertNull(RecipePreparation.measure(overlapping, Map.of("BIRCH_PLANKS", 1)));
+    }
+
     @Test void craftingCandidatesSeparateTableFromCollidingButtonAndExposeObjectiveMatch() {
         UUID world = UUID.randomUUID();
         var memory = new PolicyTaskMemory();

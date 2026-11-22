@@ -47,7 +47,8 @@ public final class TrainingControl {
                     boolean learning = response.metadata() == null || response.metadata().learningEnabled();
                     var completion = ai.getPolicyTaskMemory().settleCompletion(admittedTask == null ? after.taskMemory() : admittedTask,
                             after.taskMemory(), episode.active() && learning).orElse(null);
-                    var previous = episode.finish(after, actual.body(), actual.stock(), false, !learning, objectiveReward, objectiveEvents, completion);
+                    var previous = episode.finish(after, actual.body(), actual.stock(), false, !learning,
+                            objectiveReward, objectiveEvents, completion, nextRecipe(ai, actual, after.taskMemory(), learning));
                     if (previous != null) outbox.add(previous);
                     // Invalidated clocks do not transfer old progress credit to a later action.
                     objectiveReward = 0; objectiveEvents.clear();
@@ -72,10 +73,24 @@ public final class TrainingControl {
         return null;
     }
 
-    public void applied(Decision decision) {
+    public void applied(AIPlayer ai, Decision decision) {
         admittedTask = decision.admittedTask();
         if (decision.response().metadata() != null && !decision.response().metadata().learningEnabled()) return;
-        episode.begin(decision.requested(), decision.response(), decision.appliedState(), decision.appliedTick());
+        var requestedTask = decision.requested().frame().taskMemory();
+        var recipe = sameObjective(requestedTask, admittedTask) && !admittedTask.currentlyAchieved()
+                ? RecipePreparation.observe(ai.getCrafting(), decision.appliedState(), admittedTask) : null;
+        episode.begin(decision.requested(), decision.response(), decision.appliedState(), decision.appliedTick(), recipe);
+    }
+
+    private PpoBridge.RecipeStock nextRecipe(AIPlayer ai, PolicyCandidates.Observed actual, PolicyTaskMemory.View after,
+                                            boolean learning) {
+        return learning && episode.tracksRecipe() && sameObjective(admittedTask, after)
+                ? RecipePreparation.observe(ai.getCrafting(), actual, after) : null;
+    }
+
+    private static boolean sameObjective(PolicyTaskMemory.View first, PolicyTaskMemory.View second) {
+        return first != null && first.worldMatches() && first.objective() != null
+                && second != null && second.worldMatches() && first.objective().equals(second.objective());
     }
 
     public boolean isTransitioning() { return bridge.isTransitioning(); }
@@ -132,7 +147,8 @@ public final class TrainingControl {
                 boolean learning = !bridge.isTransitioning() && latestStatus != null && latestStatus.metadata() != null
                         && latestStatus.metadata().learningEnabled();
                 var completion = ai.getPolicyTaskMemory().settleCompletion(admittedTask, after.taskMemory(), learning).orElse(null);
-                var ended = episode.finish(after, actual.body(), actual.stock(), ai.getPlayer().isDead(), true, objectiveReward, objectiveEvents, completion);
+                var ended = episode.finish(after, actual.body(), actual.stock(), ai.getPlayer().isDead(), true,
+                        objectiveReward, objectiveEvents, completion, nextRecipe(ai, actual, after.taskMemory(), learning));
                 if (ended != null) outbox.add(ended);
             }
             if (!episode.active() && admittedTask != null) {
