@@ -540,7 +540,18 @@ def resume_parent_directory(selected_resume: Path, *, allow_conversion=True):
     converted = json.loads(selected_resume.read_bytes())
     optimizer = dict(converted["optimizer"])
     if evidence['schema'] == 'minecraft-ppo-exploration-conversion/v1':
-        if original['optimizer'].get('selection') != 'continue-switch-mean/v2' or optimizer.pop('exploration', None) != 'continue-switch-relative/v1' or optimizer != original['optimizer']:
+        from continuation_policy import PRIMITIVE_RELATIVE_EXPLORATION, SELECTION
+        source_optimizer = dict(original['optimizer'])
+        source_exploration = source_optimizer.pop('exploration', 'categorical')
+        destination_exploration = optimizer.pop('exploration', None)
+        valid_change = (
+            destination_exploration == 'continue-switch-relative/v1'
+            and source_exploration == 'categorical' and source_optimizer.get('selection') == SELECTION
+        ) or (
+            destination_exploration == PRIMITIVE_RELATIVE_EXPLORATION
+            and source_exploration in ('categorical', 'continue-switch-relative/v1')
+        )
+        if not valid_change or optimizer != source_optimizer:
             raise ValueError('exploration conversion changed original optimizer state')
     elif evidence['schema'] == 'minecraft-goal-interaction-conversion/v1':
         from rl_actor import ActorCritic
