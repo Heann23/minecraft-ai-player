@@ -1,9 +1,42 @@
 """Probability-law fixtures only; no game, training or ability evidence."""
 import unittest
 import numpy as np
-from continuation_policy import scores, relative_entropy
+from continuation_policy import scores, relative_entropy, primitive_relative_entropy, SELECTION
 
 class ContinuationTests(unittest.TestCase):
+    def test_primitive_exploration_balances_inactive_types_and_preserves_continue_group(self):
+        for count in (3, 31):
+            frame = self.frame(count + 1, running=False)
+            for index, option in enumerate(frame['options']):
+                option['features'][3 if index < count else 13] = 1
+            prior = np.array([0.5 / count] * count + [0.5])
+            value, gradient = primitive_relative_entropy(frame, prior, SELECTION)
+            self.assertAlmostEqual(value, 0)
+            np.testing.assert_allclose(gradient, 0, atol=1e-14)
+
+            frame['state'][400] = frame['state'][401] = 1
+            prior = np.array([0.5] + [0.25 / (count - 1)] * (count - 1) + [0.25])
+            value, gradient = primitive_relative_entropy(frame, prior, SELECTION)
+            self.assertAlmostEqual(value, 0)
+            np.testing.assert_allclose(gradient, 0, atol=1e-14)
+
+    def test_primitive_exploration_gradient_matches_perturbations(self):
+        frame = self.frame(5, running=False)
+        for index, option in enumerate(frame['options']):
+            option['features'][3 if index < 4 else 13] = 1
+
+        def objective(logits):
+            p = np.exp(logits - logits.max())
+            p /= p.sum()
+            return primitive_relative_entropy(frame, p, "flat")
+
+        logits = np.arange(5) * 0.13
+        _, gradient = objective(logits)
+        for index in range(len(logits)):
+            difference = np.eye(len(logits))[index] * 1e-5
+            numeric = (objective(logits - difference)[0] - objective(logits + difference)[0]) / 2e-5
+            self.assertAlmostEqual(gradient[index], numeric, places=8)
+
     def test_relative_entropy_does_not_reward_switch_option_multiplicity(self):
         for n in (2,8,128):
             frame=self.frame(n);logits=scores(frame,np.zeros(n));p=np.exp(logits-logits.max());p/=p.sum()

@@ -11,6 +11,8 @@ import numpy as np
 LEGACY_SELECTION = "continue-switch-mean/v1"
 SELECTION = "continue-switch-mean/v2"
 SUPPORTED = (LEGACY_SELECTION, SELECTION)
+PRIMITIVE_RELATIVE_EXPLORATION = "primitive-relative/v1"
+PRIMITIVE_FEATURE_COUNT = 18  # PrimitiveType ordinals in the v10 action vector.
 
 def compatible_indices(frame, selection=SELECTION):
     if frame["state"][400] != 1 or frame["state"][401] != 1:
@@ -58,3 +60,25 @@ def relative_entropy(frame, probabilities, selection=SELECTION):
         sizes[compatible] = math.log(len(compatible))
     mean_size = float(probabilities @ sizes)
     return entropy - mean_size, probabilities * (logs + entropy + sizes - mean_size)
+
+
+def primitive_relative_entropy(frame, probabilities, selection):
+    """Negative KL to equal mass per available primitive type when switching."""
+    features = np.asarray([option["features"][:PRIMITIVE_FEATURE_COUNT] for option in frame["options"]])
+    if features.shape != (len(probabilities), PRIMITIVE_FEATURE_COUNT) or \
+            not np.all((features == 0) | (features == 1)) or not np.all(features.sum(axis=1) == 1):
+        raise ValueError("primitive relative exploration requires one primitive type per option")
+    kinds = features.argmax(axis=1)
+    continuation = compatible_indices(frame, selection) if selection in SUPPORTED else []
+    switching = np.ones(len(probabilities), dtype=bool)
+    switching[continuation] = False
+    counts = np.bincount(kinds[switching], minlength=PRIMITIVE_FEATURE_COUNT)
+    groups = np.count_nonzero(counts)
+    switch_mass = 0.5 if continuation else 1.0
+    log_prior = np.empty(len(probabilities))
+    log_prior[switching] = np.log(switch_mass / (groups * counts[kinds[switching]]))
+    if continuation:
+        log_prior[continuation] = math.log(0.5 / len(continuation))
+    log_ratio = np.log(np.maximum(probabilities, 1e-300)) - log_prior
+    divergence = float(probabilities @ log_ratio)
+    return -divergence, probabilities * (log_ratio - divergence)

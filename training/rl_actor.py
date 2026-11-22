@@ -115,6 +115,9 @@ class ActorCritic:
             regularizer, entropy_gradient = entropy, probabilities * (logs + entropy)
             if self.exploration == 'continue-switch-relative/v1':
                 regularizer, entropy_gradient = continuation_policy.relative_entropy(row['frame'], probabilities, self.selection)
+            elif self.exploration == continuation_policy.PRIMITIVE_RELATIVE_EXPLORATION:
+                regularizer, entropy_gradient = continuation_policy.primitive_relative_entropy(
+                    row["frame"], probabilities, self.selection)
             ratio = math.exp(float(np.clip(logs[chosen] - row["logProbability"], -60, 60)))
             unclipped = ratio * advantage
             clipped = np.clip(ratio, 1 - clip, 1 + clip) * advantage
@@ -250,7 +253,9 @@ class ActorCritic:
         if model.selection not in ("flat", *continuation_policy.SUPPORTED):
             raise ValueError("unsupported temporal selection law")
         model.exploration = state.get('exploration', 'categorical')
-        if model.exploration not in ('categorical', 'continue-switch-relative/v1') or model.exploration != 'categorical' and model.selection != continuation_policy.SELECTION:
+        if model.exploration not in ('categorical', 'continue-switch-relative/v1',
+                                     continuation_policy.PRIMITIVE_RELATIVE_EXPLORATION) or (
+                model.exploration == 'continue-switch-relative/v1' and model.selection != continuation_policy.SELECTION):
             raise ValueError('unsupported exploration objective/selection combination')
         for group in ("params", "first", "second"):
             if set(state[group]) != set(model.params):
