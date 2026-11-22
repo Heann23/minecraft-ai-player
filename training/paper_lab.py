@@ -162,8 +162,8 @@ def validate_options(args, *, plan=None):
     plan = read_plan(args.plan) if plan is None else validate_plan(plan)
     inference_seed(args)
     objectives = requested_objectives(args)
-    if len(objectives) > 1 and (args.mode != "train" or getattr(args, "managed_backend", False)):
-        raise ValueError("multi-step objective-chain requires the external backend rollout log")
+    if len(objectives) > 1 and getattr(args, "managed_backend", False):
+        raise ValueError("multi-step objective-chain requires external training or native evaluation")
     if getattr(args, "stop_on_objective", False) and (args.mode != "train" or not objectives
             or getattr(args, "inference_only", False) or getattr(args, "managed_backend", False)
             or getattr(args, "learning", None) == "off"):
@@ -350,7 +350,7 @@ def summarize_game_log(path: Path):
                         "candidateCount": int(fingerprint[6]), "modelSha256": fingerprint[7],
                         "chosenIndex": int(fingerprint[8]), "logProbability": float(fingerprint[9]),
                         "scope": "Actual first native actor frame; hash equality is input identity, not goal-use or performance evidence."})
-            goal = re.search(r"\[AI:RLLearner\] GoalSample world=([0-9a-f-]{36}) goal=([0-9a-f-]{36}) tick=(\d+) item=([A-Z][A-Z0-9_]*) required=(\d+) owned=(\d+) matched=(true|false)(?:\s|$)", line)
+            goal = GOAL_SAMPLE.search(line)
             if goal:
                 key = goal[1] + ":" + goal[2]
                 tick, required, owned = int(goal[3]), int(goal[5]), int(goal[6])
@@ -625,6 +625,11 @@ def requested_objectives(args):
     return [] if single is None else [single]
 
 
+GOAL_SAMPLE = re.compile(
+    r"\[AI:RLLearner\] GoalSample world=([0-9a-f-]{36}) goal=([0-9a-f-]{36}) tick=(\d+) "
+    r"item=([A-Z][A-Z0-9_]*) required=(\d+) owned=(\d+) matched=(true|false)(?:\s|$)")
+
+
 class ObjectiveChainTracker:
     """Advance researcher-configured objectives only after observing real server-acknowledged completions."""
     def __init__(self, objectives):
@@ -666,6 +671,23 @@ class ObjectiveChainTracker:
         if not self.watcher.poll(rollouts_path, self.current_admission):
             return False, None
         evidence = dict(self.watcher.match)
+        self.watcher.match = None
+        return self._advance(evidence)
+
+    def observe_native_completion(self, line):
+        admission = self.current_admission
+        if self.finished or admission is None or self.pending_objective is not None:
+            return False, None
+        sample = GOAL_SAMPLE.search(line)
+        if not sample or sample[1] != admission["world"] or sample[2] != admission["id"] \
+                or sample[4] != admission["item"] or int(sample[5]) != admission["count"] \
+                or int(sample[6]) < admission["count"] or sample[7] != "true":
+            return False, None
+        return self._advance({"source": "native-inventory-observation", "world": sample[1],
+                              "objectiveId": sample[2], "tick": int(sample[3]), "item": sample[4],
+                              "required": int(sample[5]), "owned": int(sample[6])})
+
+    def _advance(self, evidence):
         self.completions.append({
             "stepIndex": self.step_index,
             "objective": dict(self.objectives[self.step_index]),
@@ -673,7 +695,6 @@ class ObjectiveChainTracker:
             "evidence": evidence,
         })
         self.current_admission = None
-        self.watcher.match = None
         if self.step_index + 1 < len(self.objectives):
             self.step_index += 1
             self.pending_objective = dict(self.objectives[self.step_index])
@@ -990,6 +1011,13 @@ def run(args):
                                 print("Paper objective acknowledged; actual survival episode admitted", flush=True)
                             else:
                                 print(f"Paper chain objective {tracker.step_index + 1}/{len(objectives)} acknowledged: {admission['item']} x{admission['count']}", flush=True)
+                        if gameplay_start is not None and args.mode == "evaluate" and objective_chain is not None:
+                            final_done, next_obj = tracker.observe_native_completion(line)
+                            if final_done or next_obj is not None:
+                                manifest["objectiveChainCompletions"] = list(tracker.completions)
+                                write_json(output / "manifest.json", manifest)
+                                if next_obj is not None:
+                                    send("ai objective RLLearner acquire " + next_obj["item"] + " " + str(next_obj["count"]))
                 except queue.Empty:
                     pass
                 if now >= next_report:
@@ -1402,7 +1430,7 @@ def main():
     parser.add_argument("--inference-seed", type=int, help="development Java evaluation sampling stream; independent of world/training RNG, resets on brain creation")
     parser.add_argument("--objective-item", help="exact canonical item; server acknowledgement is required before play")
     parser.add_argument("--objective-count", type=int, help="current ownership target 1..4096; requires --objective-item")
-    parser.add_argument("--objective-chain", help="comma-separated ITEM:COUNT milestones (1..16) advanced only after observed real taskCompletion")
+    parser.add_argument("--objective-chain", help="comma-separated ITEM:COUNT milestones (1..16) advanced after actual rollout completion or native evaluation ownership")
     parser.add_argument("--stop-on-objective", action="store_true", help="cooperatively finish a learning world run after its own real accepted completion; preserve pending experience normally")
     parser.add_argument("--mask-objective-input", action="store_true", help="development control: zero only goal state columns 208..231 in actor/critic observations; actual reward accounting is unchanged")
     parser.add_argument("--start-time", type=int, default=0, help="explicit world time prepared before spawning; no time changes during play")

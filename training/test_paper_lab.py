@@ -524,8 +524,34 @@ class SeedPlanTests(unittest.TestCase):
                     stop_on_objective=True)
             self.assertIsNotNone(validate_options(args))
             args.mode, args.world_seed, args.model, args.stop_on_objective = "evaluate", "2", artifact, False
-            with self.assertRaisesRegex(ValueError, "external backend rollout log"):
+            self.assertIsNotNone(validate_options(args))
+            args.managed_backend = True
+            with self.assertRaisesRegex(ValueError, "requires external training or native evaluation"):
                 validate_options(args)
+
+    def test_native_evaluation_chain_matches_current_admission_and_observed_ownership(self):
+        from paper_lab import ObjectiveChainTracker
+        world = "11111111-1111-1111-1111-111111111111"
+        first = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+        second = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+        tracker = ObjectiveChainTracker([{"item": "DIRT", "count": 1}, {"item": "DIRT", "count": 3}])
+
+        def acknowledge(goal, count):
+            tracker.on_console_line(f"[AIObjective] name=RLLearner item=DIRT count={count} id={goal} world={world}")
+
+        def observe(goal, required, owned, matched="true"):
+            return tracker.observe_native_completion(f"[AI:RLLearner] GoalSample world={world} goal={goal}"
+                                                     f" tick=25 item=DIRT required={required} owned={owned} matched={matched}")
+
+        tracker.begin_initial()
+        acknowledge(first, 1)
+        self.assertEqual(observe(first, 1, 0), (False, None))
+        self.assertEqual(observe(first, 1, 1, "false"), (False, None))
+        self.assertEqual(observe(first, 1, 1), (False, {"item": "DIRT", "count": 3}))
+        acknowledge(second, 3)
+        self.assertEqual(observe(first, 1, 3), (False, None))
+        self.assertEqual(observe(second, 3, 3), (True, None))
+        self.assertEqual(tracker.completions[-1]["evidence"]["source"], "native-inventory-observation")
 
 
 if __name__ == "__main__":
