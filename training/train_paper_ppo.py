@@ -276,7 +276,7 @@ class PaperTrainer:
         self.training_metadata = None
         self.discarded_during_update = 0
         self.last_sequence = {}
-        self.active_channel_decisions = {}
+        self.channel_transition_reservations = {}
         self.channel_last_seen = {}
         self.steps = self.ticks = self.bytes = self.discarded_off_policy = 0
         self.digest = hashlib.sha256()
@@ -522,16 +522,16 @@ class PaperTrainer:
                         self.training = self.worker.submit(self.fit_snapshot, copy.deepcopy(self.model), rows)
                 else:
                     self.preserve_discard(previous, "transition-budget-complete")
-        # The request carries the prior closed transition while Java may still be executing
-        # one already-issued decision. Across 1..N channels, drain all active in-flight actions
-        # into the remaining rollout slots before fitting so parallel worlds stay on-policy.
+        # A request delivers the closed transitions and reports any decision still executing.
+        # Issuing another sample reserves a second slot until that channel reports again:
+        # Java can have one completed transition queued and a newer decision in progress.
         now = time.monotonic()
         cid = "default" if channel_id is None else channel_id
         if boundary_protocol:
-            self.active_channel_decisions[cid] = active_decision
+            self.channel_transition_reservations[cid] = int(active_decision)
             self.channel_last_seen[cid] = now
-        in_flight = sum(1 for key, active in self.active_channel_decisions.items()
-                        if active and now - self.channel_last_seen.get(key, 0.0) <= 15.0)
+        in_flight = sum(reserved for key, reserved in self.channel_transition_reservations.items()
+                        if now - self.channel_last_seen[key] <= 15.0)
         remaining = min(self.rollout_size - len(self.rows), self.maximum - self.steps)
         if boundary_protocol and self.learning_enabled and (
                 self.training is not None or remaining == 0 or remaining <= in_flight):
@@ -540,7 +540,7 @@ class PaperTrainer:
             result = self.model.sample(frame)
             self.decisions += 1
             if boundary_protocol:
-                self.active_channel_decisions[cid] = True
+                self.channel_transition_reservations[cid] += 1
         if time.monotonic() - self.last_session_save >= self.session_save_seconds:
             self.persist_session()
         return {"schema": SCHEMA, "id": packet["id"], **result, **self.status()}

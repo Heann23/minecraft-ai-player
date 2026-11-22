@@ -986,11 +986,16 @@ class BridgeProtocolTests(unittest.TestCase):
                     rows_b = [row(trainer.model, session=session_b, sequence=i, terminal=False) for i in range(16)]
                     for t in rows_a + rows_b:
                         t.pop("nextValue")
-                    # Both channels are active with 15 rows each -> 30 steps collected, 2 remaining, 2 in-flight.
-                    r_a = req("chan-a", *rows_a[:15], active=True)
-                    self.assertFalse(r_a.get("rolloutBoundary", False))
-                    r_b = req("chan-b", *rows_b[:15], active=True)
-                    self.assertTrue(r_b["rolloutBoundary"])
+                    self.assertFalse(req("chan-a", *rows_a[:14]).get("rolloutBoundary", False))
+                    self.assertFalse(req("chan-b", *rows_b[:14]).get("rolloutBoundary", False))
+                    self.assertEqual(trainer.steps, 28)
+                    # Both worlds receive a new sample while their first decision remains active.
+                    self.assertFalse(req("chan-a", active=True).get("rolloutBoundary", False))
+                    self.assertFalse(req("chan-b", active=True).get("rolloutBoundary", False))
+                    # A sends its queued closure while B still owes both a queued and an active transition.
+                    self.assertTrue(req("chan-a", rows_a[14], active=True)["rolloutBoundary"])
+                    self.assertEqual(trainer.steps, 29)
+                    self.assertTrue(req("chan-b", rows_b[14], active=True)["rolloutBoundary"])
                     self.assertIsNone(trainer.training)
                     self.assertEqual(trainer.steps, 30)
                     # Channel A delivers slot 31 and becomes idle; channel B still has 1 in-flight -> hold A at boundary.
