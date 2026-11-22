@@ -133,13 +133,13 @@ class PolicyWeightsTest {
         var current = new PolicyCandidates.Candidate("mine:1,64,2:0", command, null, null,
                 new PolicyFrame.Option("mine:1,64,2:0", features, evidence)).committed(5);
         var variants = PolicyCandidates.compatibleReconsiderations(current);
-        assertEquals(3, variants.size());
+        assertEquals(List.of(20, 80), variants.stream().map(PolicyCandidates.Candidate::reconsiderAfterTicks).toList());
         for (var variant : variants) {
             assertEquals(current.inputId(), variant.inputId());
             assertNotEquals(current.id(), variant.id());
             assertEquals(0, variant.encoded().features()[55]);
             assertSame(evidence, variant.encoded().blockEvidence());
-            assertEquals(20, variant.reconsiderAfterTicks());
+            assertEquals(variant.commitmentTicks(), variant.reconsiderAfterTicks());
         }
     }
 

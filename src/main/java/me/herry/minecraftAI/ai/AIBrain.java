@@ -2,6 +2,7 @@ package me.herry.minecraftAI.ai;
 
 import me.herry.minecraftAI.ai.action.Action;
 import me.herry.minecraftAI.ai.action.ActionStatus;
+import me.herry.minecraftAI.ai.action.BreakBlockAction;
 import me.herry.minecraftAI.ai.action.RunAwayAction;
 import me.herry.minecraftAI.ai.action.WaitAction;
 import me.herry.minecraftAI.ai.autonomy.AutonomyFeedback;
@@ -101,6 +102,7 @@ final class AIBrain {
     private java.util.UUID learnedWorld;
     private long learnedStartedAt;
     private long learnedNextChoiceAt;
+    private double learnedHealthAtChoice;
     private boolean learnedLane;
     private record PortalDeparture(java.util.UUID source, java.util.UUID destination, String inputId, long observedTick) {}
     private @Nullable OverworldAutonomy.Decision activeAutonomy;
@@ -463,12 +465,13 @@ final class AIBrain {
             learnedLane = true; learnedWorld = ai.getWorldId();
         }
         if (learnedPolicy == null && trainingControl == null) { ai.getNavigation().stop(); ai.getBody().clearInputs(); return; }
+        boolean shouldChoose = learnedChoiceDue(now);
         if (now % ai.getConfig().updateInterval == 0) {
             ai.getPerceptionSystem().update();
             ai.getMemory().recordVisit(ai.getWorldId(), ai.getPosition());
             ai.getWorldModel().markExplored(ai.getWorldId(), ai.getPosition().x() >> 4, ai.getPosition().z() >> 4);
             if (trainingControl == null && !ai.getWorkBudget().isExhausted()
-                    && (plan == null || plan.isFinished() || now >= learnedNextChoiceAt)) {
+                    && shouldChoose) {
                 try {
                     var captured = learnedCandidates.capture(ai, activeLearned, (int) Math.min(2400, now - learnedStartedAt));
                     var predicted = learnedPolicy.sample(captured.frame(), inferenceRandom == null
@@ -529,7 +532,7 @@ final class AIBrain {
                         activeLearned = selected; learnedStartedAt = now;
                         ai.debug("Model " + predicted.modelSha256() + " selected " + predicted.candidate());
                     }
-                    activeLearned = selected; learnedNextChoiceAt = now + selected.reconsiderAfterTicks();
+                    rememberLearnedChoice(selected, now);
                 } catch (RuntimeException failure) {
                     if (plan != null) plan.cancel(ai);
                     plan = null; activeLearned = null;
@@ -540,7 +543,7 @@ final class AIBrain {
         }
         if (trainingControl != null) {
             var decision = trainingControl.poll(ai, activeLearned, (int) Math.min(2400, now - learnedStartedAt),
-                    now % ai.getConfig().updateInterval == 0 && (plan == null || plan.isFinished() || now >= learnedNextChoiceAt));
+                    now % ai.getConfig().updateInterval == 0 && shouldChoose);
             if (decision != null) {
                 if (decision.response().rolloutBoundary()) {
                     cancelLearnedForReplacement(ai, "ppo-rollout-boundary");
@@ -555,7 +558,7 @@ final class AIBrain {
                         plan = new Plan(GoalType.IDLE, List.of(selected.create(ai)));
                         activeLearned = selected; learnedStartedAt = now;
                     }
-                    activeLearned = selected; learnedNextChoiceAt = now + selected.reconsiderAfterTicks();
+                    rememberLearnedChoice(selected, now);
                     trainingControl.applied(ai, decision);
                 } catch (RuntimeException failure) {
                     if (plan != null) plan.cancel(ai);
@@ -588,6 +591,21 @@ final class AIBrain {
                 active && action.getStatus() == ActionStatus.RUNNING, mining != null,
                 mining == null ? 0 : mining.progress(), mining == null ? 0 : mining.actionTicks(),
                 mining == null ? 0 : mining.aimTicks(), active ? activeLearned.inputId() : "");
+    }
+
+    private void rememberLearnedChoice(me.herry.minecraftAI.ai.learned.PolicyCandidates.Candidate selected, long now) {
+        activeLearned = selected;
+        learnedNextChoiceAt = now + selected.reconsiderAfterTicks();
+        learnedHealthAtChoice = ai.getPlayer().getHealth();
+    }
+
+    private boolean learnedChoiceDue(long now) {
+        if (plan == null || plan.isFinished() || now >= learnedNextChoiceAt) return true;
+        if (!(plan.current() instanceof BreakBlockAction)) return false;
+        var player = ai.getPlayer();
+        double health = player.getHealth();
+        return health < learnedHealthAtChoice || health <= 6.0 || player.isInLava()
+                || player.getFireTicks() > 0 || player.isInWater() && player.getRemainingAir() <= 60;
     }
 
     private static boolean isLog(String name) {

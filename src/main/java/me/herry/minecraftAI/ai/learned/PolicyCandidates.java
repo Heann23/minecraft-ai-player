@@ -31,6 +31,8 @@ import java.util.function.BooleanSupplier;
  * order, best-food/tool or Teacher selection.
  */
 public final class PolicyCandidates {
+    private static final List<Integer> RECONSIDERATION_TICKS = List.of(5, 20, 80, 600);
+    private static final List<Integer> MINING_RECONSIDERATION_TICKS = List.of(5, 20, 80);
     public record Candidate(String id, PrimitiveCommand command, RecipeOption recipe,
             SurvivalObservation.Item consumable,
             PolicyFrame.Option encoded, int commitmentTicks, String inputId, ExactEquipment.Choice equipment,
@@ -58,15 +60,16 @@ public final class PolicyCandidates {
         }
 
         /**
-         * Reconsider within20 ticks; finite movement uses its hold, other executors
-         * keep their own timeout.
+         * Mining may hold the input across several observations. New hazards can
+         * still bring reconsideration forward in the learned execution lane.
          */
         public int reconsiderAfterTicks() {
             if (command instanceof PrimitiveCommand.ShootBow)
                 return ShootBowAction.ACTION_TICKS;
             if (recipe != null)
                 return VanillaCraftAction.ACTION_TICKS;
-            return Math.max(1, Math.min(20, commitmentTicks));
+            int maxDelay = command instanceof PrimitiveCommand.BreakBlock ? 80 : 20;
+            return Math.max(1, Math.min(maxDelay, commitmentTicks));
         }
 
         public Candidate committed(int ticks) {
@@ -334,7 +337,7 @@ public final class PolicyCandidates {
                     || candidate.command() instanceof PrimitiveCommand.ToggleBlock)
                 expanded.add(candidate.committed(5));
             else
-                for (int ticks : new int[] { 5, 20, 80, 600 })
+                for (int ticks : reconsiderationTicks(candidate))
                     expanded.add(candidate.committed(ticks));
         }
         var candidates = selectFair(expanded, active == null ? "" : active.id());
@@ -1514,7 +1517,7 @@ public final class PolicyCandidates {
                 || active.command() instanceof PrimitiveCommand.SocketEnderEye)
             return List.of();
         List<Candidate> result = new ArrayList<>();
-        for (int ticks : new int[] { 5, 20, 80, 600 }) {
+        for (int ticks : reconsiderationTicks(active)) {
             var variant = active.committed(ticks);
             if (variant.id().equals(active.id()))
                 continue;
@@ -1526,5 +1529,10 @@ public final class PolicyCandidates {
                     variant.inputId(), variant.equipment(), variant.movement()));
         }
         return List.copyOf(result);
+    }
+
+    private static List<Integer> reconsiderationTicks(Candidate candidate) {
+        return candidate.command() instanceof PrimitiveCommand.BreakBlock
+                ? MINING_RECONSIDERATION_TICKS : RECONSIDERATION_TICKS;
     }
 }
