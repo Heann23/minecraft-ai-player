@@ -21,6 +21,7 @@ final class WorldPolicyContext {
     static final int OFFSET = 432;
     static final int WIDTH = 16;
     static final int TABLE_REACHABLE = 439;
+    static final int FURNACE_REACHABLE = 440;
 
     private WorldPolicyContext() {}
 
@@ -111,7 +112,7 @@ final class WorldPolicyContext {
         state[437] = Math.clamp(skyLight / 15.0, 0, 1);
         state[438] = hasRespawnInWorld ? 1 : 0;
         state[TABLE_REACHABLE] = tableReachable ? 1 : 0;
-        state[440] = furnaceReachable ? 1 : 0;
+        state[FURNACE_REACHABLE] = furnaceReachable ? 1 : 0;
         if (dragonPresent) {
             state[441] = 1;
             state[442] = Math.clamp(dragonDx / 128.0, -1, 1);

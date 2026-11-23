@@ -370,4 +370,52 @@ class CandidateActionContextTest {
         assertEquals(10, redundantSecondTable.required());
         assertTrue(redundantSecondTable.fraction() < fourPlanksWithTable.fraction());
     }
+
+    @Test void smeltingAndDirectCollectionTrackFurnacePlacementRawOreAndMultiUnitTargets() {
+        var ironBlock = new RecipeOption("minecraft:raw_iron", "RAW_IRON", 9, false, false,
+                List.of(new RecipeOption.Ingredient(1, List.of("RAW_IRON_BLOCK"), false)));
+        var oakPlanks = new RecipeOption("minecraft:oak_planks", "OAK_PLANKS", 4, false, false,
+                List.of(new RecipeOption.Ingredient(1, List.of("OAK_LOG"), false)));
+        var pickaxe = new RecipeOption("minecraft:wooden_pickaxe", "WOODEN_PICKAXE", 1, true, false, List.of(
+                new RecipeOption.Ingredient(3, List.of("OAK_PLANKS"), false),
+                new RecipeOption.Ingredient(2, List.of("STICK"), false)));
+        assertTrue(RecipePreparation.isStorageUnpack(ironBlock));
+        assertFalse(RecipePreparation.isStorageUnpack(oakPlanks));
+        assertFalse(RecipePreparation.isStorageUnpack(pickaxe));
+
+        var smelt = new RecipeOption("minecraft:iron_ingot_from_smelting_raw_iron", "IRON_INGOT", 1, false, true,
+                List.of(new RecipeOption.Ingredient(1, List.of("RAW_IRON"), false)));
+        var furnace = new RecipeOption("minecraft:furnace", "FURNACE", 1, true, false,
+                List.of(new RecipeOption.Ingredient(8, List.of("COBBLESTONE"), false)));
+        var furnaces = List.of(furnace);
+
+        var empty = RecipePreparation.withFurnace(smelt, furnaces, Map.of(), false, false, 3, 0);
+        assertEquals(0, empty.filled());
+        assertEquals(12, empty.required());
+
+        var cobble = RecipePreparation.withFurnace(smelt, furnaces, Map.of("COBBLESTONE", 8), false, false, 3, 0);
+        assertEquals(8, cobble.filled());
+        assertEquals(12, cobble.required());
+
+        var ownsFurnace = RecipePreparation.withFurnace(smelt, furnaces, Map.of(), false, true, 3, 0);
+        assertEquals(8, ownsFurnace.filled());
+        assertEquals(12, ownsFurnace.required());
+
+        var placedFurnace = RecipePreparation.withFurnace(smelt, furnaces, Map.of(), true, false, 3, 0);
+        assertEquals(9, placedFurnace.filled());
+        assertEquals(12, placedFurnace.required());
+
+        var readySmelt = RecipePreparation.withFurnace(smelt, furnaces, Map.of("RAW_IRON", 3), true, false, 3, 0);
+        assertEquals(12, readySmelt.filled());
+        assertEquals(12, readySmelt.required());
+
+        var smeltedDone = RecipePreparation.withFurnace(smelt, furnaces, Map.of("IRON_INGOT", 3), true, false, 3, 3);
+        assertEquals(12, smeltedDone.filled());
+        assertEquals(12, smeltedDone.required());
+
+        var direct = RecipePreparation.directCollection(org.bukkit.Material.RAW_IRON, 3, 2);
+        assertEquals("minecraft:raw_iron", direct.recipe());
+        assertEquals(2, direct.filled());
+        assertEquals(3, direct.required());
+    }
 }

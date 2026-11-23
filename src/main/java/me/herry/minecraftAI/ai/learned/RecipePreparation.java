@@ -23,14 +23,62 @@ final class RecipePreparation {
         for (var slot : observed.snapshot().inventory()) {
             if (slot.slot() < 36 && slot.amount() > 0) stock.merge(slot.material(), slot.amount(), Integer::sum);
         }
+        int goalCount = task.objective().goal().count();
+        int ownedGoal = Math.max(0, stock.getOrDefault(target.name(), 0));
         boolean tableReachable = observed.features()[WorldPolicyContext.TABLE_REACHABLE] == 1;
         boolean ownsTable = stock.getOrDefault(Material.CRAFTING_TABLE.name(), 0) > 0;
+        boolean furnaceReachable = observed.features()[WorldPolicyContext.FURNACE_REACHABLE] == 1;
+        boolean ownsFurnace = stock.getOrDefault(Material.FURNACE.name(), 0) > 0;
         var tableOptions = crafting.recipeOptions(Material.CRAFTING_TABLE);
+        var furnaceOptions = crafting.recipeOptions(Material.FURNACE);
         PpoBridge.RecipeStock best = null;
+        for (var smelt : crafting.smeltingOptions(target)) {
+            var candidate = withFurnace(smelt, furnaceOptions, stock, furnaceReachable, ownsFurnace, goalCount, ownedGoal);
+            if (candidate != null && (best == null || candidate.fraction() > best.fraction()))
+                best = candidate;
+        }
         for (var recipe : crafting.recipeOptions(target)) {
+            if (isStorageUnpack(recipe)) continue;
             var candidate = recipe.needsTable()
                     ? withTable(recipe, tableOptions, stock, tableReachable, ownsTable)
                     : measure(recipe, stock);
+            if (candidate != null && (best == null || candidate.fraction() > best.fraction()))
+                best = candidate;
+        }
+        return best != null ? best : directCollection(target, goalCount, ownedGoal);
+    }
+
+    static boolean isStorageUnpack(RecipeOption recipe) {
+        return !recipe.smelting() && recipe.ingredients().size() == 1
+                && recipe.ingredients().getFirst().amount() == 1 && recipe.resultAmount() == 9;
+    }
+
+    static PpoBridge.RecipeStock directCollection(Material target, int goalCount, int ownedGoal) {
+        if (target == null || goalCount < 1) return null;
+        int capped = Math.min(18, goalCount);
+        return new PpoBridge.RecipeStock(target.getKey().toString(), Math.min(capped, Math.max(0, ownedGoal)), capped);
+    }
+
+    static PpoBridge.RecipeStock withFurnace(RecipeOption smelt, List<RecipeOption> furnaceOptions,
+                                             Map<String, Integer> stock, boolean furnaceReachable,
+                                             boolean ownsFurnace, int goalCount, int ownedGoal) {
+        if (!smelt.smelting() || !smelt.countPlannable() || smelt.ingredients().size() != 1 || goalCount < 1)
+            return null;
+        int units = Math.min(goalCount, 9);
+        int securedOutput = Math.min(units, Math.max(0, ownedGoal));
+        int neededInputs = units - securedOutput;
+        boolean hasFurnace = furnaceReachable || ownsFurnace;
+        int extraRequired = furnaceReachable ? 0 : 1;
+        List<RecipeOption.Ingredient> smeltIngredients = neededInputs > 0
+                ? List.of(new RecipeOption.Ingredient(neededInputs, smelt.ingredients().getFirst().alternatives(), false))
+                : List.of();
+        PpoBridge.RecipeStock best = null;
+        for (var furnace : furnaceOptions) {
+            if (furnace.smelting() || !furnace.countPlannable()) continue;
+            int furnaceUnits = furnace.ingredients().stream().mapToInt(RecipeOption.Ingredient::amount).sum();
+            int securedFurnace = furnaceReachable ? furnaceUnits + 1 : ownsFurnace ? furnaceUnits : 0;
+            var candidate = measure(smelt.id(), smeltIngredients, hasFurnace ? List.of() : furnace.ingredients(),
+                    stock, securedFurnace + securedOutput, extraRequired);
             if (candidate != null && (best == null || candidate.fraction() > best.fraction()))
                 best = candidate;
         }
