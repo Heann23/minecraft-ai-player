@@ -42,7 +42,7 @@ def write_atomic(path: Path, value: dict):
 def validate_transition(row: dict):
     required = {"session", "sequence", "frame", "index", "logProbability", "value", "modelVersion", "reward",
                 "elapsedTicks", "terminated", "truncated", "appliedTick", "nextWorld", "nextState"}
-    if set(row) - {"rewardContract", "objectiveEvents", "rewardEvidence", "nextTaskMemory", "taskCompletion"} != required:
+    if set(row) - {"rewardContract", "objectiveEvents", "rewardEvidence", "nextTaskMemory", "taskCompletion", "appliedState"} != required:
         raise ValueError("transition schema mismatch; Teacher labels are not accepted")
     contract = row.get("rewardContract", "survival-progress/v1")
     recipe_progress = contract in ("survival-progress/v4", "survival-progress/v5")
@@ -60,6 +60,11 @@ def validate_transition(row: dict):
         raise ValueError("invalid actual application tick")
     if len(row["nextState"]) != STATE_SIZE or any(not isinstance(x, (int, float)) or not math.isfinite(x) or abs(x) > 16 for x in row["nextState"]):
         raise ValueError("invalid actual next state")
+    if "appliedState" in row:
+        applied_state = row["appliedState"]
+        if not isinstance(applied_state, list) or len(applied_state) != STATE_SIZE \
+                or any(type(x) not in (int, float) or not math.isfinite(x) or abs(x) > 16 for x in applied_state):
+            raise ValueError("invalid actual applied state")
     inputs(row["frame"])
     if not isinstance(row["sequence"], int) or row["sequence"] < 0 or not isinstance(row["modelVersion"], int) or row["modelVersion"] < 0:
         raise ValueError("invalid sequence/model version")
@@ -236,7 +241,9 @@ def validate_pending_row(row):
     if not isinstance(row, dict) or "nextValue" not in row or type(row["nextValue"]) not in (int, float) \
             or not math.isfinite(row["nextValue"]):
         raise ValueError("invalid saved pending next-state value")
-    validate_transition({key: value for key, value in row.items() if key != "nextValue"})
+    if "appliedValue" in row and (type(row["appliedValue"]) not in (int, float) or not math.isfinite(row["appliedValue"])):
+        raise ValueError("invalid saved pending applied-state value")
+    validate_transition({key: value for key, value in row.items() if key not in ("nextValue", "appliedValue")})
 
 
 def verify_runtime_session(state):
@@ -538,6 +545,8 @@ class PaperTrainer:
                 elif self.steps < self.maximum:
                     next_value, _ = self.model.value(previous["nextState"])
                     row = dict(previous)
+                    if "appliedState" in row:
+                        row["appliedValue"], _ = self.model.value(row["appliedState"])
                     # A cross-world boundary is not bootstrapped from an unrelated world's body state.
                     row["nextValue"] = 0 if row["terminated"] or row["nextWorld"] != row["frame"]["world"] else next_value
                     encoded = (json.dumps(row, ensure_ascii=False, allow_nan=False, separators=(",", ":")) + "\n").encode()

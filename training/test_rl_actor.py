@@ -597,6 +597,34 @@ class ActorTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             inputs(observed)
 
+    def test_applied_state_and_value_eliminate_request_lag_td_drift(self):
+        model = ActorCritic(7, hidden=4)
+        sample = row(model, session="s1", sequence=0, reward=0.0, terminal=False)
+        sample["appliedState"] = list(sample["frame"]["state"])
+        sample["appliedState"][135] = 0.9
+        sample["frame"]["state"][135] = 0.2  # Stale request state differs from admission state
+        sample["nextState"] = list(sample["appliedState"])
+        applied_v, _ = model.value(sample["appliedState"])
+        sample["appliedValue"] = applied_v
+        sample["nextValue"] = applied_v
+        sample["value"] = applied_v - 0.75  # Stale request value would otherwise inject +0.75 TD phantom profit
+
+        advantages, returns = generalized_advantages([sample], gamma_tick=1.0, gae_lambda=0.95)
+        self.assertAlmostEqual(float(advantages[0]), 0.0, places=12)
+        self.assertAlmostEqual(float(returns[0]), applied_v, places=12)
+
+        adv = np.array([0.7]); target = np.array([applied_v + 1.0])
+        grad, _ = model.gradients([sample], adv, target)
+        for key, idx in (("actor_w", (0, STATE_SIZE)), ("value_w", (0, 135)), ("value_out", (0,))):
+            original = model.params[key][idx]
+            eps = 1e-6
+            model.params[key][idx] = original + eps
+            _, plus = model.gradients([sample], adv, target)
+            model.params[key][idx] = original - eps
+            _, minus = model.gradients([sample], adv, target)
+            model.params[key][idx] = original
+            self.assertAlmostEqual((plus["loss"] - minus["loss"]) / (2 * eps), grad[key][idx], places=5)
+
 
 class BridgeProtocolTests(unittest.TestCase):
     def test_learning_controls_preserve_the_same_weights_identity_and_durable_disabled_state(self):
@@ -1060,6 +1088,43 @@ class BridgeProtocolTests(unittest.TestCase):
                     serve([base / "c1", base / "c1"], t3, stopped)
             finally:
                 t3.close()
+
+    def test_applied_state_computes_applied_value_across_pending_reload_and_rejects_invalid_vectors(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            trainer = PaperTrainer(root / "run1", seed=7, rollout_size=32, maximum=64, max_bytes=16 * 1024 * 1024)
+            try:
+                session_id = str(uuid.uuid4())
+                t0 = row(trainer.model, session=session_id, sequence=0, terminal=False)
+                t0.pop("nextValue")
+                t0["appliedState"] = list(t0["frame"]["state"])
+                trainer.handle({"schema": SCHEMA, "environment": "minecraft-paper", "id": str(uuid.uuid4()),
+                                "frame": frame(), "transitions": [t0]})
+                t1 = row(trainer.model, session=session_id, sequence=1, terminal=False)
+                t1.pop("nextValue")
+                t1["appliedTick"] = t0["appliedTick"] + t0["elapsedTicks"]
+                t1["appliedState"] = list(t0["nextState"])
+                trainer.handle({"schema": SCHEMA, "environment": "minecraft-paper", "id": str(uuid.uuid4()),
+                                "frame": frame(), "transitions": [t1]})
+                self.assertEqual(len(trainer.rows), 2)
+                self.assertAlmostEqual(trainer.rows[1]["appliedValue"], trainer.rows[0]["nextValue"], places=12)
+                for bad in ([0.0] * (STATE_SIZE - 1), [True] + [0.0] * (STATE_SIZE - 1),
+                            [float("nan")] + [0.0] * (STATE_SIZE - 1), [16.5] + [0.0] * (STATE_SIZE - 1)):
+                    bad_t = row(trainer.model, session=session_id, sequence=2, terminal=False)
+                    bad_t.pop("nextValue")
+                    bad_t["appliedState"] = bad
+                    with self.assertRaises(ValueError):
+                        validate_transition(bad_t)
+            finally:
+                trainer.close()
+            restored_state = brain_session.load(root / "run1/runtime-session.json")
+            restored = PaperTrainer(root / "run2", seed=99, rollout_size=32, maximum=64, max_bytes=16 * 1024 * 1024,
+                                    resume=Path(restored_state["checkpoint"]), restore_state=restored_state)
+            try:
+                self.assertEqual(len(restored.rows), 2)
+                self.assertAlmostEqual(restored.rows[1]["appliedValue"], restored.rows[0]["nextValue"], places=12)
+            finally:
+                restored.close()
 
 
 if __name__ == "__main__":

@@ -15,6 +15,7 @@ public final class TrainingEpisode {
     private long sequence;
     private PolicyFrame before;
     private SurvivalObservation.Body beforeBody;
+    private double[] beforeState;
     private PpoBridge.Response chosen;
     private PpoBridge.RecipeStock beforeRecipe;
     private long appliedTick;
@@ -26,7 +27,7 @@ public final class TrainingEpisode {
     void begin(PolicyCandidates.Capture captured, PpoBridge.Response response, PolicyCandidates.Observed actual, long now,
                PpoBridge.RecipeStock recipe) {
         if (before != null) throw new IllegalStateException("previous policy transition not closed");
-        before = captured.frame(); beforeBody = actual.body(); chosen = response; appliedTick = now;
+        before = captured.frame(); beforeBody = actual.body(); beforeState = actual.features(); chosen = response; appliedTick = now;
         beforeRecipe = recipe;
         if (sequence == 0) observedItems.addAll(actual.stock().keySet());
     }
@@ -55,7 +56,7 @@ public final class TrainingEpisode {
         long elapsed = next.serverTick() - appliedTick;
         if (elapsed < 0 || elapsed > 2400) {
             // An invalidated clock is not manufactured into a valid game step. Same-tick terminal events retain their actual zero duration.
-            before = null; beforeBody = null; chosen = null; beforeRecipe = null; return null;
+            before = null; beforeBody = null; beforeState = null; chosen = null; beforeRecipe = null; return null;
         }
         int discoveries = 0;
         for (var entry : stock.entrySet()) if (entry.getValue() > 0 && observedItems.add(entry.getKey())) discoveries++;
@@ -70,8 +71,8 @@ public final class TrainingEpisode {
                 : completion == null ? REWARD_CONTRACT : "survival-progress/v3";
         var transition = new PpoBridge.Transition(session, sequence++, before, chosen.index(), chosen.logProbability(),
                 chosen.value(), chosen.modelVersion(), reward, (int) elapsed, terminated, truncated, appliedTick,
-                next.world().toString(), next.state(), contract, objectiveEvents, evidence, next.taskMemory(), completion);
-        before = null; beforeBody = null; chosen = null; beforeRecipe = null;
+                next.world().toString(), next.state(), contract, objectiveEvents, evidence, next.taskMemory(), completion, beforeState);
+        before = null; beforeBody = null; beforeState = null; chosen = null; beforeRecipe = null;
         return transition;
     }
 

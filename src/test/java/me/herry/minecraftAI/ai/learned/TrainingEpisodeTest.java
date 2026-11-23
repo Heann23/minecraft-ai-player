@@ -113,4 +113,35 @@ class TrainingEpisodeTest {
         assertEquals(first.sequence() + 1, repeated.sequence());
         assertEquals(first.session(), repeated.session());
     }
+
+    @Test void appliedStateCapturesAdmissionFeaturesAndMatchesPreviousNextState() {
+        var episode = new TrainingEpisode();
+        double[] reqState = new double[PolicyFrame.STATE_SIZE];
+        reqState[135] = 0.25;
+        var requested = new PolicyCandidates.Capture(
+                new PolicyFrame(WORLD, 10, reqState, OPTIONS, false), List.of(), body(20), Map.of());
+        double[] appliedFeatures = new double[PolicyFrame.STATE_SIZE];
+        appliedFeatures[135] = 1.0;
+        var appliedObserved = new PolicyCandidates.Observed(
+                new PrimitiveSnapshot(1, 1, WORLD, new PrimitiveTarget.Point(0, 64, 0), 20, 20, 300, true, false, false, List.of()),
+                body(20), Map.of(), appliedFeatures);
+        episode.begin(requested, response(), appliedObserved, 12);
+
+        double[] betweenFeatures = new double[PolicyFrame.STATE_SIZE];
+        betweenFeatures[135] = 0.95;
+        var first = episode.finish(new PolicyFrame(WORLD, 17, betweenFeatures, OPTIONS, false),
+                body(20), Map.of(), false, false, 0);
+        assertEquals(1.0, first.appliedState()[135]);
+        assertEquals(0.25, first.frame().state()[135]);
+        double[] defensiveCopy = first.appliedState();
+        defensiveCopy[135] = -5.0;
+        assertEquals(1.0, first.appliedState()[135]);
+
+        var nextActual = new PolicyCandidates.Observed(
+                new PrimitiveSnapshot(1, 1, WORLD, new PrimitiveTarget.Point(0, 64, 0), 20, 20, 300, true, false, false, List.of()),
+                body(20), Map.of(), betweenFeatures);
+        episode.begin(requested, response(), nextActual, 17);
+        var second = episode.finish(frame(22), body(20), Map.of(), false, false, 0);
+        assertArrayEquals(first.nextState(), second.appliedState());
+    }
 }

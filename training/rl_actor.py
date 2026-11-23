@@ -107,6 +107,10 @@ class ActorCritic:
         loss = entropy_sum = regularizer_sum = 0.0
         for row, advantage, target in zip(rows, advantages, returns):
             probabilities, value, (state, x, hidden, value_hidden) = self.evaluate(row["frame"])
+            value_state = state
+            if "appliedState" in row:
+                value_state = np.asarray(row["appliedState"], dtype=np.float64)
+                value, value_hidden = self.value(value_state)
             chosen = row["index"]
             if not 0 <= chosen < len(probabilities):
                 raise ValueError("chosen index outside captured candidate set")
@@ -139,7 +143,7 @@ class ActorCritic:
             gradients["value_out"] += value_gradient * value_hidden
             gradients["value_bias"][0] += value_gradient
             vh_gradient = value_gradient * self.params["value_out"] * (1 - value_hidden ** 2)
-            gradients["value_w"] += np.outer(vh_gradient, state)
+            gradients["value_w"] += np.outer(vh_gradient, value_state)
             gradients["value_b"] += vh_gradient
         for key in gradients:
             gradients[key] /= len(rows)
@@ -314,11 +318,12 @@ def generalized_advantages(rows: list[dict], gamma_tick: float = 0.99997, gae_la
                       and following["sequence"] == row["sequence"] + 1
                       and following["appliedTick"] == row["appliedTick"] + ticks
                       and row["frame"]["world"] == row["nextWorld"] == following["frame"]["world"])
-        delta = row["reward"] + discount * next_value - row["value"]
+        start_value = row.get("appliedValue", row["value"])
+        delta = row["reward"] + discount * next_value - start_value
         carry = delta + (discount * gae_lambda * following_advantage if contiguous and not terminal and not row.get("truncated", False) else 0)
         advantages[index] = carry
         tails[row["session"]] = (row, carry)
-    returns = advantages + np.asarray([row["value"] for row in rows])
+    returns = advantages + np.asarray([row.get("appliedValue", row["value"]) for row in rows])
     if not np.isfinite(advantages).all() or not np.isfinite(returns).all():
         raise ValueError("non-finite rollout returns")
     return advantages, returns

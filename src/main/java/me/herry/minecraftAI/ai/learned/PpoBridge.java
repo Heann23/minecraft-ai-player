@@ -38,7 +38,8 @@ public final class PpoBridge implements AutoCloseable {
                              double logProbability, double value, long modelVersion, double reward,
                              int elapsedTicks, boolean terminated, boolean truncated, long appliedTick, String nextWorld, double[] nextState,
                              String rewardContract, java.util.List<String> objectiveEvents, RewardEvidence rewardEvidence,
-                             PolicyTaskMemory.View nextTaskMemory, PolicyTaskMemory.Completion taskCompletion) {
+                             PolicyTaskMemory.View nextTaskMemory, PolicyTaskMemory.Completion taskCompletion,
+                             double[] appliedState) {
         static final String RECIPE_PROGRESS = "survival-progress/v5";
         private static final String INGREDIENT_PROGRESS = "survival-progress/v4";
         private static final java.util.Set<String> EVIDENCE_CONTRACTS =
@@ -47,29 +48,38 @@ public final class PpoBridge implements AutoCloseable {
                           double logProbability, double value, long modelVersion, double reward,
                           int elapsedTicks, boolean terminated, boolean truncated, long appliedTick, String nextWorld, double[] nextState,
                           String rewardContract, java.util.List<String> objectiveEvents, RewardEvidence rewardEvidence,
+                          PolicyTaskMemory.View nextTaskMemory, PolicyTaskMemory.Completion taskCompletion) {
+            this(session, sequence, frame, index, logProbability, value, modelVersion, reward, elapsedTicks,
+                    terminated, truncated, appliedTick, nextWorld, nextState, rewardContract, objectiveEvents, rewardEvidence,
+                    nextTaskMemory, taskCompletion, null);
+        }
+        public Transition(String session, long sequence, PolicyFrame frame, int index,
+                          double logProbability, double value, long modelVersion, double reward,
+                          int elapsedTicks, boolean terminated, boolean truncated, long appliedTick, String nextWorld, double[] nextState,
+                          String rewardContract, java.util.List<String> objectiveEvents, RewardEvidence rewardEvidence,
                           PolicyTaskMemory.View nextTaskMemory) {
             this(session, sequence, frame, index, logProbability, value, modelVersion, reward, elapsedTicks,
-                    terminated, truncated, appliedTick, nextWorld, nextState, rewardContract, objectiveEvents, rewardEvidence, nextTaskMemory, null);
+                    terminated, truncated, appliedTick, nextWorld, nextState, rewardContract, objectiveEvents, rewardEvidence, nextTaskMemory, null, null);
         }
         public Transition(String session, long sequence, PolicyFrame frame, int index,
                           double logProbability, double value, long modelVersion, double reward,
                           int elapsedTicks, boolean terminated, boolean truncated, long appliedTick, String nextWorld, double[] nextState,
                           String rewardContract, java.util.List<String> objectiveEvents, RewardEvidence rewardEvidence) {
             this(session, sequence, frame, index, logProbability, value, modelVersion, reward, elapsedTicks,
-                    terminated, truncated, appliedTick, nextWorld, nextState, rewardContract, objectiveEvents, rewardEvidence, null);
+                    terminated, truncated, appliedTick, nextWorld, nextState, rewardContract, objectiveEvents, rewardEvidence, null, null, null);
         }
         public Transition(String session, long sequence, PolicyFrame frame, int index,
                           double logProbability, double value, long modelVersion, double reward,
                           int elapsedTicks, boolean terminated, boolean truncated, long appliedTick, String nextWorld, double[] nextState,
                           String rewardContract, java.util.List<String> objectiveEvents) {
             this(session, sequence, frame, index, logProbability, value, modelVersion, reward, elapsedTicks,
-                    terminated, truncated, appliedTick, nextWorld, nextState, rewardContract, objectiveEvents, null);
+                    terminated, truncated, appliedTick, nextWorld, nextState, rewardContract, objectiveEvents, null, null, null, null);
         }
         public Transition(String session, long sequence, PolicyFrame frame, int index,
                           double logProbability, double value, long modelVersion, double reward,
                           int elapsedTicks, boolean terminated, boolean truncated, long appliedTick, String nextWorld, double[] nextState) {
             this(session, sequence, frame, index, logProbability, value, modelVersion, reward, elapsedTicks,
-                    terminated, truncated, appliedTick, nextWorld, nextState, "survival-progress/v1", java.util.List.of());
+                    terminated, truncated, appliedTick, nextWorld, nextState, "survival-progress/v1", java.util.List.of(), null, null, null, null);
         }
         public Transition {
             if (rewardEvidence != null && (!EVIDENCE_CONTRACTS.contains(rewardContract)
@@ -113,12 +123,20 @@ public final class PpoBridge implements AutoCloseable {
             nextState = nextState.clone();
             for (double feature : nextState) if (!Double.isFinite(feature) || Math.abs(feature) > 16)
                 throw new IllegalArgumentException("invalid actual next state");
+            if (appliedState != null) {
+                if (appliedState.length != PolicyFrame.STATE_SIZE)
+                    throw new IllegalArgumentException("invalid actual applied state");
+                appliedState = appliedState.clone();
+                for (double feature : appliedState) if (!Double.isFinite(feature) || Math.abs(feature) > 16)
+                    throw new IllegalArgumentException("invalid actual applied state");
+            }
             if (sequence < 0 || index < 0 || index >= frame.options().size() || modelVersion < 0
                     || elapsedTicks < 0 || elapsedTicks > 2400 || !Double.isFinite(logProbability) || logProbability > 0
                     || !Double.isFinite(value) || !Double.isFinite(reward) || Math.abs(reward) > 100)
                 throw new IllegalArgumentException("invalid actual PPO transition");
         }
         @Override public double[] nextState() { return nextState.clone(); }
+        @Override public double[] appliedState() { return appliedState == null ? null : appliedState.clone(); }
     }
     public record RecipeStock(String recipe, int filled, int required) {
         public RecipeStock {
