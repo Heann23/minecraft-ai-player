@@ -383,4 +383,21 @@ class PolicyWeightsTest {
         for (int s = 0; s < 12; s++)
             assertTrue(covered.contains(s), "slot " + s + " must be covered across rotation");
     }
+
+    @Test
+    void equipmentCandidateCapRotatesAcrossAllSlotTargetPairs() {
+        assertEquals(4, PolicyCandidates.MAX_EQUIPMENT_CANDIDATES);
+        for (int pairs : new int[] { 1, 2, 6, 8, 12, 24, 30 }) {
+            var visited = new java.util.HashSet<Integer>();
+            int cursor = 0;
+            for (int tick = 0; tick < pairs; tick++) {
+                int offer = Math.min(pairs, PolicyCandidates.MAX_EQUIPMENT_CANDIDATES);
+                for (int step = 0; step < offer; step++)
+                    visited.add(PolicyCandidates.equipmentPairIndex(cursor, step, pairs));
+                cursor = PolicyCandidates.nextEquipmentCursor(cursor, offer, pairs);
+            }
+            for (int p = 0; p < pairs; p++)
+                assertTrue(visited.contains(p), "pair " + p + " of " + pairs + " must be visited");
+        }
+    }
 }

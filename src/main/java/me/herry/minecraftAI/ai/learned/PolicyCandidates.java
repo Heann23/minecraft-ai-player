@@ -1167,6 +1167,34 @@ public final class PolicyCandidates {
         return List.copyOf(selected);
     }
 
+    static final int MAX_EQUIPMENT_CANDIDATES = 4;
+
+    static int equipmentPairIndex(int cursor, int step, int pairs) {
+        if (pairs <= 0 || step < 0)
+            throw new IllegalArgumentException("invalid equipment pair index");
+        return Math.floorMod(cursor + step, pairs);
+    }
+
+    static int nextEquipmentCursor(int cursor, int attempted, int pairs) {
+        if (pairs <= 1)
+            return 0;
+        int stride = Math.max(1, attempted);
+        while (gcd(stride, pairs) != 1)
+            stride++;
+        return Math.floorMod(cursor + stride, pairs);
+    }
+
+    private static int gcd(int a, int b) {
+        int x = Math.abs(a);
+        int y = Math.abs(b);
+        while (y != 0) {
+            int r = x % y;
+            x = y;
+            y = r;
+        }
+        return x;
+    }
+
     private void equipment(AIPlayer ai, Map<String, Candidate> found, CandidateActionContext.Context actionContext) {
         var player = ai.getPlayer();
         int held = player.getInventory().getHeldItemSlot();
@@ -1185,48 +1213,57 @@ public final class PolicyCandidates {
                 amounts[slot] = item == null || item.isEmpty() ? 0 : item.getAmount();
             }
         }
-        List<Integer> sources = equipmentSourceSlots(equipmentCursor, held, amounts, 8);
-        equipmentCursor = Math.floorMod(equipmentCursor + 1, 41);
-        for (int source : sources) {
-            if (ai.getWorkBudget().isExhausted())
-                return;
-            var from = targets.containsKey(source) ? targets.get(source) : ExactEquipment.read(player, source);
-            for (var target : targets.entrySet()) {
-                if (ai.getWorkBudget().isExhausted() || found.size() >= 512)
-                    return;
-                if (source == target.getKey())
-                    continue;
-                var choice = new ExactEquipment.Choice(ai.getWorldId(), source, target.getKey(), held, from,
-                        target.getValue());
-                if (!ExactEquipment.offered(player, choice))
-                    continue;
-                String id = "equip-exact:" + source + ":" + target.getKey();
-                double[] features = new double[PolicyFrame.ACTION_SIZE];
-                features[PrimitiveType.EQUIP_ITEM.ordinal()] = 1;
-                features[27] = Math.min(16, from.amount() / 64.0);
-                features[28] = Math.min(16, target.getValue().amount() / 64.0);
-                features[29] = source / 40.0;
-                features[56] = from.damageFraction();
-                features[58] = target.getValue().amount() == 0 ? 1 : 0;
-                features[60] = from.amount() == 0 ? 1 : 0;
-                features[59] = from.enchantments().getOrDefault("minecraft:binding_curse", 0) > 0 ? 1 : 0;
-                features[61] = choice.selectHotbar() ? 1 : 0;
-                features[62] = target.getKey() / 40.0;
-                features[63] = 1;
-                if (from.amount() > 0)
-                    features[32 + bucket(from.material(), 16)] = 1;
-                if (target.getValue().amount() > 0)
-                    features[64 + bucket(target.getValue().material(), 16)] = 1;
-                from.enchantments().forEach((key, level) -> {
-                    int index = 80 + bucket(key, 16);
-                    features[index] = Math.clamp(features[index] + level / 8.0, 0, 16);
-                });
-                CandidateActionContext.encode(features, PrimitiveType.EQUIP_ITEM,
-                        from.amount() > 0 ? from.material() : null, null, actionContext);
-                found.putIfAbsent(id,
-                        new Candidate(id, null, null, null, new PolicyFrame.Option(id, features), 0, id, choice));
-            }
+        List<Integer> sources = equipmentSourceSlots(0, held, amounts, 41);
+        List<Integer> targetSlots = List.copyOf(targets.keySet());
+        int pairs = sources.size() * targetSlots.size();
+        if (pairs <= 0) {
+            equipmentCursor = 0;
+            return;
         }
+        int offered = 0;
+        int attempted = 0;
+        int attemptLimit = Math.min(pairs, 24);
+        while (attempted < attemptLimit && offered < MAX_EQUIPMENT_CANDIDATES
+                && !ai.getWorkBudget().isExhausted() && found.size() < 512) {
+            int pairIndex = equipmentPairIndex(equipmentCursor, attempted, pairs);
+            attempted++;
+            int source = sources.get(pairIndex / targetSlots.size());
+            int dest = targetSlots.get(pairIndex % targetSlots.size());
+            if (source == dest)
+                continue;
+            var from = targets.containsKey(source) ? targets.get(source) : ExactEquipment.read(player, source);
+            var targetStack = targets.get(dest);
+            var choice = new ExactEquipment.Choice(ai.getWorldId(), source, dest, held, from, targetStack);
+            if (!ExactEquipment.offered(player, choice))
+                continue;
+            String id = "equip-exact:" + source + ":" + dest;
+            double[] features = new double[PolicyFrame.ACTION_SIZE];
+            features[PrimitiveType.EQUIP_ITEM.ordinal()] = 1;
+            features[27] = Math.min(16, from.amount() / 64.0);
+            features[28] = Math.min(16, targetStack.amount() / 64.0);
+            features[29] = source / 40.0;
+            features[56] = from.damageFraction();
+            features[58] = targetStack.amount() == 0 ? 1 : 0;
+            features[60] = from.amount() == 0 ? 1 : 0;
+            features[59] = from.enchantments().getOrDefault("minecraft:binding_curse", 0) > 0 ? 1 : 0;
+            features[61] = choice.selectHotbar() ? 1 : 0;
+            features[62] = dest / 40.0;
+            features[63] = 1;
+            if (from.amount() > 0)
+                features[32 + bucket(from.material(), 16)] = 1;
+            if (targetStack.amount() > 0)
+                features[64 + bucket(targetStack.material(), 16)] = 1;
+            from.enchantments().forEach((key, level) -> {
+                int index = 80 + bucket(key, 16);
+                features[index] = Math.clamp(features[index] + level / 8.0, 0, 16);
+            });
+            CandidateActionContext.encode(features, PrimitiveType.EQUIP_ITEM,
+                    from.amount() > 0 ? from.material() : null, null, actionContext);
+            if (found.putIfAbsent(id,
+                    new Candidate(id, null, null, null, new PolicyFrame.Option(id, features), 0, id, choice)) == null)
+                offered++;
+        }
+        equipmentCursor = nextEquipmentCursor(equipmentCursor, attempted, pairs);
     }
 
     private static List<BlockPoint> movementOffsets() {
