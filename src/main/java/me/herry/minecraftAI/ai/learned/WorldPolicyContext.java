@@ -51,10 +51,10 @@ final class WorldPolicyContext {
                             || !world.isChunkLoaded(bx >> 4, bz >> 4)) continue;
                     Material type = world.getBlockAt(bx, by, bz).getType();
                     if (!tableReachable && type == Material.CRAFTING_TABLE
-                            && NearbyBlocks.canTouch(player, new me.herry.minecraftAI.ai.util.BlockPoint(bx, by, bz), 4.5)) {
+                            && NearbyBlocks.findVisibleHit(player, new me.herry.minecraftAI.ai.util.BlockPoint(bx, by, bz), 4.5) != null) {
                         tableReachable = true;
                     } else if (!furnaceReachable && type == Material.FURNACE
-                            && NearbyBlocks.canTouch(player, new me.herry.minecraftAI.ai.util.BlockPoint(bx, by, bz), 4.5)) {
+                            && NearbyBlocks.findVisibleHit(player, new me.herry.minecraftAI.ai.util.BlockPoint(bx, by, bz), 4.5) != null) {
                         furnaceReachable = true;
                     }
                     if (tableReachable && furnaceReachable) break outer;

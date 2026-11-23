@@ -69,11 +69,18 @@ public final class FurnaceSlotAction extends AbstractAction {
             fail("existing menu or cursor is occupied");
             return;
         }
-        var center = Positions.center(player.getWorld(), transfer.target());
-        ai.getBody().lookAt(center.getX(), center.getY(), center.getZ());
+        var aim = NearbyBlocks.findVisibleHit(player, transfer.target(), handle.blockInteractionRange());
+        if (aim == null) {
+            fail("furnace blocked from interaction");
+            return;
+        }
+        ai.getBody().lookAt(aim.aimX(), aim.aimY(), aim.aimZ());
         var hit = player.rayTraceBlocks(handle.blockInteractionRange(), FluidCollisionMode.NEVER);
         if (hit == null || hit.getHitBlock() == null || hit.getHitBlockFace() == null
-                || !transfer.target().equals(Positions.of(hit.getHitBlock()))) return;
+                || !transfer.target().equals(Positions.of(hit.getHitBlock()))) {
+            if (getElapsed() > 10) fail("furnace aim timeout");
+            return;
+        }
         var point = new BlockPos(transfer.target().x(), transfer.target().y(), transfer.target().z());
         if (!handle.isWithinBlockInteractionRange(point, 0)) {
             fail("furnace outside native interaction range");

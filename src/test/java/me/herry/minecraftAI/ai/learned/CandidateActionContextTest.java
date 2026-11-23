@@ -418,4 +418,46 @@ class CandidateActionContextTest {
         assertEquals(2, direct.filled());
         assertEquals(3, direct.required());
     }
+
+    @Test void materialPropertiesEncodeFactualToolHarvestAndRecipeGraphBits() {
+        double[] pickaxe = new double[PolicyFrame.ACTION_SIZE];
+        CandidateActionContext.encodeMaterialProperties(pickaxe,
+                new CandidateActionContext.MaterialProperties(0, true, true, true, 4.0, false, false, false, false));
+        assertEquals(0.0, pickaxe[CandidateActionContext.MATERIAL_DEPENDENT_RECIPES]);
+        assertEquals(1.0, pickaxe[CandidateActionContext.MATERIAL_HAS_DURABILITY]);
+        assertEquals(1.0, pickaxe[CandidateActionContext.MATERIAL_HARVESTS_STONE]);
+        assertEquals(1.0, pickaxe[CandidateActionContext.MATERIAL_HARVESTS_IRON_ORE]);
+        assertEquals(0.25, pickaxe[CandidateActionContext.MATERIAL_STONE_DESTROY_SPEED], 1e-12);
+        assertEquals(0.0, pickaxe[CandidateActionContext.MATERIAL_HARVESTS_OBSIDIAN]);
+        assertEquals(0.0, pickaxe[CandidateActionContext.MATERIAL_IS_BLOCK]);
+        assertEquals(0.0, pickaxe[CandidateActionContext.MATERIAL_IS_FOOD]);
+        assertEquals(0.0, pickaxe[CandidateActionContext.MATERIAL_IS_FUEL]);
+
+        double[] intermediate = new double[PolicyFrame.ACTION_SIZE];
+        CandidateActionContext.encodeMaterialProperties(intermediate,
+                new CandidateActionContext.MaterialProperties(20, false, false, false, 1.0, false, true, false, true));
+        assertEquals(1.0, intermediate[CandidateActionContext.MATERIAL_DEPENDENT_RECIPES]);
+        assertEquals(0.0, intermediate[CandidateActionContext.MATERIAL_HAS_DURABILITY]);
+        assertEquals(1.0 / 16.0, intermediate[CandidateActionContext.MATERIAL_STONE_DESTROY_SPEED], 1e-12);
+        assertEquals(1.0, intermediate[CandidateActionContext.MATERIAL_IS_BLOCK]);
+        assertEquals(0.0, intermediate[CandidateActionContext.MATERIAL_IS_FOOD]);
+        assertEquals(1.0, intermediate[CandidateActionContext.MATERIAL_IS_FUEL]);
+
+        double[] blank = new double[PolicyFrame.ACTION_SIZE];
+        CandidateActionContext.encodeMaterialProperties(blank, null);
+        CandidateActionContext.encodeMaterialProperties(blank, CandidateActionContext.MaterialProperties.EMPTY);
+        for (int idx : new int[] {
+                CandidateActionContext.MATERIAL_DEPENDENT_RECIPES,
+                CandidateActionContext.MATERIAL_HAS_DURABILITY,
+                CandidateActionContext.MATERIAL_HARVESTS_STONE,
+                CandidateActionContext.MATERIAL_HARVESTS_IRON_ORE,
+                CandidateActionContext.MATERIAL_STONE_DESTROY_SPEED,
+                CandidateActionContext.MATERIAL_HARVESTS_OBSIDIAN,
+                CandidateActionContext.MATERIAL_IS_BLOCK,
+                CandidateActionContext.MATERIAL_IS_FOOD,
+                CandidateActionContext.MATERIAL_IS_FUEL
+        }) {
+            assertEquals(0.0, blank[idx]);
+        }
+    }
 }

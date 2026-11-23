@@ -2,6 +2,7 @@ package me.herry.minecraftAI.ai.action;
 
 import me.herry.minecraftAI.ai.AIPlayer;
 import me.herry.minecraftAI.ai.util.BlockPoint;
+import me.herry.minecraftAI.ai.util.Positions;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.InteractionHand;
@@ -10,6 +11,7 @@ import net.minecraft.world.inventory.ContainerInput;
 import net.minecraft.world.inventory.CraftingMenu;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
+import org.bukkit.FluidCollisionMode;
 import org.bukkit.Keyed;
 import org.bukkit.Material;
 import org.bukkit.craftbukkit.entity.CraftPlayer;
@@ -53,7 +55,7 @@ public final class VanillaCraftAction extends AbstractAction {
         }
         ai.getNavigation().stop(); ai.getBody().clearInputs();
         if (selected.needsTable()) {
-            table = NearbyBlocks.find(ai.getPlayer(), Material.CRAFTING_TABLE, 4);
+            table = NearbyBlocks.findInteractable(ai.getPlayer(), Material.CRAFTING_TABLE, 4);
             if (table == null) { fail("no reachable crafting table"); return; }
         } else initialize(ai, handle.inventoryMenu);
     }
@@ -112,19 +114,27 @@ public final class VanillaCraftAction extends AbstractAction {
         var player = ai.getPlayer(); var handle = ((CraftPlayer) player).getHandle();
         if (table != null) {
             if (!NearbyBlocks.is(player.getWorld(), table, Material.CRAFTING_TABLE)) { fail("crafting table disappeared"); return; }
-            ai.getBody().lookAt(table.x() + .5, table.y() + 1, table.z() + .5);
         }
         if (menu == null) {
             var pos = new BlockPos(table.x(), table.y(), table.z());
             if (!handle.isWithinBlockInteractionRange(pos, 0)) { fail("crafting table outside interaction range"); return; }
-            var hit = player.rayTraceBlocks(handle.blockInteractionRange());
-            if (hit == null || hit.getHitBlock() == null || !hit.getHitBlock().getLocation().equals(
-                    new org.bukkit.Location(player.getWorld(), table.x(), table.y(), table.z()))) return;
+            var aim = NearbyBlocks.findVisibleHit(player, table, handle.blockInteractionRange());
+            if (aim == null) { fail("crafting table blocked from interaction"); return; }
+            ai.getBody().lookAt(aim.aimX(), aim.aimY(), aim.aimZ());
+            var hit = player.rayTraceBlocks(handle.blockInteractionRange(), FluidCollisionMode.NEVER);
+            if (hit == null || hit.getHitBlock() == null || hit.getHitBlockFace() == null
+                    || !table.equals(Positions.of(hit.getHitBlock()))) {
+                if (getElapsed() > 10) fail("crafting table aim timeout");
+                return;
+            }
+            var impact = hit.getHitPosition();
             handle.gameMode.useItemOn(handle, handle.level(), handle.getMainHandItem(), InteractionHand.MAIN_HAND,
-                    new BlockHitResult(new Vec3(table.x() + .5, table.y() + 1, table.z() + .5), Direction.UP, pos, false));
+                    new BlockHitResult(new Vec3(impact.getX(), impact.getY(), impact.getZ()),
+                            Direction.valueOf(hit.getHitBlockFace().name()), pos, false));
             if (!(handle.containerMenu instanceof CraftingMenu opened)) { fail("vanilla workbench interaction denied"); return; }
             initialize(ai, opened); return;
         }
+        if (table != null) ai.getBody().lookAt(table.x() + 0.5, table.y() + 0.5, table.z() + 0.5);
         if (handle.containerMenu != menu || !menu.stillValid(handle)) { fail("crafting menu invalidated"); return; }
         if (!allocated) {
             if (ai.getWorkBudget().isExhausted()) return;

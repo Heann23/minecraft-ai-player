@@ -4,17 +4,93 @@ import me.herry.minecraftAI.ai.perception.PerceptionSystem;
 import me.herry.minecraftAI.ai.perception.Visibility;
 import me.herry.minecraftAI.ai.util.BlockPoint;
 import me.herry.minecraftAI.ai.util.Positions;
+import org.bukkit.FluidCollisionMode;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.World;
+import org.bukkit.attribute.Attribute;
 import org.bukkit.entity.Player;
+import org.bukkit.util.RayTraceResult;
+import org.bukkit.util.Vector;
 import org.jetbrains.annotations.Nullable;
 
 /**
  * 손이 닿는 범위에서 특정 블록(작업대, 화로 등)을 찾는다.
  */
 public final class NearbyBlocks {
+    public record AimHit(double aimX, double aimY, double aimZ, RayTraceResult hit) {}
+
+    private static final double[][] AIM_OFFSETS = {
+            {0.5, 0.5, 0.5},
+            {0.5, 0.95, 0.5},
+            {0.5, 0.05, 0.5},
+            {0.95, 0.5, 0.5},
+            {0.05, 0.5, 0.5},
+            {0.5, 0.5, 0.95},
+            {0.5, 0.5, 0.05}
+    };
+
     private NearbyBlocks() {
+    }
+
+    public static @Nullable AimHit findVisibleHit(Player player, @Nullable BlockPoint point, double reach) {
+        if (point == null) return null;
+        World world = player.getWorld();
+        if (point.y() < world.getMinHeight() || point.y() >= world.getMaxHeight() || !Positions.isLoaded(world, point)) {
+            return null;
+        }
+        Location eye = player.getEyeLocation();
+        int minX = Math.min(eye.getBlockX(), point.x()) >> 4;
+        int maxX = Math.max(eye.getBlockX(), point.x()) >> 4;
+        int minZ = Math.min(eye.getBlockZ(), point.z()) >> 4;
+        int maxZ = Math.max(eye.getBlockZ(), point.z()) >> 4;
+        for (int x = minX; x <= maxX; x++) {
+            for (int z = minZ; z <= maxZ; z++) {
+                if (!world.isChunkLoaded(x, z)) return null;
+            }
+        }
+        for (double[] off : AIM_OFFSETS) {
+            double aimX = point.x() + off[0];
+            double aimY = point.y() + off[1];
+            double aimZ = point.z() + off[2];
+            Vector dir = new Vector(aimX - eye.getX(), aimY - eye.getY(), aimZ - eye.getZ());
+            double dist = dir.length();
+            if (dist < 1.0E-6 || dist > reach) continue;
+            RayTraceResult hit = world.rayTraceBlocks(eye, dir.normalize(), Math.min(reach, dist + 0.25),
+                    FluidCollisionMode.NEVER, false);
+            if (hit != null && hit.getHitBlock() != null && hit.getHitBlockFace() != null
+                    && Positions.of(hit.getHitBlock()).equals(point)) {
+                return new AimHit(aimX, aimY, aimZ, hit);
+            }
+        }
+        return null;
+    }
+
+    public static @Nullable BlockPoint findInteractable(Player player, Material material, int radius) {
+        var attr = player.getAttribute(Attribute.BLOCK_INTERACTION_RANGE);
+        double reach = Math.min(radius + 0.5, attr != null ? attr.getValue() : 4.5);
+        World world = player.getWorld();
+        Location eye = player.getEyeLocation();
+        int ex = eye.getBlockX();
+        int ey = eye.getBlockY();
+        int ez = eye.getBlockZ();
+
+        BlockPoint best = null;
+        double bestDistance = radius + 0.5;
+        for (int dx = -radius; dx <= radius; dx++) {
+            for (int dz = -radius; dz <= radius; dz++) {
+                for (int dy = -radius; dy <= radius; dy++) {
+                    BlockPoint point = new BlockPoint(ex + dx, ey + dy, ez + dz);
+                    if (!is(world, point, material)) continue;
+                    double distance = Positions.center(world, point).distance(eye);
+                    if (distance <= bestDistance && findVisibleHit(player, point, reach) != null) {
+                        bestDistance = distance;
+                        best = point;
+                    }
+                }
+            }
+        }
+        return best;
     }
 
     // 눈에서 radius + 0.5 칸 안에 있고 손이 닿는 가장 가까운 블록. 없으면 null.

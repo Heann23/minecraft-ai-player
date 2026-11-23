@@ -48,6 +48,15 @@ public final class CandidateActionContext {
     public static final int BREAKS_REQUIRED_TABLE_FEASIBILITY = 298;
     public static final int BREAKS_TABLE_AND_OBJECTIVE_FEASIBILITY = 299;
     public static final int ENABLES_TABLE_AND_OBJECTIVE_FEASIBILITY = 300;
+    public static final int MATERIAL_DEPENDENT_RECIPES = 18;
+    public static final int MATERIAL_HAS_DURABILITY = 19;
+    public static final int MATERIAL_HARVESTS_STONE = 20;
+    public static final int MATERIAL_HARVESTS_IRON_ORE = 21;
+    public static final int MATERIAL_STONE_DESTROY_SPEED = 22;
+    public static final int MATERIAL_HARVESTS_OBSIDIAN = 23;
+    public static final int MATERIAL_IS_BLOCK = 301;
+    public static final int MATERIAL_IS_FOOD = 302;
+    public static final int MATERIAL_IS_FUEL = 303;
     private static final int IMPACT_START = CONSUMES_OBJECTIVE_INGREDIENT;
     private static final int IMPACT_END = ENABLES_TABLE_AND_OBJECTIVE_FEASIBILITY;
     private static final int ALLOCATION_SEARCH_LIMIT = 4096;
@@ -190,6 +199,27 @@ public final class CandidateActionContext {
             features[RECIPE_INGREDIENT_UNITS] = Math.min(16, totalUnits / 9.0);
             features[RECIPE_INGREDIENT_GROUPS] = Math.min(16, recipe.ingredients().size() / 9.0);
         }
+    }
+
+    public record MaterialProperties(int dependentRecipes, boolean hasDurability, boolean harvestsStone,
+                                     boolean harvestsIronOre, double stoneDestroySpeed, boolean harvestsObsidian,
+                                     boolean block, boolean food, boolean fuel) {
+        public static final MaterialProperties EMPTY =
+                new MaterialProperties(0, false, false, false, 0.0, false, false, false, false);
+    }
+
+    public static void encodeMaterialProperties(double[] features, MaterialProperties props) {
+        if (features.length != PolicyFrame.ACTION_SIZE) throw new IllegalArgumentException("candidate action context shape");
+        if (props == null) return;
+        features[MATERIAL_DEPENDENT_RECIPES] = Math.clamp(props.dependentRecipes() / 16.0, 0, 1);
+        features[MATERIAL_HAS_DURABILITY] = props.hasDurability() ? 1 : 0;
+        features[MATERIAL_HARVESTS_STONE] = props.harvestsStone() ? 1 : 0;
+        features[MATERIAL_HARVESTS_IRON_ORE] = props.harvestsIronOre() ? 1 : 0;
+        features[MATERIAL_STONE_DESTROY_SPEED] = Math.clamp(props.stoneDestroySpeed() / 16.0, 0, 1);
+        features[MATERIAL_HARVESTS_OBSIDIAN] = props.harvestsObsidian() ? 1 : 0;
+        features[MATERIAL_IS_BLOCK] = props.block() ? 1 : 0;
+        features[MATERIAL_IS_FOOD] = props.food() ? 1 : 0;
+        features[MATERIAL_IS_FUEL] = props.fuel() ? 1 : 0;
     }
 
     /**

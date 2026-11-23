@@ -112,6 +112,9 @@ public final class PolicyCandidates {
     private long recipeRevision = Long.MIN_VALUE;
     private final CandidateDiscovery discovery = new CandidateDiscovery();
     private final CandidateActionContext candidateContext = new CandidateActionContext();
+    private final Map<Material, CandidateActionContext.MaterialProperties> materialPropertiesCache =
+            new EnumMap<>(Material.class);
+    private long materialPropertiesRevision = Long.MIN_VALUE;
     private int recipeOptions;
     private int recipesChecked;
     private boolean recipeScanComplete;
@@ -155,7 +158,7 @@ public final class PolicyCandidates {
         @Override
         public boolean getAsBoolean() {
             if (available == null)
-                available = NearbyBlocks.find(player, Material.CRAFTING_TABLE, 4) != null;
+                available = NearbyBlocks.findInteractable(player, Material.CRAFTING_TABLE, 4) != null;
             return available;
         }
 
@@ -1361,8 +1364,10 @@ public final class PolicyCandidates {
                 int index = 80 + bucket(key, 16);
                 features[index] = Math.clamp(features[index] + level / 8.0, 0, 16);
             });
+            String equipMaterial = from.amount() > 0 ? from.material() : null;
             CandidateActionContext.encode(features, PrimitiveType.EQUIP_ITEM,
-                    from.amount() > 0 ? from.material() : null, null, actionContext);
+                    equipMaterial, null, actionContext);
+            CandidateActionContext.encodeMaterialProperties(features, resolveMaterialProperties(ai, equipMaterial));
             if (found.putIfAbsent(id,
                     new Candidate(id, null, null, null, new PolicyFrame.Option(id, features), 0, id, choice)) == null)
                 offered++;
@@ -1641,6 +1646,7 @@ public final class PolicyCandidates {
                 || command instanceof PrimitiveCommand.FurnaceTransfer transfer
                         && transfer.slot() == PrimitiveCommand.FurnaceSlot.RESULT;
         CandidateActionContext.encode(features, type, directMaterial, recipe, actionContext, takesObservedItem);
+        CandidateActionContext.encodeMaterialProperties(features, resolveMaterialProperties(ai, directMaterial));
         found.put(id,
                 new Candidate(id, command, recipe, consumable, new PolicyFrame.Option(id, features, blockEvidence)));
         return true;
@@ -1672,6 +1678,43 @@ public final class PolicyCandidates {
             }
         }
         return List.copyOf(selected);
+    }
+
+    private CandidateActionContext.MaterialProperties resolveMaterialProperties(AIPlayer ai, String directMaterial) {
+        if (directMaterial == null || directMaterial.isBlank() || Bukkit.getServer() == null) {
+            return CandidateActionContext.MaterialProperties.EMPTY;
+        }
+        long revision = ai.getCrafting().revision();
+        if (materialPropertiesRevision != revision) {
+            materialPropertiesCache.clear();
+            materialPropertiesRevision = revision;
+        }
+        Material mat = Material.getMaterial(directMaterial);
+        if (mat == null || mat.isAir()) {
+            return CandidateActionContext.MaterialProperties.EMPTY;
+        }
+        return materialPropertiesCache.computeIfAbsent(mat, m -> {
+            if (!m.isItem()) {
+                return new CandidateActionContext.MaterialProperties(
+                        0, false, false, false, 0.0, false, m.isBlock(), false, false);
+            }
+            var sample = new org.bukkit.inventory.ItemStack(m);
+            var nms = org.bukkit.craftbukkit.inventory.CraftItemStack.asNMSCopy(sample);
+            int dep = ai.getCrafting().dependentRecipeCount(m);
+            boolean durability = nms.has(net.minecraft.core.component.DataComponents.MAX_DAMAGE);
+            var stone = net.minecraft.world.level.block.Blocks.STONE.defaultBlockState();
+            var ironOre = net.minecraft.world.level.block.Blocks.IRON_ORE.defaultBlockState();
+            var obsidian = net.minecraft.world.level.block.Blocks.OBSIDIAN.defaultBlockState();
+            boolean harvestsStone = nms.isCorrectToolForDrops(stone);
+            boolean harvestsIron = nms.isCorrectToolForDrops(ironOre);
+            double stoneSpeed = nms.getDestroySpeed(stone);
+            boolean harvestsObsidian = nms.isCorrectToolForDrops(obsidian);
+            boolean food = nms.has(net.minecraft.core.component.DataComponents.FOOD);
+            boolean fuel = nms.has(net.minecraft.core.component.DataComponents.COOKING_FUEL);
+            return new CandidateActionContext.MaterialProperties(
+                    dep, durability, harvestsStone, harvestsIron, stoneSpeed, harvestsObsidian,
+                    m.isBlock(), food, fuel);
+        });
     }
 
     static String approachMaterial(String id, String identity) {

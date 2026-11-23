@@ -89,6 +89,12 @@ public final class CraftingSystem {
         return List.copyOf(choices.values());
     }
 
+    public int dependentRecipeCount(Material material) {
+        if (material == null) return 0;
+        warmUp();
+        return ingredientOptionIndex.getOrDefault(material, List.of()).size();
+    }
+
     /**
      * Sound feasibility pre-filter over registered recipes sharing an owned ingredient.
      * Eliminates recipes missing required ingredients or a reachable crafting table so impossible 3x3 recipes
