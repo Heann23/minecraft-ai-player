@@ -353,4 +353,34 @@ class PolicyWeightsTest {
         assertEquals("move:149", selected.getFirst().id());
         assertTrue(selected.stream().anyMatch(c -> c.id().equals("craft:recipe")));
     }
+
+    @Test
+    void equipmentSourceSlotsDeduplicatesEmptyHotbarAndStorageWhileKeepingOccupiedSlots() {
+        int[] sparse = new int[41];
+        sparse[0] = 8; // held OAK_PLANKS
+        sparse[1] = 4; // STICK
+        List<Integer> selected = PolicyCandidates.equipmentSourceSlots(0, 0, sparse, 8);
+        // Occupied (0, 1) + at most 1 empty hotbar representative + at most 1 empty storage representative
+        assertEquals(4, selected.size());
+        assertTrue(selected.contains(0));
+        assertTrue(selected.contains(1));
+        assertEquals(1, selected.stream().filter(s -> s < 9 && sparse[s] == 0).count());
+        assertEquals(1, selected.stream().filter(s -> s >= 9 && s < 36 && sparse[s] == 0).count());
+
+        // When held slot is empty and only armor/offhand is empty, still bounded without held duplication
+        sparse[0] = 0;
+        List<Integer> emptyHeld = PolicyCandidates.equipmentSourceSlots(0, 0, sparse, 8);
+        assertFalse(emptyHeld.contains(0));
+        assertEquals(1, emptyHeld.stream().filter(s -> s < 9 && sparse[s] == 0).count());
+
+        // Rotating cursor covers all occupied slots when more than limit=8 slots are occupied
+        int[] dense = new int[41];
+        for (int s = 0; s < 12; s++)
+            dense[s] = 1;
+        var covered = new java.util.HashSet<Integer>();
+        for (int cursor = 0; cursor < 41; cursor++)
+            covered.addAll(PolicyCandidates.equipmentSourceSlots(cursor, 0, dense, 8));
+        for (int s = 0; s < 12; s++)
+            assertTrue(covered.contains(s), "slot " + s + " must be covered across rotation");
+    }
 }

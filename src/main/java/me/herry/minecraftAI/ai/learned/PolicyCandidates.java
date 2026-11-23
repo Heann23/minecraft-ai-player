@@ -682,7 +682,7 @@ public final class PolicyCandidates {
         var recipes = ai.getCrafting().feasibleRecipeOptions(stock, tableAccess);
         recipeOptions = recipes.size();
         recipesChecked = 0;
-        while (recipesChecked < Math.min(64, recipes.size()) && crafted < 16 && !ai.getWorkBudget().isExhausted()) {
+        while (recipesChecked < Math.min(64, recipes.size()) && crafted < 24 && !ai.getWorkBudget().isExhausted()) {
             var recipe = recipes.get(Math.floorMod(recipeCursor++, recipes.size()));
             recipesChecked++;
             Material result = Material.matchMaterial(recipe.result());
@@ -1139,6 +1139,34 @@ public final class PolicyCandidates {
         return false; // A rotating subset never claims that unoffered key inputs do not exist.
     }
 
+    static List<Integer> equipmentSourceSlots(int cursor, int held, int[] amounts, int limit) {
+        if (amounts.length != 41 || limit < 0)
+            throw new IllegalArgumentException("invalid equipment slot scan");
+        List<Integer> selected = new ArrayList<>(limit);
+        boolean emptyHotbar = false;
+        boolean emptyStorage = false;
+        for (int step = 0; step < 41 && selected.size() < limit; step++) {
+            int slot = Math.floorMod(cursor + step, 41);
+            if (amounts[slot] > 0) {
+                selected.add(slot);
+                continue;
+            }
+            if (slot >= 36)
+                continue;
+            if (slot < 9) {
+                if (slot == held || emptyHotbar)
+                    continue;
+                emptyHotbar = true;
+            } else {
+                if (emptyStorage)
+                    continue;
+                emptyStorage = true;
+            }
+            selected.add(slot);
+        }
+        return List.copyOf(selected);
+    }
+
     private void equipment(AIPlayer ai, Map<String, Candidate> found, CandidateActionContext.Context actionContext) {
         var player = ai.getPlayer();
         int held = player.getInventory().getHeldItemSlot();
@@ -1148,13 +1176,21 @@ public final class PolicyCandidates {
                 return;
             targets.put(slot, ExactEquipment.read(player, slot));
         }
-        int inspected = 0;
-        while (inspected < 8 && !ai.getWorkBudget().isExhausted()) {
-            int source = Math.floorMod(equipmentCursor++, 41);
-            inspected++;
+        int[] amounts = new int[41];
+        for (int slot = 0; slot < 41; slot++) {
+            if (targets.containsKey(slot)) {
+                amounts[slot] = targets.get(slot).amount();
+            } else {
+                var item = player.getInventory().getItem(slot);
+                amounts[slot] = item == null || item.isEmpty() ? 0 : item.getAmount();
+            }
+        }
+        List<Integer> sources = equipmentSourceSlots(equipmentCursor, held, amounts, 8);
+        equipmentCursor = Math.floorMod(equipmentCursor + 1, 41);
+        for (int source : sources) {
+            if (ai.getWorkBudget().isExhausted())
+                return;
             var from = targets.containsKey(source) ? targets.get(source) : ExactEquipment.read(player, source);
-            if (source >= 36 && from.amount() == 0)
-                continue;
             for (var target : targets.entrySet()) {
                 if (ai.getWorkBudget().isExhausted() || found.size() >= 512)
                     return;
