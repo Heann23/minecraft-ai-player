@@ -144,4 +144,41 @@ class TrainingEpisodeTest {
         var second = episode.finish(frame(22), body(20), Map.of(), false, false, 0);
         assertArrayEquals(first.nextState(), second.appliedState());
     }
+
+    @Test void focusedRecipeProgressV6PrioritizesGoalCompletionAndPenalizesIngredientWaste() {
+        var memory = new PolicyTaskMemory();
+        memory.acquire(WORLD, "WOODEN_PICKAXE", 1, 1);
+        var beforeGoal = memory.observe(WORLD, Map.of("OAK_PLANKS", 3, "STICK", 2));
+        var requested = new PolicyFrame(WORLD, 1, new double[PolicyFrame.STATE_SIZE], OPTIONS, false,
+                null, beforeGoal);
+        var beforeStock = new PpoBridge.RecipeStock("minecraft:wooden_pickaxe", 9, 9);
+
+        // Case A: decorative craft consumes ingredients (9/9 -> 6/9) despite 1 new item discovery
+        var episode = new TrainingEpisode();
+        episode.begin(new PolicyCandidates.Capture(requested, List.of(), body(20), Map.of("OAK_PLANKS", 3, "STICK", 2)),
+                response(), actual(20, Map.of("OAK_PLANKS", 3, "STICK", 2)), 1, beforeStock);
+        var wasteNext = new PolicyFrame(WORLD, 6, new double[PolicyFrame.STATE_SIZE], OPTIONS, false,
+                null, memory.observe(WORLD, Map.of("OAK_BUTTON", 1, "STICK", 2)));
+        var wasteStock = new PpoBridge.RecipeStock("minecraft:wooden_pickaxe", 6, 9);
+        var waste = episode.finish(wasteNext, body(20), Map.of("OAK_BUTTON", 1, "STICK", 2), false, false,
+                0, List.of(), null, wasteStock);
+        assertEquals("survival-progress/v6", waste.rewardContract());
+        double expectedWaste = 5 * 0.00001 + 0.02 + 2.0 * (Math.pow(0.99997, 5) * (6.0 / 9.0) - 1.0);
+        assertEquals(expectedWaste, waste.reward(), 1e-9);
+        assertTrue(waste.reward() < -0.6, "ingredient waste must remain strongly negative despite decorative discovery");
+
+        // Case B: actual goal completion + advancement
+        var completeNext = new PolicyFrame(WORLD, 6, new double[PolicyFrame.STATE_SIZE], OPTIONS, false,
+                null, memory.observe(WORLD, Map.of("WOODEN_PICKAXE", 1)));
+        var completion = memory.settleCompletion(beforeGoal, completeNext.taskMemory(), true).orElseThrow();
+        episode.begin(new PolicyCandidates.Capture(requested, List.of(), body(20), Map.of("OAK_PLANKS", 3, "STICK", 2)),
+                response(), actual(20, Map.of("OAK_PLANKS", 3, "STICK", 2)), 1, beforeStock);
+        var completeStock = new PpoBridge.RecipeStock("minecraft:wooden_pickaxe", 6, 9);
+        var complete = episode.finish(completeNext, body(20), Map.of("WOODEN_PICKAXE", 1), false, false,
+                1, List.of("advancement:minecraft:story/root"), completion, completeStock);
+        assertEquals("survival-progress/v6", complete.rewardContract());
+        double expectedComplete = 5 * 0.00001 + 0.02 + 3.0 + 2.0 * (Math.pow(0.99997, 5) - 1.0) + 4.0;
+        assertEquals(expectedComplete, complete.reward(), 1e-9);
+        assertTrue(complete.reward() > 7.0);
+    }
 }

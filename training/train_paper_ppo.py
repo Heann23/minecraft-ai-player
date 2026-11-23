@@ -45,8 +45,10 @@ def validate_transition(row: dict):
     if set(row) - {"rewardContract", "objectiveEvents", "rewardEvidence", "nextTaskMemory", "taskCompletion", "appliedState"} != required:
         raise ValueError("transition schema mismatch; Teacher labels are not accepted")
     contract = row.get("rewardContract", "survival-progress/v1")
-    recipe_progress = contract in ("survival-progress/v4", "survival-progress/v5")
-    evidence_contracts = ("survival-progress/v2", "survival-progress/v3", "survival-progress/v4", "survival-progress/v5")
+    focused_recipe = contract == "survival-progress/v6"
+    recipe_progress = contract in ("survival-progress/v4", "survival-progress/v5", "survival-progress/v6")
+    evidence_contracts = ("survival-progress/v2", "survival-progress/v3", "survival-progress/v4",
+                          "survival-progress/v5", "survival-progress/v6")
     if contract not in ("survival-progress/v1", *evidence_contracts):
         raise ValueError("unsupported observed reward contract")
     events = row.get("objectiveEvents", [])
@@ -115,18 +117,27 @@ def validate_transition(row: dict):
         if any(evidence[key] < 0 for key in ("healthBefore", "healthAfter", "saturationBefore", "saturationAfter", "discoveries")) \
                 or any(not 0 <= evidence[key] <= 20 for key in ("foodBefore", "foodAfter")):
             raise ValueError("invalid reward evidence range")
-        max_recipe_units = 18 if contract == "survival-progress/v5" else 9
-        preparation_reward = validate_recipe_preparation(row, evidence["recipePreparation"], max_recipe_units) if recipe_progress else 0
-        expected = max(-100, min(100, row["elapsedTicks"] * 0.0001
-                       + (evidence["healthAfter"] - evidence["healthBefore"]) * 0.05
-                       + evidence["discoveries"] * 0.2 + evidence["objectiveReward"] - (10 if row["terminated"] else 0)
-                       + preparation_reward))
-        expected = max(-100, min(100, expected + (1 if completion is not None else 0)))
+        max_recipe_units = 18 if contract in ("survival-progress/v5", "survival-progress/v6") else 9
+        prep_scale = 2.0 if focused_recipe else 0.5
+        preparation_reward = validate_recipe_preparation(
+            row, evidence["recipePreparation"], max_recipe_units, prep_scale) if recipe_progress else 0
+        if focused_recipe:
+            base = (row["elapsedTicks"] * 0.00001
+                    + (evidence["healthAfter"] - evidence["healthBefore"]) * 0.05
+                    + evidence["discoveries"] * 0.02 + evidence["objectiveReward"] * 3.0
+                    - (10 if row["terminated"] else 0) + preparation_reward)
+            expected = max(-100, min(100, max(-100, min(100, base)) + (4.0 if completion is not None else 0)))
+        else:
+            expected = max(-100, min(100, row["elapsedTicks"] * 0.0001
+                           + (evidence["healthAfter"] - evidence["healthBefore"]) * 0.05
+                           + evidence["discoveries"] * 0.2 + evidence["objectiveReward"] - (10 if row["terminated"] else 0)
+                           + preparation_reward))
+            expected = max(-100, min(100, expected + (1 if completion is not None else 0)))
         if not math.isclose(expected, row["reward"], rel_tol=0, abs_tol=1e-9):
             raise ValueError("actual reward evidence mismatch")
 
 
-def validate_recipe_preparation(row, preparation, max_recipe_units):
+def validate_recipe_preparation(row, preparation, max_recipe_units, scale=0.5):
     if not isinstance(preparation, dict) or set(preparation) != {"before", "after", "achieved"}:
         raise ValueError("invalid recipe preparation schema")
     for endpoint in (preparation["before"], preparation["after"]):
@@ -150,7 +161,7 @@ def validate_recipe_preparation(row, preparation, max_recipe_units):
         current = 0
     elif preparation["achieved"]:
         current = 1
-    return 0.5 * (0.99997 ** row["elapsedTicks"] * current - previous)
+    return scale * (0.99997 ** row["elapsedTicks"] * current - previous)
 
 
 def resume_checkpoint(path: Path, *, upgrade_context=False, allow_initial=False):

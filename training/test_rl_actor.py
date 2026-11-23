@@ -379,6 +379,44 @@ class ActorTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "observed recipe stock"):
             validate_transition(dict(sample, rewardContract="survival-progress/v4"))
 
+    def test_focused_recipe_progress_v6_validates_scaled_reward_and_rejects_v5_reward(self):
+        model = ActorCritic(7, hidden=4)
+        sample = row(model, session=str(uuid.uuid4()))
+        sample.pop("nextValue")
+        objective = {"id": str(uuid.uuid4()), "world": sample["nextWorld"],
+                     "goal": {"item": "WOODEN_PICKAXE", "count": 1}, "startedTick": 1}
+        sample["frame"]["taskMemory"] = {"objective": objective, "worldMatches": True}
+        endpoint = {"recipe": "minecraft:wooden_pickaxe", "required": 9}
+        preparation = {"before": dict(endpoint, filled=9), "after": dict(endpoint, filled=6), "achieved": False}
+        sample.update(
+            rewardContract="survival-progress/v6",
+            objectiveEvents=[],
+            nextTaskMemory=dict(objective=objective, worldMatches=True, currentlyAchieved=False),
+            rewardEvidence={
+                "schema": "actual-reward-evidence/v1", "healthBefore": 20, "healthAfter": 20,
+                "foodBefore": 20, "foodAfter": 20, "saturationBefore": 0, "saturationAfter": 0,
+                "airBefore": 300, "airAfter": 300, "discoveries": 1, "objectiveReward": 0,
+                "recipePreparation": preparation,
+            },
+        )
+        discount = 0.99997 ** sample["elapsedTicks"]
+        sample["reward"] = sample["elapsedTicks"] * 0.00001 + 0.02 + 2.0 * (discount * (6 / 9) - 1.0)
+        validate_transition(sample)
+        v5_reward = sample["elapsedTicks"] * 0.0001 + 0.2 + 0.5 * (discount * (6 / 9) - 1.0)
+        with self.assertRaisesRegex(ValueError, "reward evidence mismatch"):
+            validate_transition(dict(sample, reward=v5_reward))
+
+        preparation["achieved"] = True
+        sample["nextTaskMemory"].update(currentlyAchieved=True, owned=1)
+        sample["objectiveEvents"] = ["advancement:minecraft:story/root"]
+        sample["rewardEvidence"]["objectiveReward"] = 1
+        sample["taskCompletion"] = dict(
+            objectiveId=objective["id"], world=sample["nextWorld"],
+            item="WOODEN_PICKAXE", required=1, beforeOwned=0, afterOwned=1,
+        )
+        sample["reward"] = sample["elapsedTicks"] * 0.00001 + 0.02 + 3.0 + 2.0 * (discount - 1.0) + 4.0
+        validate_transition(sample)
+
     def test_reward_versions_preserve_legacy_rows_and_validate_actual_progress_event_metadata(self):
         model = ActorCritic(7, hidden=4)
         sample = row(model, session=str(uuid.uuid4()))

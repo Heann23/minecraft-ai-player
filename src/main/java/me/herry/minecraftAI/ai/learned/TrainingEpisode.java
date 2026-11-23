@@ -66,9 +66,13 @@ public final class TrainingEpisode {
         var evidence = new PpoBridge.RewardEvidence("actual-reward-evidence/v1", beforeBody.health(), body.health(),
                 beforeBody.foodLevel(), body.foodLevel(), beforeBody.saturation(), body.saturation(),
                 beforeBody.remainingAir(), body.remainingAir(), discoveries, actualObjectiveReward, preparation);
-        double reward = Math.clamp(evidence.total((int) elapsed, terminated) + (completion == null ? 0 : 1), -100, 100);
-        String contract = preparation != null ? PpoBridge.Transition.RECIPE_PROGRESS
+        String contract = preparation != null ? PpoBridge.Transition.FOCUSED_RECIPE_PROGRESS
                 : completion == null ? REWARD_CONTRACT : "survival-progress/v3";
+        boolean focused = PpoBridge.Transition.FOCUSED_RECIPE_PROGRESS.equals(contract);
+        double reward = Math.clamp((focused
+                ? evidence.focusedTotal((int) elapsed, terminated)
+                : evidence.total((int) elapsed, terminated))
+                + (completion == null ? 0 : (focused ? 4.0 : 1.0)), -100, 100);
         var transition = new PpoBridge.Transition(session, sequence++, before, chosen.index(), chosen.logProbability(),
                 chosen.value(), chosen.modelVersion(), reward, (int) elapsed, terminated, truncated, appliedTick,
                 next.world().toString(), next.state(), contract, objectiveEvents, evidence, next.taskMemory(), completion, beforeState);
