@@ -14,7 +14,6 @@ import me.herry.minecraftAI.ai.action.WaitAction;
 import me.herry.minecraftAI.ai.memory.MemoryType;
 import me.herry.minecraftAI.ai.navigation.PathGoal;
 import me.herry.minecraftAI.ai.perception.TreeSpotter;
-import me.herry.minecraftAI.ai.team.Phrases;
 import me.herry.minecraftAI.ai.team.ShaftRegistry;
 import me.herry.minecraftAI.ai.util.BlockPoint;
 import me.herry.minecraftAI.ai.util.Positions;
@@ -314,7 +313,6 @@ public final class GatherPlans {
         if (source == null || sources > MAX_SOURCES_TO_PLUG) return List.of();
 
         ai.debug("Plugging water source at " + source);
-        ai.getTeam().say(ai, Phrases.pluggingWater(), false);
         return List.of(new MoveToAction(PathGoal.reach(source, BREAK_REACH), false), new PlugWaterAction(source));
     }
 

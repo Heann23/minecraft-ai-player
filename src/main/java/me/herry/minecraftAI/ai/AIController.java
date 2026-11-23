@@ -1,9 +1,6 @@
 package me.herry.minecraftAI.ai;
 
 import me.herry.minecraftAI.ai.combat.CombatSystem;
-import me.herry.minecraftAI.ai.comm.CommunicationHub;
-import me.herry.minecraftAI.ai.comm.IncomingMessage;
-import me.herry.minecraftAI.ai.comm.MessageSource;
 import me.herry.minecraftAI.ai.crafting.CraftingSystem;
 import me.herry.minecraftAI.ai.experience.Experience;
 import me.herry.minecraftAI.ai.experience.ExperienceSink;
@@ -66,7 +63,6 @@ public final class AIController {
     private final JavaPlugin plugin;
     private final AIConfig config;
     private final CraftingSystem crafting = new CraftingSystem();
-    private final CommunicationHub hub;
     private final TeamChat team;
     private final WorkBudget budget;
     private final AIServices services;
@@ -86,12 +82,11 @@ public final class AIController {
     /**
      * @param store AI 상태를 저장할 곳. null 이면 저장하지 않는다.
      */
-    public AIController(JavaPlugin plugin, AIConfig config, AIDebugger debugger, CommunicationHub hub, @Nullable AIStateStore store) {
+    public AIController(JavaPlugin plugin, AIConfig config, AIDebugger debugger, @Nullable AIStateStore store) {
         this.plugin = plugin;
         this.config = config;
-        this.hub = hub;
         this.store = store;
-        this.team = new TeamChat(this::getAll, hub);
+        this.team = new TeamChat(this::getAll);
         this.budget = new WorkBudget(config.tickBudgetNanos);
         this.experience = !config.recordExperience ? null : new JsonlExperienceWriter(
                 plugin.getDataFolder().toPath().resolve("training-data"), config.experienceMaxBytes, plugin.getLogger()::warning);
@@ -131,7 +126,6 @@ public final class AIController {
 
         AIPlayer ai = new AIPlayer(name, body, services, skin);
         entries.put(key(name), new Entry(ai, body));
-        hub.join(new Conversation(ai));
         refreshTickList();
         return SpawnResult.OK;
     }
@@ -147,27 +141,6 @@ public final class AIController {
             AISkin skin = error == null ? found : null;
             Bukkit.getScheduler().runTask(plugin, () -> callback.accept(spawn(name, location, skin), skin != null));
         });
-    }
-
-    /**
-     * 사람의 채팅을 AI 들에게 전한다. 채팅 이벤트는 다른 스레드에서 오므로 메인 스레드로 넘겨서 처리한다.
-     * 일을 시킬 권한이 있는지도 메인 스레드에서 확인한다.
-     */
-    public void handlePlayerChat(UUID senderId, String senderName, String message) {
-        if (entries.isEmpty()) return;
-        Bukkit.getScheduler().runTask(plugin, () -> {
-            Player sender = Bukkit.getPlayer(senderId);
-            // AI 끼리 주고받는 말에는 반응하지 않는다.
-            if (sender == null || getByEntity(sender) != null) return;
-            hub.receive(IncomingMessage.inGame(senderName, message, sender.hasPermission(COMMAND_PERMISSION)));
-        });
-    }
-
-    /**
-     * 관리자 명령(/ai say)으로 AI 한 명에게 직접 말을 건다. 명령을 쓸 수 있는 사람이므로 일을 시킬 수도 있다.
-     */
-    public void tell(AIPlayer ai, String senderName, String message) {
-        hub.receive(new IncomingMessage(MessageSource.SYSTEM, senderName, ai.getName() + " " + message, false, true));
     }
 
     /**
@@ -246,7 +219,6 @@ public final class AIController {
         entries.remove(key(player.getName()));
         views.closeAll(entry.ai);
         team.forget(entry.ai.getName());
-        hub.leave(entry.ai.getName());
         entry.ai.dispose();
         if (store != null) store.delete(entry.ai.getName());
         refreshTickList();
@@ -394,7 +366,6 @@ public final class AIController {
         entry.removing = true;
         views.closeAll(entry.ai);
         team.forget(entry.ai.getName());
-        hub.leave(entry.ai.getName());
         try {
             entry.ai.dispose();
         } finally {

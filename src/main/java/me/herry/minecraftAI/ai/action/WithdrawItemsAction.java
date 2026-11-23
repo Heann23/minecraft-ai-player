@@ -4,7 +4,6 @@ import me.herry.minecraftAI.ai.AIPlayer;
 import me.herry.minecraftAI.ai.primitive.PrimitiveAction;
 import me.herry.minecraftAI.ai.primitive.PrimitiveTarget;
 import me.herry.minecraftAI.ai.primitive.PrimitiveType;
-import me.herry.minecraftAI.ai.team.Phrases;
 import me.herry.minecraftAI.ai.util.BlockPoint;
 import org.bukkit.Material;
 import org.bukkit.entity.Player;
@@ -59,7 +58,6 @@ public final class WithdrawItemsAction extends ChestAction implements PrimitiveA
             fail("nothing to take");
             return;
         }
-        ai.getTeam().say(ai, Phrases.fetched(), false);
         succeed();
     }
 

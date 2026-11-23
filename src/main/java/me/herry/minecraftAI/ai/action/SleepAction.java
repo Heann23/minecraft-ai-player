@@ -5,7 +5,6 @@ import me.herry.minecraftAI.ai.memory.MemoryType;
 import me.herry.minecraftAI.ai.primitive.PrimitiveAction;
 import me.herry.minecraftAI.ai.primitive.PrimitiveTarget;
 import me.herry.minecraftAI.ai.primitive.PrimitiveType;
-import me.herry.minecraftAI.ai.team.Phrases;
 import me.herry.minecraftAI.ai.util.BlockPoint;
 import me.herry.minecraftAI.ai.util.Positions;
 import me.herry.minecraftAI.ai.world.Base;
@@ -72,7 +71,6 @@ public final class SleepAction extends AbstractAction implements PrimitiveAction
 
         if (!player.isSleeping()) {
             // 아침이 되어 일어났다.
-            ai.getTeam().say(ai, Phrases.goodMorning(), false);
             succeed();
         } else if (getElapsed() - sleptAt > MAX_SLEEP_TICKS) {
             player.wakeup(true);

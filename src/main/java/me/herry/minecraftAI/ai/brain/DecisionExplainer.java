@@ -9,7 +9,7 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * 판단 기록을 사람이 읽는 설명으로 바꾼다. "/ai why" 와 채팅의 "왜 그거 하고 있어?" 가 같은 설명을 쓴다.
+ * /ai why 에서 판단 기록을 사람이 읽을 수 있게 표시한다.
  */
 public final class DecisionExplainer {
     public static final String FINAL_GOAL = "엔더 드래곤 처치";
@@ -37,13 +37,6 @@ public final class DecisionExplainer {
         lines.add("현재 행동: " + action);
         lines.add("이유: " + trace.reason());
         return lines;
-    }
-
-    // 채팅으로 대답할 때 쓰는 짧은 한두 문장짜리 설명
-    public static String brief(@Nullable DecisionTrace trace) {
-        if (trace == null) return "아직 아무것도 정하지 않았어요.";
-        String goal = trace.stage() == Stage.CLEARED ? "" : " 지금은 '" + trace.stage().label() + "' 단계예요.";
-        return trace.reason() + "." + goal;
     }
 
     // 고려했던 후보들을 점수와 함께 보여 준다 (디버그용).

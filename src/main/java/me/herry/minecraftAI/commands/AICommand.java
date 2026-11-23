@@ -20,7 +20,6 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 import java.util.function.Function;
@@ -31,7 +30,7 @@ import java.util.function.Function;
 public class AICommand implements TabExecutor {
     public static final String PERMISSION = "minecraftai.admin";
     private static final List<String> SUB_COMMANDS = List.of("spawn", "remove", "start", "stop", "status", "inv", "goal", "debug",
-            "why", "brain", "plan", "observe", "learn", "memory", "perf", "home", "say", "save");
+            "why", "brain", "plan", "observe", "learn", "memory", "perf", "home", "save");
     // 디버그를 켜고 끄는 말. "/ai debug start" 처럼 입력해도 알아듣게 한다.
     private static final List<String> SWITCH_ON = List.of("on", "start", "true", "enable", "켜기");
     private static final List<String> SWITCH_OFF = List.of("off", "stop", "false", "disable", "끄기");
@@ -73,7 +72,6 @@ public class AICommand implements TabExecutor {
             case "memory" -> inspect(sender, args, "기억", AIInspector::memory);
             case "perf" -> inspect(sender, args, "성능", ai -> AIInspector.perf(ai, controller.getBudget()));
             case "home" -> home(sender, args);
-            case "say" -> say(sender, args);
             case "save" -> save(sender);
             default -> {
                 return false;
@@ -119,24 +117,6 @@ public class AICommand implements TabExecutor {
             }
             default -> error(sender, "사용법: /ai home <set|clear> [이름]");
         }
-    }
-
-    /**
-     * 채팅으로 말한 것과 똑같이 AI 에게 말을 건다. 콘솔에서 대화 기능을 시험할 때 쓴다.
-     * 예: /ai say AI_Player 지금 뭐 하고 있어?
-     */
-    private void say(CommandSender sender, String[] args) {
-        if (args.length < 3) {
-            error(sender, "사용법: /ai say <이름> <할 말>");
-            return;
-        }
-        AIPlayer ai = controller.get(args[1]);
-        if (ai == null) {
-            error(sender, "'" + args[1] + "' 이라는 AI 가 없습니다.");
-            return;
-        }
-        String text = String.join(" ", Arrays.copyOfRange(args, 2, args.length));
-        controller.tell(ai, sender.getName(), text);
     }
 
     private void save(CommandSender sender) {
@@ -312,7 +292,7 @@ public class AICommand implements TabExecutor {
         String sub = args[0].toLowerCase(Locale.ROOT);
         if (args.length == 2) {
             return switch (sub) {
-                case "remove", "start", "stop", "status", "inv", "inventory", "why", "brain", "plan", "observe", "learn", "memory", "perf", "say" ->
+                case "remove", "start", "stop", "status", "inv", "inventory", "why", "brain", "plan", "observe", "learn", "memory", "perf" ->
                         filter(names(), args[1]);
                 case "goal" -> filter(goalNames(), args[1]);
                 case "debug" -> filter(List.of("on", "off"), args[1]);
