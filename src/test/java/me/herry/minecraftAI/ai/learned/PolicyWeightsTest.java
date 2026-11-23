@@ -433,4 +433,27 @@ class PolicyWeightsTest {
             assertEquals(pairs, visited.size());
         }
     }
+
+    @Test
+    void nearbyTargetsIncludeReachableDeepFloorAndLocalMoveCapRotatesAllOffsets() {
+        assertEquals(114, PolicyCandidates.NEARBY_TARGET_COUNT);
+        assertEquals(3, PolicyCandidates.MAX_LOCAL_MOVE_CANDIDATES);
+        var feet = new me.herry.minecraftAI.ai.util.BlockPoint(10, 70, -15);
+        var targets = PolicyCandidates.nearbyTargets(feet);
+        assertEquals(114, targets.size());
+        assertTrue(targets.contains(feet.offset(0, -2, 0)));
+        assertTrue(targets.contains(feet.offset(1, -2, -1)));
+        assertTrue(targets.contains(feet.offset(0, -3, 0)));
+        assertTrue(targets.contains(feet.offset(1, -3, 0)));
+        assertTrue(targets.contains(feet.offset(0, -3, -1)));
+
+        var visited = new java.util.HashSet<Integer>();
+        int cursor = 0;
+        for (int tick = 0; tick < 48; tick++) {
+            for (int s = 0; s < PolicyCandidates.MAX_LOCAL_MOVE_CANDIDATES; s++)
+                visited.add(Math.floorMod(cursor + s, 48));
+            cursor = PolicyCandidates.nextCoprimeCursor(cursor, PolicyCandidates.MAX_LOCAL_MOVE_CANDIDATES, 48);
+        }
+        assertEquals(48, visited.size());
+    }
 }

@@ -133,7 +133,7 @@ public final class PolicyCandidates {
     private int movementCursor;
     private int movementInputCursor;
     private int pickupCursor;
-    static final int NEARBY_TARGET_COUNT = 100;
+    static final int NEARBY_TARGET_COUNT = 114;
     private static final List<BlockPoint> MOVE_OFFSETS = movementOffsets();
     private static final List<BlockPoint> PLACE_OFFSETS = placementOffsets();
 
@@ -356,16 +356,22 @@ public final class PolicyCandidates {
                 taskView, observed.sight()), candidates, observed.body(), observed.stock());
     }
 
+    static final int MAX_LOCAL_MOVE_CANDIDATES = 3;
+
     private void movementTargets(AIPlayer ai, Map<String, Candidate> found,
             CandidateActionContext.Context actionContext) {
-        for (var delta : movementOffsets(movementCursor)) {
-            if (ai.getWorkBudget().isExhausted())
-                break;
+        var offsets = movementOffsets(movementCursor);
+        int offered = 0;
+        int attempted = 0;
+        int limit = Math.min(offsets.size(), 16);
+        while (attempted < limit && offered < MAX_LOCAL_MOVE_CANDIDATES && !ai.getWorkBudget().isExhausted()) {
+            var delta = offsets.get(attempted++);
             BlockPoint target = ai.getPosition().offset(delta.x(), delta.y(), delta.z());
-            add(ai, found, "move:" + target.encode(), new PrimitiveCommand.MoveTo(target, 0.5), null, null,
-                    delta.x(), delta.y(), delta.z(), "", true, actionContext);
+            if (add(ai, found, "move:" + target.encode(), new PrimitiveCommand.MoveTo(target, 0.5), null, null,
+                    delta.x(), delta.y(), delta.z(), "", true, actionContext))
+                offered++;
         }
-        movementCursor = Math.floorMod(movementCursor + 1, MOVE_OFFSETS.size());
+        movementCursor = nextCoprimeCursor(movementCursor, attempted, MOVE_OFFSETS.size());
     }
 
     private void visibleApproaches(AIPlayer ai, PolicyFrame.SightObservation sight, Map<String, Candidate> found,
@@ -1376,8 +1382,13 @@ public final class PolicyCandidates {
             for (int dz = -2; dz <= 2; dz++)
                 for (int dy = -1; dy <= 2; dy++)
                     points.add(feet.offset(dx, dy, dz));
-        // Geometric proximity, never material desirability; includes dy=-1 for
-        // downward/staircase mining.
+        for (int dx = -1; dx <= 1; dx++)
+            for (int dz = -1; dz <= 1; dz++)
+                points.add(feet.offset(dx, -2, dz));
+        for (int[] shaft : new int[][] { { 0, 0 }, { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } })
+            points.add(feet.offset(shaft[0], -3, shaft[1]));
+        // Geometric proximity, never material desirability; includes dy=-1..-3 for
+        // reachable downward/staircase mining.
         points.sort(Comparator.comparingInt(point -> {
             int dx = point.x() - feet.x(), dy = point.y() - feet.y() - 1, dz = point.z() - feet.z();
             return dx * dx + dy * dy + dz * dz;
