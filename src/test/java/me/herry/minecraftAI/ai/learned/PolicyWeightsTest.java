@@ -400,4 +400,37 @@ class PolicyWeightsTest {
                 assertTrue(visited.contains(p), "pair " + p + " of " + pairs + " must be visited");
         }
     }
+
+    @Test
+    void miningPairBijectionCoversAllBlockToolPairsAndSpreadsBlocksFirst() {
+        assertEquals(12, PolicyCandidates.MAX_ABOVE_FLOOR_MINING_CANDIDATES);
+        assertEquals(6, PolicyCandidates.MAX_BELOW_FLOOR_MINING_CANDIDATES);
+        for (int[] shape : new int[][] { { 1, 1 }, { 4, 6 }, { 6, 12 }, { 8, 8 }, { 10, 15 } }) {
+            int blocks = shape[0], tools = shape[1], pairs = blocks * tools;
+            var allPairs = new java.util.HashSet<String>();
+            for (int p = 0; p < pairs; p++) {
+                int b = PolicyCandidates.miningBlockIndex(p, blocks);
+                int t = PolicyCandidates.miningToolIndex(p, blocks, tools);
+                assertTrue(allPairs.add(b + ":" + t), "duplicate pair for shape " + blocks + "x" + tools);
+            }
+            assertEquals(pairs, allPairs.size());
+
+            int window = Math.min(blocks, 6);
+            for (int start = 0; start < pairs; start++) {
+                var distinctBlocks = new java.util.HashSet<Integer>();
+                for (int w = 0; w < window; w++)
+                    distinctBlocks.add(PolicyCandidates.miningBlockIndex((start + w) % pairs, blocks));
+                assertEquals(window, distinctBlocks.size());
+            }
+
+            var visited = new java.util.HashSet<Integer>();
+            int cursor = 0, step = Math.min(pairs, 6);
+            for (int tick = 0; tick < pairs; tick++) {
+                for (int s = 0; s < step; s++)
+                    visited.add(Math.floorMod(cursor + s, pairs));
+                cursor = PolicyCandidates.nextCoprimeCursor(cursor, step, pairs);
+            }
+            assertEquals(pairs, visited.size());
+        }
+    }
 }

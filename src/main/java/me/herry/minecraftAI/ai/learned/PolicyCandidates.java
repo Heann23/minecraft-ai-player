@@ -491,35 +491,69 @@ public final class PolicyCandidates {
                 .toList();
         var aboveFloor = blocks.stream().filter(block -> block.point().y() >= feet.y()).toList();
         var belowFloor = blocks.stream().filter(block -> block.point().y() < feet.y()).toList();
-        // Pure geometric balance: keep eye/horizon-level targets ahead of the 24 ever-present dy=-1 floor tiles
-        // while still rotating downward mining candidates every tick (no material preference).
-        int mined = 0, attempted = 0, pairs = tools.size() * aboveFloor.size();
-        while (pairs > 0 && attempted < Math.min(pairs, 48) && mined < 24 && !ai.getWorkBudget().isExhausted()) {
-            int pair = Math.floorMod(miningCursor + attempted++, pairs);
-            var slot = tools.get(pair % tools.size());
-            var block = aboveFloor.get(pair / tools.size());
-            ToolChoice tool = new ToolChoice(slot.slot(), slot.material(), slot.enchantments());
-            var delta = block.point().offset(-feet.x(), -feet.y(), -feet.z());
-            String id = "mine:" + block.point().encode() + ":" + slot.slot();
-            if (add(ai, found, id, new PrimitiveCommand.BreakBlock(block.point(), tool), null, null,
-                    delta.x(), delta.y(), delta.z(), block.material() + ":" + slot.material(), true, actionContext))
-                mined++;
+        // Pure geometric 2:1 balance across eye/horizon blocks and floor cells,
+        // spreading distinct blocks before pairing more tools with the same block.
+        int abovePairs = tools.size() * aboveFloor.size();
+        int belowPairs = tools.size() * belowFloor.size();
+        int aboveLimit = Math.min(abovePairs, 36);
+        int belowLimit = Math.min(belowPairs, 24);
+        int aboveOffered = 0, aboveAttempted = 0;
+        int belowOffered = 0, belowAttempted = 0;
+        while (!ai.getWorkBudget().isExhausted()
+                && ((aboveOffered < MAX_ABOVE_FLOOR_MINING_CANDIDATES && aboveAttempted < aboveLimit)
+                        || (belowOffered < MAX_BELOW_FLOOR_MINING_CANDIDATES && belowAttempted < belowLimit))) {
+            int stepAdded = 0;
+            while (stepAdded < 2 && aboveOffered < MAX_ABOVE_FLOOR_MINING_CANDIDATES
+                    && aboveAttempted < aboveLimit && !ai.getWorkBudget().isExhausted()) {
+                int pair = Math.floorMod(miningCursor + aboveAttempted++, abovePairs);
+                if (offerMiningCandidate(ai, found, actionContext, feet, aboveFloor, tools, pair)) {
+                    aboveOffered++;
+                    stepAdded++;
+                }
+            }
+            int floorAdded = 0;
+            while (floorAdded < 1 && belowOffered < MAX_BELOW_FLOOR_MINING_CANDIDATES
+                    && belowAttempted < belowLimit && !ai.getWorkBudget().isExhausted()) {
+                int pair = Math.floorMod(floorMiningCursor + belowAttempted++, belowPairs);
+                if (offerMiningCandidate(ai, found, actionContext, feet, belowFloor, tools, pair)) {
+                    belowOffered++;
+                    floorAdded++;
+                }
+            }
         }
-        miningCursor = pairs == 0 ? 0 : Math.floorMod(miningCursor + (attempted < pairs ? attempted : Math.max(1, tools.size())), pairs);
-        int floorMined = 0, floorAttempted = 0, floorPairs = tools.size() * belowFloor.size();
-        while (floorPairs > 0 && floorAttempted < Math.min(floorPairs, 16) && floorMined < 2 && !ai.getWorkBudget().isExhausted()) {
-            int pair = Math.floorMod(floorMiningCursor + floorAttempted++, floorPairs);
-            var slot = tools.get(pair % tools.size());
-            var block = belowFloor.get(pair / tools.size());
-            ToolChoice tool = new ToolChoice(slot.slot(), slot.material(), slot.enchantments());
-            var delta = block.point().offset(-feet.x(), -feet.y(), -feet.z());
-            String id = "mine:" + block.point().encode() + ":" + slot.slot();
-            if (add(ai, found, id, new PrimitiveCommand.BreakBlock(block.point(), tool), null, null,
-                    delta.x(), delta.y(), delta.z(), block.material() + ":" + slot.material(), true, actionContext))
-                floorMined++;
-        }
-        floorMiningCursor = floorPairs == 0 ? 0
-                : Math.floorMod(floorMiningCursor + (floorAttempted < floorPairs ? floorAttempted : Math.max(1, tools.size())), floorPairs);
+        miningCursor = abovePairs == 0 ? 0 : nextCoprimeCursor(miningCursor, aboveAttempted, abovePairs);
+        floorMiningCursor = belowPairs == 0 ? 0 : nextCoprimeCursor(floorMiningCursor, belowAttempted, belowPairs);
+    }
+
+    static final int MAX_ABOVE_FLOOR_MINING_CANDIDATES = 12;
+    static final int MAX_BELOW_FLOOR_MINING_CANDIDATES = 6;
+
+    static int miningBlockIndex(int pairIndex, int blockCount) {
+        if (pairIndex < 0 || blockCount <= 0)
+            throw new IllegalArgumentException("invalid mining pair index");
+        return pairIndex % blockCount;
+    }
+
+    static int miningToolIndex(int pairIndex, int blockCount, int toolCount) {
+        if (pairIndex < 0 || blockCount <= 0 || toolCount <= 0)
+            throw new IllegalArgumentException("invalid mining tool index");
+        int norm = Math.floorMod(pairIndex, blockCount * toolCount);
+        int b = norm % blockCount;
+        int q = norm / blockCount;
+        return (q + b) % toolCount;
+    }
+
+    private boolean offerMiningCandidate(AIPlayer ai, Map<String, Candidate> found,
+            CandidateActionContext.Context actionContext, BlockPoint feet,
+            List<me.herry.minecraftAI.ai.primitive.runtime.PrimitiveContext.BlockView> targets,
+            List<me.herry.minecraftAI.ai.primitive.control.PrimitiveSnapshot.ItemSlot> tools, int pair) {
+        var block = targets.get(miningBlockIndex(pair, targets.size()));
+        var slot = tools.get(miningToolIndex(pair, targets.size(), tools.size()));
+        ToolChoice tool = new ToolChoice(slot.slot(), slot.material(), slot.enchantments());
+        var delta = block.point().offset(-feet.x(), -feet.y(), -feet.z());
+        String id = "mine:" + block.point().encode() + ":" + slot.slot();
+        return add(ai, found, id, new PrimitiveCommand.BreakBlock(block.point(), tool), null, null,
+                delta.x(), delta.y(), delta.z(), block.material() + ":" + slot.material(), true, actionContext);
     }
 
     private void consumables(AIPlayer ai,
@@ -1175,13 +1209,17 @@ public final class PolicyCandidates {
         return Math.floorMod(cursor + step, pairs);
     }
 
-    static int nextEquipmentCursor(int cursor, int attempted, int pairs) {
+    static int nextCoprimeCursor(int cursor, int attempted, int pairs) {
         if (pairs <= 1)
             return 0;
         int stride = Math.max(1, attempted);
         while (gcd(stride, pairs) != 1)
             stride++;
         return Math.floorMod(cursor + stride, pairs);
+    }
+
+    static int nextEquipmentCursor(int cursor, int attempted, int pairs) {
+        return nextCoprimeCursor(cursor, attempted, pairs);
     }
 
     private static int gcd(int a, int b) {
