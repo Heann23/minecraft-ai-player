@@ -381,7 +381,7 @@ class ActorTests(unittest.TestCase):
 
     def test_focused_recipe_progress_v6_validates_scaled_reward_and_rejects_v5_reward(self):
         model = ActorCritic(7, hidden=4)
-        sample = row(model, session=str(uuid.uuid4()))
+        sample = row(model, session=str(uuid.uuid4()), terminal=False)
         sample.pop("nextValue")
         objective = {"id": str(uuid.uuid4()), "world": sample["nextWorld"],
                      "goal": {"item": "WOODEN_PICKAXE", "count": 1}, "startedTick": 1}
