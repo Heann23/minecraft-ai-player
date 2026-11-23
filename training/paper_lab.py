@@ -234,6 +234,9 @@ def validate_options(args, *, plan=None):
             or getattr(args, "inference_only", False) or getattr(args, "managed_backend", False)
             or getattr(args, "learning", None) == "off"):
         raise ValueError("critic reset requires resuming training with learning enabled")
+    max_megabytes = getattr(args, "max_megabytes", 512)
+    if type(max_megabytes) is not int or not 4 <= max_megabytes <= 8192:
+        raise ValueError("max-megabytes must be an integer 4..8192")
     if getattr(args, "inference_only", False) and args.mode != "train":
         raise ValueError("backend inference uses the shared backend experiment lane; evaluate is standalone Java inference")
     if getattr(args, "max_decisions", None) is not None and args.max_decisions < 1:
@@ -964,7 +967,8 @@ def run(args):
             if args.mode == "train" and not args.managed_backend:
                 command = [sys.executable, "-u", str(source / "training/train_paper_ppo.py"), "--channel",
                     str(plugin / "training-session/channel"), "--output", str(output / "training"),
-                    "--max-transitions", str(args.steps), "--rollout-size", str(rollout_size), "--seed", str(args.policy_seed),
+                    "--max-transitions", str(args.steps), "--rollout-size", str(rollout_size),
+                    "--max-megabytes", str(getattr(args, "max_megabytes", 512)), "--seed", str(args.policy_seed),
                     "--stop-file", str(output / "trainer.stop.request")]
                 if catalog_state:
                     command.extend(["--restore-session", str(output / "catalog-source-session.json")])
@@ -1308,7 +1312,9 @@ def run_parallel(args, source: Path, objectives: list[dict], objective_chain, pl
             for ch in channels:
                 command.extend(["--channel", str(ch)])
             command.extend(["--output", str(output / "training"), "--max-transitions", str(args.steps),
-                            "--rollout-size", str(rollout_size), "--seed", str(args.policy_seed),
+                            "--rollout-size", str(rollout_size),
+                            "--max-megabytes", str(getattr(args, "max_megabytes", 512)),
+                            "--seed", str(args.policy_seed),
                             "--stop-file", str(output / "trainer.stop.request")])
             if catalog_state:
                 command.extend(["--restore-session", str(output / "catalog-source-session.json")])
@@ -1518,6 +1524,7 @@ def main():
     parser.add_argument("--seconds", type=int, required=True)
     parser.add_argument("--steps", type=int, default=512)
     parser.add_argument("--rollout-size", type=int, help="external learning batch size, a multiple of 32; default 32")
+    parser.add_argument("--max-megabytes", type=int, default=512, help="raw Paper rollout/evidence byte budget in MiB for the external trainer")
     parser.add_argument("--policy-seed", type=int, default=777)
     parser.add_argument("--inference-seed", type=int, help="development Java evaluation sampling stream; independent of world/training RNG, resets on brain creation")
     parser.add_argument("--objective-item", help="exact canonical item; server acknowledgement is required before play")
