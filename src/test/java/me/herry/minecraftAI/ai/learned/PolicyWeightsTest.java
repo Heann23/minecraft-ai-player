@@ -471,6 +471,8 @@ class PolicyWeightsTest {
     @Test
     void visibleApproachExposesObservedBlockMaterialOnlyForBlockHits() {
         assertEquals("OAK_LOG", PolicyCandidates.approachMaterial("approach:1,64,2:0,64,1", "OAK_LOG"));
+        assertEquals("DIRT", PolicyCandidates.approachMaterial("approach:1,64,2:0,64,1", "GRASS_BLOCK"));
+        assertEquals(null, PolicyCandidates.approachMaterial("approach:1,64,2:0,64,1", "OAK_LEAVES"));
         assertEquals(null, PolicyCandidates.approachMaterial("approach:clear:0:10,64,0", "HORIZON"));
         assertEquals(null, PolicyCandidates.approachMaterial("move:1,64,0", "OAK_LOG"));
     }

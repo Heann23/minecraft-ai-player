@@ -352,9 +352,12 @@ public final class PolicyCandidates {
                 miningScan);
         // Direct keys and budgeted registries are partial observations, even after
         // every source was visited.
+        boolean tableReachable = body[WorldPolicyContext.TABLE_REACHABLE] == 1.0;
+        boolean furnaceReachable = body[WorldPolicyContext.FURNACE_REACHABLE] == 1.0;
         return new Capture(new PolicyFrame(ai.getWorldId(), Integer.toUnsignedLong(Bukkit.getCurrentTick()), body,
                 candidates.stream()
-                        .map(candidate -> option(ai, candidate, feet, observed.eye(), actionContext, tableAccess))
+                        .map(candidate -> option(ai, candidate, feet, observed.eye(), actionContext, tableAccess,
+                                tableReachable, furnaceReachable))
                         .toList(),
                 false, evidence,
                 taskView, observed.sight()), candidates, observed.body(), observed.stock());
@@ -1164,7 +1167,8 @@ public final class PolicyCandidates {
 
     private static PolicyFrame.Option option(AIPlayer ai, Candidate candidate, BlockPoint feet,
             EnderEyeTrack.Observation eye,
-            CandidateActionContext.Context context, TableAccess tableAccess) {
+            CandidateActionContext.Context context, TableAccess tableAccess,
+            boolean tableReachable, boolean furnaceReachable) {
         double[] features = candidate.encoded().features();
         var block = candidate.encoded().blockEvidence();
         String material = candidate.recipe() != null ? candidate.recipe().result()
@@ -1202,6 +1206,12 @@ public final class PolicyCandidates {
         var delta = CandidateActionContext.materialDelta(candidate.type(), candidate.recipe(), candidate.command(),
                 candidate.consumable(), pickupAmount, context.storageStock(), context.storageSlots());
         CandidateActionContext.encodeMaterialImpact(features, delta, context, tableMissing, smeltingOutput);
+        String workstationMaterial = candidate.recipe() != null ? candidate.recipe().result()
+                : candidate.command() instanceof PrimitiveCommand.PlaceBlock place ? place.material() : null;
+        boolean ownsTable = context.stock().getOrDefault(Material.CRAFTING_TABLE.name(), 0) > 0;
+        boolean ownsFurnace = context.stock().getOrDefault(Material.FURNACE.name(), 0) > 0;
+        CandidateActionContext.encodeWorkstationContext(features, candidate.type(), workstationMaterial,
+                tableReachable, ownsTable, furnaceReachable, ownsFurnace);
         if (eye != null && candidate.command() instanceof PrimitiveCommand.MoveTo move) {
             double dx = move.target().x() - feet.x();
             double dz = move.target().z() - feet.z();
@@ -1594,6 +1604,7 @@ public final class PolicyCandidates {
             EffectEncoding.encode(features, use.effects());
         }
         PolicyFrame.BlockEvidence blockEvidence = null;
+        String breakDropMaterial = null;
         if (command instanceof PrimitiveCommand.BreakBlock mine) {
             var observedBlock = Positions.block(ai.getPlayer().getWorld(), mine.target());
             blockEvidence = new PolicyFrame.BlockEvidence(observedBlock.getType().name(), ai.getWorldId(),
@@ -1608,6 +1619,13 @@ public final class PolicyCandidates {
             }
             var actualTool = tool == null ? org.bukkit.inventory.ItemStack.empty() : tool;
             features[57] = Math.clamp(observedBlock.getBlockData().getDestroySpeed(actualTool, true) / 32.0, 0, 16);
+            boolean preferredTool = observedBlock.isPreferredTool(actualTool);
+            features[CandidateActionContext.BREAK_HARVESTS_DROPS] = preferredTool ? 1 : 0;
+            boolean silkTouch = !actualTool.isEmpty()
+                    && actualTool.containsEnchantment(org.bukkit.enchantments.Enchantment.SILK_TOUCH);
+            boolean shears = !actualTool.isEmpty() && actualTool.getType() == Material.SHEARS;
+            breakDropMaterial = CandidateActionContext.observedDropMaterial(
+                    blockEvidence.material(), preferredTool, silkTouch, shears);
         }
         if (recipe != null)
             features[27] = recipe.resultAmount() / 64.0;
@@ -1627,7 +1645,7 @@ public final class PolicyCandidates {
         if (command instanceof PrimitiveCommand.ShieldBlock shield)
             features[56] = shield.offHand() ? 1 : 0;
         String directMaterial = recipe != null ? recipe.result()
-                : blockEvidence != null ? blockEvidence.material()
+                : blockEvidence != null ? breakDropMaterial
                         : command instanceof PrimitiveCommand.PlaceBlock place ? place.material()
                                 : command instanceof PrimitiveCommand.FillBucket fill
                                         ? ("LAVA".equals(fill.fluid()) ? "LAVA_BUCKET" : "WATER_BUCKET")
@@ -1720,7 +1738,7 @@ public final class PolicyCandidates {
     static String approachMaterial(String id, String identity) {
         if (id != null && id.startsWith("approach:") && !id.startsWith("approach:clear:")
                 && identity != null && !identity.isBlank() && !"HORIZON".equals(identity)) {
-            return identity;
+            return CandidateActionContext.observedDropMaterial(identity, true, false, false);
         }
         return null;
     }

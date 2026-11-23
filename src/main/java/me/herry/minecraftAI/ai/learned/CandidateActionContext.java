@@ -57,9 +57,23 @@ public final class CandidateActionContext {
     public static final int MATERIAL_IS_BLOCK = 301;
     public static final int MATERIAL_IS_FOOD = 302;
     public static final int MATERIAL_IS_FUEL = 303;
+    public static final int BREAK_HARVESTS_DROPS = 240;
+    public static final int MATERIAL_IS_WORKSTATION = 241;
+    public static final int PLACES_NEEDED_WORKSTATION = 242;
+    public static final int CRAFTS_REDUNDANT_WORKSTATION = 243;
+    public static final int PLACES_REDUNDANT_WORKSTATION = 244;
     private static final int IMPACT_START = CONSUMES_OBJECTIVE_INGREDIENT;
     private static final int IMPACT_END = ENABLES_TABLE_AND_OBJECTIVE_FEASIBILITY;
     private static final int ALLOCATION_SEARCH_LIMIT = 4096;
+    private static final Set<String> WORKSTATIONS = Set.of(
+            "CRAFTING_TABLE", "FURNACE", "BLAST_FURNACE", "SMOKER",
+            "ANVIL", "CHIPPED_ANVIL", "DAMAGED_ANVIL", "ENCHANTING_TABLE",
+            "BREWING_STAND", "SMITHING_TABLE", "STONECUTTER", "LOOM",
+            "GRINDSTONE", "CARTOGRAPHY_TABLE");
+
+    public static boolean isWorkstationMaterial(String material) {
+        return material != null && WORKSTATIONS.contains(material);
+    }
 
     public record SlotAmount(int slot, String material, int amount) {}
 
@@ -174,6 +188,7 @@ public final class CandidateActionContext {
         if (hasMaterial) {
             features[OFFSET + Math.floorMod(directMaterial.hashCode(), 16)] = 1;
             features[HAS_MATERIAL] = 1;
+            features[MATERIAL_IS_WORKSTATION] = isWorkstationMaterial(directMaterial) ? 1 : 0;
             int owned = Math.max(0, context.stock().getOrDefault(directMaterial, 0));
             features[OWNED_MATERIAL] = Math.min(16, owned / 64.0);
             features[UNOWNED_MATERIAL] = owned == 0 ? 1 : 0;
@@ -220,6 +235,62 @@ public final class CandidateActionContext {
         features[MATERIAL_IS_BLOCK] = props.block() ? 1 : 0;
         features[MATERIAL_IS_FOOD] = props.food() ? 1 : 0;
         features[MATERIAL_IS_FUEL] = props.fuel() ? 1 : 0;
+    }
+
+    public static void encodeWorkstationContext(double[] features, PrimitiveType type, String material,
+                                                boolean tableReachable, boolean ownsTable,
+                                                boolean furnaceReachable, boolean ownsFurnace) {
+        if (features.length != PolicyFrame.ACTION_SIZE) throw new IllegalArgumentException("candidate action context shape");
+        features[PLACES_NEEDED_WORKSTATION] = 0;
+        features[CRAFTS_REDUNDANT_WORKSTATION] = 0;
+        features[PLACES_REDUNDANT_WORKSTATION] = 0;
+        if ("CRAFTING_TABLE".equals(material)) {
+            if (type == PrimitiveType.PLACE_BLOCK) {
+                features[PLACES_NEEDED_WORKSTATION] = tableReachable ? 0 : 1;
+                features[PLACES_REDUNDANT_WORKSTATION] = tableReachable ? 1 : 0;
+            } else if (type == PrimitiveType.CRAFT_ITEM) {
+                features[CRAFTS_REDUNDANT_WORKSTATION] = (tableReachable || ownsTable) ? 1 : 0;
+            }
+        } else if ("FURNACE".equals(material)) {
+            if (type == PrimitiveType.PLACE_BLOCK) {
+                features[PLACES_NEEDED_WORKSTATION] = furnaceReachable ? 0 : 1;
+                features[PLACES_REDUNDANT_WORKSTATION] = furnaceReachable ? 1 : 0;
+            } else if (type == PrimitiveType.CRAFT_ITEM) {
+                features[CRAFTS_REDUNDANT_WORKSTATION] = (furnaceReachable || ownsFurnace) ? 1 : 0;
+            }
+        }
+    }
+
+    public static String observedDropMaterial(String blockMaterial, boolean preferredTool, boolean silkTouch, boolean shears) {
+        if (blockMaterial == null || blockMaterial.isBlank() || !preferredTool) return null;
+        if (silkTouch) return blockMaterial;
+        if (!shears && (blockMaterial.endsWith("_LEAVES") || switch (blockMaterial) {
+            case "SHORT_GRASS", "TALL_GRASS", "SHORT_DRY_GRASS", "TALL_DRY_GRASS",
+                 "FERN", "LARGE_FERN", "VINE", "BUSH", "DEAD_BUSH",
+                 "SEAGRASS", "TALL_SEAGRASS", "COBWEB" -> true;
+            default -> false;
+        })) {
+            return null;
+        }
+        return switch (blockMaterial) {
+            case "GRASS_BLOCK", "MYCELIUM", "PODZOL", "DIRT_PATH" -> "DIRT";
+            case "STONE" -> "COBBLESTONE";
+            case "DEEPSLATE" -> "COBBLED_DEEPSLATE";
+            case "COAL_ORE", "DEEPSLATE_COAL_ORE" -> "COAL";
+            case "IRON_ORE", "DEEPSLATE_IRON_ORE" -> "RAW_IRON";
+            case "COPPER_ORE", "DEEPSLATE_COPPER_ORE" -> "RAW_COPPER";
+            case "GOLD_ORE", "DEEPSLATE_GOLD_ORE" -> "RAW_GOLD";
+            case "DIAMOND_ORE", "DEEPSLATE_DIAMOND_ORE" -> "DIAMOND";
+            case "REDSTONE_ORE", "DEEPSLATE_REDSTONE_ORE" -> "REDSTONE";
+            case "LAPIS_ORE", "DEEPSLATE_LAPIS_ORE" -> "LAPIS_LAZULI";
+            case "EMERALD_ORE", "DEEPSLATE_EMERALD_ORE" -> "EMERALD";
+            case "NETHER_QUARTZ_ORE" -> "QUARTZ";
+            case "NETHER_GOLD_ORE" -> "GOLD_NUGGET";
+            case "CLAY" -> "CLAY_BALL";
+            case "GLOWSTONE" -> "GLOWSTONE_DUST";
+            case "SNOW", "SNOW_BLOCK" -> "SNOWBALL";
+            default -> blockMaterial;
+        };
     }
 
     /**

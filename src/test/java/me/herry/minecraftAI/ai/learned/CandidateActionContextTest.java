@@ -460,4 +460,42 @@ class CandidateActionContextTest {
             assertEquals(0.0, blank[idx]);
         }
     }
+
+    @Test void workstationContextAndObservedDropMaterialEliminatePhantomUnownedAndFlagNeededPlacement() {
+        assertEquals("DIRT", CandidateActionContext.observedDropMaterial("GRASS_BLOCK", true, false, false));
+        assertEquals("COBBLESTONE", CandidateActionContext.observedDropMaterial("STONE", true, false, false));
+        assertNull(CandidateActionContext.observedDropMaterial("IRON_ORE", false, false, false));
+        assertEquals("RAW_IRON", CandidateActionContext.observedDropMaterial("IRON_ORE", true, false, false));
+        assertNull(CandidateActionContext.observedDropMaterial("OAK_LEAVES", true, false, false));
+        assertEquals("OAK_LEAVES", CandidateActionContext.observedDropMaterial("OAK_LEAVES", true, false, true));
+        assertNull(CandidateActionContext.observedDropMaterial("SHORT_GRASS", true, false, false));
+        assertEquals("GRASS_BLOCK", CandidateActionContext.observedDropMaterial("GRASS_BLOCK", true, true, false));
+        assertEquals("OAK_LOG", CandidateActionContext.observedDropMaterial("OAK_LOG", true, false, false));
+
+        var emptyCtx = new CandidateActionContext.Context(Map.of(), null, false, Set.of());
+        double[] tblFeat = new double[PolicyFrame.ACTION_SIZE];
+        CandidateActionContext.encode(tblFeat, PrimitiveType.PLACE_BLOCK, "CRAFTING_TABLE", null, emptyCtx);
+        assertEquals(1.0, tblFeat[CandidateActionContext.MATERIAL_IS_WORKSTATION]);
+
+        double[] btnFeat = new double[PolicyFrame.ACTION_SIZE];
+        CandidateActionContext.encode(btnFeat, PrimitiveType.CRAFT_ITEM, "OAK_BUTTON", null, emptyCtx);
+        assertEquals(0.0, btnFeat[CandidateActionContext.MATERIAL_IS_WORKSTATION]);
+
+        double[] neededPlace = new double[PolicyFrame.ACTION_SIZE];
+        CandidateActionContext.encodeWorkstationContext(neededPlace, PrimitiveType.PLACE_BLOCK, "CRAFTING_TABLE",
+                false, true, false, false);
+        assertEquals(1.0, neededPlace[CandidateActionContext.PLACES_NEEDED_WORKSTATION]);
+        assertEquals(0.0, neededPlace[CandidateActionContext.PLACES_REDUNDANT_WORKSTATION]);
+
+        double[] redundantPlace = new double[PolicyFrame.ACTION_SIZE];
+        CandidateActionContext.encodeWorkstationContext(redundantPlace, PrimitiveType.PLACE_BLOCK, "CRAFTING_TABLE",
+                true, true, false, false);
+        assertEquals(0.0, redundantPlace[CandidateActionContext.PLACES_NEEDED_WORKSTATION]);
+        assertEquals(1.0, redundantPlace[CandidateActionContext.PLACES_REDUNDANT_WORKSTATION]);
+
+        double[] redundantCraft = new double[PolicyFrame.ACTION_SIZE];
+        CandidateActionContext.encodeWorkstationContext(redundantCraft, PrimitiveType.CRAFT_ITEM, "FURNACE",
+                false, false, false, true);
+        assertEquals(1.0, redundantCraft[CandidateActionContext.CRAFTS_REDUNDANT_WORKSTATION]);
+    }
 }
