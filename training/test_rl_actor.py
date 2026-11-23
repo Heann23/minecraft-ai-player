@@ -1221,10 +1221,10 @@ class BridgeProtocolTests(unittest.TestCase):
     def test_value_bias_tracks_return_shift_without_saturating_critic_hidden(self):
         model = ActorCritic(23, hidden=16)
         observed = frame()
-        for _ in range(40):
-            model.fit([row(model, reward=-8.0, terminal=True)])
+        for _ in range(120):
+            model.fit([row(model, reward=-10.0, terminal=True)])
         _, _, (_, _, _, vh) = model.evaluate(observed)
-        self.assertLess(float(model.params["value_bias"][0]), -0.5)
+        self.assertLess(float(model.params["value_bias"][0]), -5.0)
         self.assertGreater(float(np.mean(1.0 - vh ** 2)), 0.5)
 
 

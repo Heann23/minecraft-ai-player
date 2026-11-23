@@ -1635,7 +1635,7 @@ public final class PolicyCandidates {
                                                                                 ? pickup.material()
                                                                                 : consumable != null
                                                                                         ? consumable.material()
-                                                                                        : null;
+                                                                                        : approachMaterial(id, identity);
         boolean takesObservedItem = command instanceof PrimitiveCommand.PickupExact
                 || command instanceof PrimitiveCommand.FillBucket
                 || command instanceof PrimitiveCommand.FurnaceTransfer transfer
@@ -1672,6 +1672,14 @@ public final class PolicyCandidates {
             }
         }
         return List.copyOf(selected);
+    }
+
+    static String approachMaterial(String id, String identity) {
+        if (id != null && id.startsWith("approach:") && !id.startsWith("approach:clear:")
+                && identity != null && !identity.isBlank() && !"HORIZON".equals(identity)) {
+            return identity;
+        }
+        return null;
     }
 
     private static int bucket(String text, int size) {

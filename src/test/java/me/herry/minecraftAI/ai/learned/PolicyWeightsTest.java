@@ -467,4 +467,11 @@ class PolicyWeightsTest {
         assertEquals(-60.0, DirectionalPolicyContext.rayAngle(0));
         assertThrows(IllegalArgumentException.class, () -> DirectionalPolicyContext.rayAngle(8));
     }
+
+    @Test
+    void visibleApproachExposesObservedBlockMaterialOnlyForBlockHits() {
+        assertEquals("OAK_LOG", PolicyCandidates.approachMaterial("approach:1,64,2:0,64,1", "OAK_LOG"));
+        assertEquals(null, PolicyCandidates.approachMaterial("approach:clear:0:10,64,0", "HORIZON"));
+        assertEquals(null, PolicyCandidates.approachMaterial("move:1,64,0", "OAK_LOG"));
+    }
 }

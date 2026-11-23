@@ -173,8 +173,10 @@ class ActorCritic:
             self.second[key] = 0.999 * self.second[key] + 0.001 * gradient * gradient
             first = self.first[key] / (1 - 0.9 ** self.updates)
             second = self.second[key] / (1 - 0.999 ** self.updates)
-            step_rate = rate * 25.0 if key == "value_bias" else rate
+            step_rate = rate * 100.0 if key == "value_bias" else rate
             self.params[key] -= step_rate * first / (np.sqrt(second) + 1e-8)
+            if key in ("value_w", "value_b"):
+                self.params[key] *= 0.999
         if not all(np.isfinite(value).all() for value in self.params.values()):
             raise ValueError("non-finite updated policy")
 
