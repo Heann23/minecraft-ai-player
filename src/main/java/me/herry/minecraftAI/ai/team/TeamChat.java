@@ -2,10 +2,7 @@ package me.herry.minecraftAI.ai.team;
 
 import me.herry.minecraftAI.ai.AIPlayer;
 import me.herry.minecraftAI.ai.AIState;
-import me.herry.minecraftAI.ai.comm.CommunicationHub;
-import me.herry.minecraftAI.ai.goal.GoalType;
 import me.herry.minecraftAI.ai.memory.MemoryType;
-import me.herry.minecraftAI.ai.perception.PerceptionSystem;
 import me.herry.minecraftAI.ai.plan.ResourceLocator;
 import me.herry.minecraftAI.ai.util.BlockPoint;
 import me.herry.minecraftAI.ai.util.Positions;
@@ -26,7 +23,7 @@ import java.util.function.Supplier;
  * AI 가 한 명뿐이면 동료가 없으므로 이 기능들은 아무 일도 하지 않고, AI 의 판단과 진행은 여기에 의존하지 않는다.
  * (역할 분담은 없다. 모든 AI 가 모든 일을 스스로 한다.)
  *
- * 채팅 문장은 사람이 읽을 수 있게 한국어로 내보내고, 실제 정보(좌표, 대상)는 같은 시점에 상대의 기억에 직접 넣어 준다.
+ * 자원과 위험 정보는 가까운 동료 AI의 기억과 행동에 직접 전달한다.
  */
 public final class TeamChat {
     private record FoodRequest(AIPlayer requester, long expiresAt) {
@@ -55,7 +52,6 @@ public final class TeamChat {
     private static final MemoryType[] SHARED_TYPES = {MemoryType.TREE, MemoryType.STONE, MemoryType.IRON_ORE, MemoryType.DIAMOND_ORE, MemoryType.WORKBENCH};
 
     private final Supplier<List<AIPlayer>> members;
-    private final CommunicationHub hub;
     private final List<Claim> claims = new ArrayList<>();
     private final Map<String, Long> lastHelpRequest = new HashMap<>();
 
@@ -64,9 +60,8 @@ public final class TeamChat {
     private final Map<String, FoodRequest> foodRequests = new HashMap<>();
     private final Map<String, Long> lastFoodRequest = new HashMap<>();
 
-    public TeamChat(Supplier<List<AIPlayer>> members, CommunicationHub hub) {
+    public TeamChat(Supplier<List<AIPlayer>> members) {
         this.members = members;
-        this.hub = hub;
     }
 
     /**
@@ -90,13 +85,7 @@ public final class TeamChat {
             }
         }
 
-        say(ai, Phrases.askFood(), true);
-        if (donor == null) {
-            say(ai, Phrases.goForage(), true);
-            return;
-        }
-        foodRequests.put(donor.getName(), new FoodRequest(ai, now + FOOD_REQUEST_TTL));
-        say(donor, Phrases.willShareFood(ai.getName()), true);
+        if (donor != null) foodRequests.put(donor.getName(), new FoodRequest(ai, now + FOOD_REQUEST_TTL));
     }
 
     // 이 AI 가 음식을 가져다주기로 한 상대. 없거나 약속이 끝났으면 null.
@@ -130,18 +119,6 @@ public final class TeamChat {
     }
 
     /**
-     * AI 가 스스로 하는 말. 어디로 내보낼지(인게임 채팅, Discord)와 얼마나 자주 말할지는 CommunicationHub 가 정한다.
-     */
-    public void say(AIPlayer speaker, String message, boolean urgent) {
-        hub.say(speaker.getName(), message, urgent);
-    }
-
-    public void announceGoal(AIPlayer ai, GoalType goal) {
-        String line = Phrases.goalAnnouncement(goal);
-        if (line != null) say(ai, line, goal == GoalType.ESCAPE_DANGER || goal == GoalType.FIGHT_HOSTILE);
-    }
-
-    /**
      * 자기가 아는 자원 위치를, 아직 그 자원을 모르는 가까운 동료에게 알려 준다.
      */
     public void shareDiscoveries(AIPlayer ai) {
@@ -153,15 +130,9 @@ public final class TeamChat {
             BlockPoint pos = ResourceLocator.locate(ai, type);
             if (pos == null) continue;
 
-            AIPlayer informed = null;
             for (AIPlayer mate : mates) {
                 if (mate.getMemory().count(type, world, mate.getTicks()) > 0) continue;
                 mate.getMemory().remember(type, world, pos, mate.getTicks(), SHARED_MEMORY_TTL);
-                informed = mate;
-            }
-            if (informed != null) {
-                say(ai, Phrases.found(type), true);
-                say(informed, Phrases.thanks(ai.getName()), false);
             }
         }
     }
@@ -171,7 +142,6 @@ public final class TeamChat {
         List<AIPlayer> mates = teammates(ai, SHARE_RANGE);
         if (mates.isEmpty()) return;
         for (AIPlayer mate : mates) mate.getMemory().rememberPermanent(type, ai.getWorldId(), pos, mate.getTicks());
-        say(ai, Phrases.placed(type), true);
     }
 
     /**
@@ -186,13 +156,9 @@ public final class TeamChat {
         if (mates.isEmpty()) return;
         lastHelpRequest.put(ai.getName(), now);
 
-        say(ai, Phrases.help(PerceptionSystem.threatTypeOf(attacker)), true);
-        boolean answered = false;
         for (AIPlayer mate : mates) {
             if (mate.getState() != AIState.RUNNING) continue;
             mate.setAssistTarget(attacker, HELP_TTL);
-            if (!answered) say(mate, Phrases.onMyWay(ai.getName()), true);
-            answered = true;
         }
     }
 
@@ -222,10 +188,6 @@ public final class TeamChat {
         lastFoodRequest.remove(name);
         foodRequests.remove(name);
         foodRequests.values().removeIf(request -> request.requester().getName().equals(name));
-    }
-
-    public int teamSize() {
-        return members.get().size();
     }
 
     /**

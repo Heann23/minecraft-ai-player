@@ -36,8 +36,6 @@ public final class AIConfig {
     public final double engageRange;
     public final double fleeDistance;
 
-    public final boolean chatEnabled;
-    public final int chatMinInterval;
 
     // 한 서버 틱에 모든 AI 가 미룰 수 있는 일(블록 검색, 경로 탐색)에 쓸 수 있는 시간. 0 이면 제한하지 않는다.
     public final long tickBudgetNanos;
@@ -87,8 +85,6 @@ public final class AIConfig {
         engageRange = ranges.engageRange();
         fleeDistance = ranges.fleeDistance();
 
-        chatEnabled = config.getBoolean("chat.enabled", true);
-        chatMinInterval = clamp(config.getInt("chat.min-interval", 100), 0, 6000);
 
         double budgetMillis = Math.max(0.0, Math.min(40.0, config.getDouble("performance.tick-budget-ms", 5.0)));
         tickBudgetNanos = (long) (budgetMillis * 1_000_000.0);

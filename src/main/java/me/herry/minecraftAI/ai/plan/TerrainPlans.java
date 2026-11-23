@@ -17,7 +17,6 @@ import me.herry.minecraftAI.ai.navigation.Enclosure;
 import me.herry.minecraftAI.ai.navigation.PathGoal;
 import me.herry.minecraftAI.ai.navigation.ShaftAccess;
 import me.herry.minecraftAI.ai.navigation.WaterExitSearch;
-import me.herry.minecraftAI.ai.team.Phrases;
 import me.herry.minecraftAI.ai.team.ShaftRegistry;
 import me.herry.minecraftAI.ai.util.BlockPoint;
 import me.herry.minecraftAI.ai.util.Positions;
@@ -138,7 +137,6 @@ public final class TerrainPlans {
 
         List<Action> pillar = pillarUp(ai, null);
         if (!pillar.isEmpty()) {
-            ai.getTeam().say(ai, Phrases.climbingOut(), false);
             return pillar;
         }
         // 숨은 자리의 사방이 몬스터 쪽이라 어디로도 뚫을 수 없으면 그 안에서 기다린다. 걸어서 옮겨 갈 곳이 없다.
@@ -282,7 +280,6 @@ public final class TerrainPlans {
                 || terrain.classify(front.x(), front.y() + 1, front.z()) != BlockClass.OPEN) return List.of();
 
         ai.debug("Bridging " + direction + " over " + floor);
-        ai.getTeam().say(ai, Phrases.bridging(), false);
         return List.of(new PlaceFillerAction(floor), new MoveToAction(PathGoal.arrive(front, 0.3), false));
     }
 
