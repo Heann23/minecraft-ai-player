@@ -131,6 +131,7 @@ public final class PolicyCandidates {
     private int igniteCursor;
     private int eyeFrameCursor;
     private int movementCursor;
+    private int approachRayCursor;
     private int movementInputCursor;
     private int pickupCursor;
     static final int NEARBY_TARGET_COUNT = 114;
@@ -356,7 +357,17 @@ public final class PolicyCandidates {
                 taskView, observed.sight()), candidates, observed.body(), observed.stock());
     }
 
-    static final int MAX_LOCAL_MOVE_CANDIDATES = 3;
+    static final int MAX_LOCAL_MOVE_CANDIDATES = 2;
+    static final int MAX_VISIBLE_APPROACH_CANDIDATES = 4;
+
+    static int[] approachElevationCandidates(int originY, int blockY) {
+        List<Integer> ys = new ArrayList<>(6);
+        for (int candidate : new int[] { originY, originY + 1, originY - 1, blockY, blockY - 1, blockY + 1 }) {
+            if (Math.abs(candidate - originY) <= 6 && !ys.contains(candidate))
+                ys.add(candidate);
+        }
+        return ys.stream().mapToInt(Integer::intValue).toArray();
+    }
 
     private void movementTargets(AIPlayer ai, Map<String, Candidate> found,
             CandidateActionContext.Context actionContext) {
@@ -378,12 +389,20 @@ public final class PolicyCandidates {
             CandidateActionContext.Context actionContext) {
         if (sight == null)
             return;
+        var rays = sight.rays();
+        int rayCount = rays.size();
+        if (rayCount == 0)
+            return;
+        int startRay = Math.floorMod(approachRayCursor++, rayCount);
         var origin = ai.getPosition();
-        var opacity = PerceptionSystem.opacityOf(ai.getPlayer().getWorld());
+        var world = ai.getPlayer().getWorld();
+        var opacity = PerceptionSystem.opacityOf(world);
         var visited = new HashSet<BlockPoint>();
-        for (var ray : sight.rays()) {
-            if (ai.getWorkBudget().isExhausted())
-                return;
+        int offeredCount = 0;
+
+        for (int step = 0; step < rayCount && offeredCount < MAX_VISIBLE_APPROACH_CANDIDATES
+                && !ai.getWorkBudget().isExhausted(); step++) {
+            var ray = rays.get((startRay + step) % rayCount);
             var observed = ray.block();
             if (observed == null || ray.distance() <= PrimitiveAdapter.BLOCK_REACH)
                 continue;
@@ -405,18 +424,59 @@ public final class PolicyCandidates {
             int standZ = origin.z() + (int) Math.round(dz * fraction);
             int sideX = (int) Math.round(-dz / distance);
             int sideZ = (int) Math.round(dx / distance);
+            int[] elevations = approachElevationCandidates(origin.y(), block.y());
             boolean offered = false;
             for (int side : new int[] { 0, -1, 1 }) {
-                for (int dy : new int[] { 0, 1, -1 }) {
+                for (int y : elevations) {
                     if (ai.getWorkBudget().isExhausted())
                         return;
-                    var stand = new BlockPoint(standX + side * sideX, origin.y() + dy, standZ + side * sideZ);
-                    if (!visibleStandingPoint(sight, opacity, stand))
+                    if (y <= world.getMinHeight() || y + 1 >= world.getMaxHeight())
+                        continue;
+                    var stand = new BlockPoint(standX + side * sideX, y, standZ + side * sideZ);
+                    if (!Positions.isLoaded(world, stand) || !visibleStandingPoint(sight, opacity, stand))
                         continue;
                     if (add(ai, found, "approach:" + block.encode() + ":" + stand.encode(),
                             new PrimitiveCommand.MoveTo(stand, 0.5),
-                            null, null, stand.x() - origin.x(), dy, stand.z() - origin.z(), observed.material(), true,
-                            actionContext)) {
+                            null, null, stand.x() - origin.x(), y - origin.y(), stand.z() - origin.z(),
+                            observed.material(), true, actionContext)) {
+                        offeredCount++;
+                        offered = true;
+                        break;
+                    }
+                }
+                if (offered)
+                    break;
+            }
+        }
+
+        for (int step = 0; step < rayCount && offeredCount < MAX_VISIBLE_APPROACH_CANDIDATES
+                && !ai.getWorkBudget().isExhausted(); step++) {
+            var ray = rays.get((startRay + step) % rayCount);
+            if (!"CLEAR".equals(ray.status()))
+                continue;
+            double rad = Math.toRadians(sight.yaw() + DirectionalPolicyContext.rayAngle(ray.index()));
+            double ux = -Math.sin(rad);
+            double uz = Math.cos(rad);
+            boolean offered = false;
+            for (int stride : new int[] { 10, 6 }) {
+                int standX = origin.x() + (int) Math.round(ux * stride);
+                int standZ = origin.z() + (int) Math.round(uz * stride);
+                if (!world.isChunkLoaded(standX >> 4, standZ >> 4))
+                    continue;
+                for (int dy : new int[] { 0, 1, -1, 2, -2, 3, -3 }) {
+                    if (ai.getWorkBudget().isExhausted())
+                        return;
+                    int y = origin.y() + dy;
+                    if (y <= world.getMinHeight() || y + 1 >= world.getMaxHeight())
+                        continue;
+                    var stand = new BlockPoint(standX, y, standZ);
+                    if (!visibleStandingPoint(sight, opacity, stand))
+                        continue;
+                    if (add(ai, found, "approach:clear:" + ray.index() + ":" + stand.encode(),
+                            new PrimitiveCommand.MoveTo(stand, 0.5),
+                            null, null, stand.x() - origin.x(), dy, stand.z() - origin.z(),
+                            "HORIZON", true, actionContext)) {
+                        offeredCount++;
                         offered = true;
                         break;
                     }

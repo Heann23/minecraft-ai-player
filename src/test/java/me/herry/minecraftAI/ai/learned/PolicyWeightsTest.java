@@ -437,7 +437,8 @@ class PolicyWeightsTest {
     @Test
     void nearbyTargetsIncludeReachableDeepFloorAndLocalMoveCapRotatesAllOffsets() {
         assertEquals(114, PolicyCandidates.NEARBY_TARGET_COUNT);
-        assertEquals(3, PolicyCandidates.MAX_LOCAL_MOVE_CANDIDATES);
+        assertEquals(2, PolicyCandidates.MAX_LOCAL_MOVE_CANDIDATES);
+        assertEquals(4, PolicyCandidates.MAX_VISIBLE_APPROACH_CANDIDATES);
         var feet = new me.herry.minecraftAI.ai.util.BlockPoint(10, 70, -15);
         var targets = PolicyCandidates.nearbyTargets(feet);
         assertEquals(114, targets.size());
@@ -455,5 +456,15 @@ class PolicyWeightsTest {
             cursor = PolicyCandidates.nextCoprimeCursor(cursor, PolicyCandidates.MAX_LOCAL_MOVE_CANDIDATES, 48);
         }
         assertEquals(48, visited.size());
+    }
+
+    @Test
+    void visibleApproachElevationCandidatesDeduplicateAndBoundVerticalDelta() {
+        assertArrayEquals(new int[] { 64, 65, 63, 68, 67, 69 },
+                PolicyCandidates.approachElevationCandidates(64, 68));
+        assertArrayEquals(new int[] { 64, 65, 63 },
+                PolicyCandidates.approachElevationCandidates(64, 80));
+        assertEquals(-60.0, DirectionalPolicyContext.rayAngle(0));
+        assertThrows(IllegalArgumentException.class, () -> DirectionalPolicyContext.rayAngle(8));
     }
 }

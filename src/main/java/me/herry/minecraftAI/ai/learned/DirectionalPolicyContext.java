@@ -12,6 +12,11 @@ final class DirectionalPolicyContext {
     private static final int RANGE = 16;
     private DirectionalPolicyContext() {}
 
+    static double rayAngle(int ray) {
+        if (ray < 0 || ray >= ANGLES.length) throw new IllegalArgumentException("invalid sight ray index");
+        return ANGLES[ray];
+    }
+
     static PolicyFrame.SightObservation capture(AIPlayer ai, double[] state) {
         var player = ai.getPlayer();
         var eye = player.getEyeLocation();

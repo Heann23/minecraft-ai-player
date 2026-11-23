@@ -336,4 +336,38 @@ class CandidateActionContextTest {
             assertEquals(0.0, df[i], "unrelated drop idx " + i);
         }
     }
+
+    @Test void placingCraftingTableIncreasesReadinessOverPocketTableAndPenalizesRedundantTable() {
+        var woods = List.of("BIRCH_PLANKS", "OAK_PLANKS");
+        var pickaxe = new RecipeOption("minecraft:wooden_pickaxe", "WOODEN_PICKAXE", 1, true, false, List.of(
+                new RecipeOption.Ingredient(3, woods, false),
+                new RecipeOption.Ingredient(2, List.of("STICK"), false)));
+        var table = new RecipeOption("minecraft:crafting_table", "CRAFTING_TABLE", 1, false, false,
+                List.of(new RecipeOption.Ingredient(4, woods, false)));
+        var tables = List.of(table);
+
+        var bareFourPlanks = RecipePreparation.withTable(pickaxe, tables, Map.of("OAK_PLANKS", 4), false, false);
+        assertEquals(4, bareFourPlanks.filled());
+        assertEquals(10, bareFourPlanks.required());
+
+        var pocketTable = RecipePreparation.withTable(pickaxe, tables, Map.of("CRAFTING_TABLE", 1), false, true);
+        assertEquals(4, pocketTable.filled());
+        assertEquals(10, pocketTable.required());
+
+        var placedTable = RecipePreparation.withTable(pickaxe, tables, Map.of(), true, false);
+        assertEquals(5, placedTable.filled());
+        assertEquals(10, placedTable.required());
+
+        var readyPickaxe = RecipePreparation.withTable(pickaxe, tables, Map.of("OAK_PLANKS", 3, "STICK", 2), true, false);
+        assertEquals(10, readyPickaxe.filled());
+        assertEquals(10, readyPickaxe.required());
+
+        var fourPlanksWithTable = RecipePreparation.withTable(pickaxe, tables, Map.of("OAK_PLANKS", 4), true, false);
+        var redundantSecondTable = RecipePreparation.withTable(pickaxe, tables, Map.of("CRAFTING_TABLE", 1), true, true);
+        assertEquals(8, fourPlanksWithTable.filled());
+        assertEquals(10, fourPlanksWithTable.required());
+        assertEquals(5, redundantSecondTable.filled());
+        assertEquals(10, redundantSecondTable.required());
+        assertTrue(redundantSecondTable.fraction() < fourPlanksWithTable.fraction());
+    }
 }

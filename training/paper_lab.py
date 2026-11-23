@@ -229,6 +229,11 @@ def validate_options(args, *, plan=None):
         raise ValueError("evaluation requires a frozen actor and cannot resume/update an optimizer")
     if getattr(args, "upgrade_context", False) and (args.mode != "train" or args.resume is None):
         raise ValueError("context upgrade requires explicit training resume")
+    if getattr(args, "reset_critic", False) and (
+            args.mode != "train" or (args.resume is None and getattr(args, "catalog", None) is None)
+            or getattr(args, "inference_only", False) or getattr(args, "managed_backend", False)
+            or getattr(args, "learning", None) == "off"):
+        raise ValueError("critic reset requires resuming training with learning enabled")
     if getattr(args, "inference_only", False) and args.mode != "train":
         raise ValueError("backend inference uses the shared backend experiment lane; evaluate is standalone Java inference")
     if getattr(args, "max_decisions", None) is not None and args.max_decisions < 1:
@@ -967,6 +972,8 @@ def run(args):
                     command.extend(["--resume", str(args.resume.resolve())])
                 if args.upgrade_context:
                     command.append("--upgrade-context")
+                if getattr(args, "reset_critic", False):
+                    command.append("--reset-critic")
                 if args.inference_only:
                     command.append("--inference-only")
                 if getattr(args, "learning", None) is not None:
@@ -1309,6 +1316,8 @@ def run_parallel(args, source: Path, objectives: list[dict], objective_chain, pl
                 command.extend(["--resume", str(args.resume.resolve())])
             if args.upgrade_context:
                 command.append("--upgrade-context")
+            if getattr(args, "reset_critic", False):
+                command.append("--reset-critic")
             if args.inference_only:
                 command.append("--inference-only")
             if getattr(args, "learning", None) is not None:
@@ -1528,6 +1537,7 @@ def main():
     parser.add_argument("--player-persistence", action="store_true", help="enable player persistence in the new isolated managed-backend acceptance server")
     parser.add_argument("--admit-models", nargs="*", default=[], help="up to eight verified named snapshots admitted to the private managed-backend catalog")
     parser.add_argument("--upgrade-context", action="store_true", help="explicitly expand v1 trained context when resuming PPO")
+    parser.add_argument("--reset-critic", action="store_true", help="re-initialize only critic weights/Adam when resuming learning after a reward-contract change")
     parser.add_argument("--start-state", choices=("fresh", "pretrained", "resume"))
     parser.add_argument("--inference-only", action="store_true", help="shared backend with learning disabled, for startup/mode scenarios")
     parser.add_argument("--learning", choices=("on", "off"), help="explicit external-backend learning state; omitted preserves the restored mode")

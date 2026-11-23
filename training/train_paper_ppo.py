@@ -265,7 +265,8 @@ def verify_runtime_session(state):
 class PaperTrainer:
     def __init__(self, output: Path, *, seed: int, rollout_size: int, maximum: int, max_bytes: int,
                  resume: Path | None = None, upgrade_context=False, learning_enabled=True, start_state=None,
-                 restore_state: dict | None = None, session_save_seconds: int = 30, model_catalog_path: Path | None = None):
+                 restore_state: dict | None = None, session_save_seconds: int = 30, model_catalog_path: Path | None = None,
+                 reset_critic: bool = False):
         if not 32 <= rollout_size <= 4096 or maximum < rollout_size or max_bytes < MAX_PACKET:
             raise ValueError("invalid training budget")
         if upgrade_context and resume is None:
@@ -275,6 +276,8 @@ class PaperTrainer:
             raise ValueError("starting weights must match the explicitly selected fresh/pretrained/resume source")
         if type(learning_enabled) is not bool:
             raise ValueError("learning state must be an explicit boolean")
+        if reset_critic and (resume is None or not learning_enabled):
+            raise ValueError("critic reset requires resuming a checkpoint with learning enabled")
         if not 1 <= session_save_seconds <= 3600:
             raise ValueError("session save interval must be 1..3600 seconds")
         model, parent = (ActorCritic(seed), None) if resume is None else resume_checkpoint(
@@ -292,8 +295,11 @@ class PaperTrainer:
             restored_rows = pending_rollout.load(restore_state, parent["environmentSteps"], validate_pending_row)
             if len(restored_rows) >= rollout_size or len(restored_rows) >= maximum:
                 raise ValueError("restored pending buffer needs a larger rollout and transition budget")
+        if reset_critic:
+            model.reset_critic(seed)
         output.mkdir(parents=True, exist_ok=False)  # A new run never overwrites another model or provenance.
         self.output = output
+        self.critic_reset = bool(reset_critic)
         self.session_alias = None
         self.model_name = restore_state.get("modelName") if restore_state else None
         self.catalog = None if model_catalog_path is None else model_catalog.ModelCatalog(model_catalog_path)
@@ -360,6 +366,7 @@ class PaperTrainer:
                      "restoredPendingTransitions": self.restored_pending_count,
                      "restoredPendingEvidence": None if restore_state is None else restore_state.get("pendingRollout"),
                      "initialWeights": "random" if parent is None else "verified-initial-state" if parent.get("initializationOnly") else "verified-ppo-checkpoint", "parents": self.parents,
+                     **({"criticReset": True} if self.critic_reset else {}),
                      "resumeRecovery": None if parent is None else parent.get("recoveredCheckpoint"),
                      "gammaPerServerTick": 0.99997, "gaeLambda": 0.95,
                      "advantageTrace": "same-session-sequence-world-and-tick/v1",
@@ -959,6 +966,7 @@ def main():
     parser.add_argument("--catalog", type=Path, help="private named model catalog; read-only during this run")
     parser.add_argument("--restore-model", help="restore a named model, or the catalog selection when omitted")
     parser.add_argument("--model-catalog", type=Path, help="explicit private catalog for connected in-game list/info/save")
+    parser.add_argument("--reset-critic", action="store_true", help="re-initialize only critic weights/Adam when resuming with learning enabled")
     args = parser.parse_args()
     if args.max_decisions is not None and args.max_decisions < 1:
         raise ValueError("max-decisions must be positive")
@@ -988,7 +996,7 @@ def main():
                            start_state=args.start_state,
                            learning_enabled=resolve_learning_mode(restored, learning=args.learning, inference_only=args.inference_only),
                            restore_state=restored, session_save_seconds=args.session_save_seconds,
-                           model_catalog_path=args.model_catalog)
+                           model_catalog_path=args.model_catalog, reset_critic=args.reset_critic)
     if recovery is not None:
         write_atomic(args.output / "session-recovery.json", recovery)
         print("Recovered exact committed runtime session; damaged original preserved:",

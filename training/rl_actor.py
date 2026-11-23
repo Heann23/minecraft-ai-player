@@ -50,6 +50,18 @@ class ActorCritic:
         self.updates = 0
         self.version = 0
 
+    def reset_critic(self, seed: int):
+        """Explicitly re-initialize only critic weights and Adam moments; actor policy and RNG stay identical."""
+        hidden = len(self.params["value_b"])
+        critic_rng = np.random.default_rng(seed)
+        self.params["value_w"] = critic_rng.normal(0, 1 / math.sqrt(STATE_SIZE), (hidden, STATE_SIZE))
+        self.params["value_b"] = np.zeros(hidden)
+        self.params["value_out"] = critic_rng.normal(0, 1 / math.sqrt(hidden), hidden)
+        self.params["value_bias"] = np.zeros(1)
+        for key in ("value_w", "value_b", "value_out", "value_bias"):
+            self.first[key] = np.zeros_like(self.params[key])
+            self.second[key] = np.zeros_like(self.params[key])
+
     def enable_goal_interaction(self):
         """Explicit zero-residual architecture extension; no semantic action advice."""
         if self.interaction is not None:

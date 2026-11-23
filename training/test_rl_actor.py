@@ -1164,6 +1164,60 @@ class BridgeProtocolTests(unittest.TestCase):
             finally:
                 restored.close()
 
+    def test_reset_critic_preserves_actor_probabilities_and_clears_critic_saturation(self):
+        model = ActorCritic(17, hidden=8)
+        observed = frame()
+        # Saturate critic hidden units while leaving actor weights nontrivial.
+        model.fit([row(model)])
+        model.params["value_w"].fill(5.0)
+        model.params["value_b"].fill(3.0)
+        model.params["value_bias"].fill(12.0)
+        model.first["value_w"].fill(2.0)
+        model.second["value_w"].fill(4.0)
+        saturated_probs, _, (_, _, _, saturated_vh) = model.evaluate(observed)
+        self.assertLess(float(np.mean(1.0 - saturated_vh ** 2)), 0.1)
+
+        actor_snapshot = {k: model.params[k].copy() for k in ("actor_w", "actor_b", "actor_out", "actor_bias")}
+        actor_first = {k: model.first[k].copy() for k in ("actor_w", "actor_b", "actor_out", "actor_bias")}
+        actor_second = {k: model.second[k].copy() for k in ("actor_w", "actor_b", "actor_out", "actor_bias")}
+        rng_before = model.rng.bit_generator.state
+        counters_before = (model.version, model.updates)
+
+        model.reset_critic(123)
+
+        reset_probs, _, (_, _, _, reset_vh) = model.evaluate(observed)
+        np.testing.assert_array_equal(reset_probs, saturated_probs)
+        self.assertEqual((model.version, model.updates), counters_before)
+        self.assertEqual(model.rng.bit_generator.state, rng_before)
+        for k in actor_snapshot:
+            np.testing.assert_array_equal(model.params[k], actor_snapshot[k])
+            np.testing.assert_array_equal(model.first[k], actor_first[k])
+            np.testing.assert_array_equal(model.second[k], actor_second[k])
+        for k in ("value_w", "value_b", "value_out", "value_bias"):
+            np.testing.assert_array_equal(model.first[k], np.zeros_like(model.params[k]))
+            np.testing.assert_array_equal(model.second[k], np.zeros_like(model.params[k]))
+        self.assertEqual(float(model.params["value_bias"][0]), 0.0)
+        self.assertGreater(float(np.mean(1.0 - reset_vh ** 2)), 0.7)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            with self.assertRaisesRegex(ValueError, "critic reset"):
+                PaperTrainer(root / "fresh", seed=7, rollout_size=32, maximum=32, max_bytes=8 * 1024 * 1024, reset_critic=True)
+            base = PaperTrainer(root / "base", seed=7, rollout_size=32, maximum=32, max_bytes=8 * 1024 * 1024)
+            try:
+                session = str(uuid.uuid4())
+                for seq in range(32):
+                    t = row(base.model, session=session, sequence=seq)
+                    t.pop("nextValue")
+                    base.handle({"schema": SCHEMA, "environment": "minecraft-paper", "id": str(uuid.uuid4()),
+                                 "frame": frame(), "transitions": [t]})
+                base.poll_training(wait=True)
+            finally:
+                base.close()
+            with self.assertRaisesRegex(ValueError, "critic reset"):
+                PaperTrainer(root / "off", seed=7, rollout_size=32, maximum=32, max_bytes=8 * 1024 * 1024,
+                             resume=root / "base/optimizer-checkpoint.json", learning_enabled=False, reset_critic=True)
+
 
 if __name__ == "__main__":
     unittest.main()
