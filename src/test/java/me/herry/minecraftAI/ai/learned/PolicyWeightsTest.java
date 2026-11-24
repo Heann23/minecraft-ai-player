@@ -505,4 +505,33 @@ class PolicyWeightsTest {
         assertEquals(null, PolicyCandidates.approachMaterial("approach:clear:0:10,64,0", "HORIZON"));
         assertEquals(null, PolicyCandidates.approachMaterial("move:1,64,0", "OAK_LOG"));
     }
+
+    @Test
+    void shortActionsDoNotDuplicateLongCommitmentsWhileMoveAndInputRemainCompact() {
+        assertArrayEquals(new int[] { -90, -45, 0, 45, 90 }, PolicyCandidates.LOOK_YAW_OFFSETS);
+        var point = new me.herry.minecraftAI.ai.util.BlockPoint(1, 64, 2);
+        var look = new PolicyCandidates.Candidate("look:45",
+                new me.herry.minecraftAI.ai.primitive.control.PrimitiveCommand.LookAt(
+                        new me.herry.minecraftAI.ai.primitive.PrimitiveTarget.Point(1, 65, 2)),
+                null, null, new PolicyFrame.Option("look:45", new double[PolicyFrame.ACTION_SIZE])).committed(20);
+        assertEquals(List.of(), PolicyCandidates.compatibleReconsiderations(look));
+
+        var jump = new PolicyCandidates.Candidate("jump",
+                new me.herry.minecraftAI.ai.primitive.control.PrimitiveCommand.Jump(),
+                null, null, new PolicyFrame.Option("jump", new double[PolicyFrame.ACTION_SIZE])).committed(20);
+        assertEquals(List.of(), PolicyCandidates.compatibleReconsiderations(jump));
+
+        var place = new PolicyCandidates.Candidate("place:1,64,2:CRAFTING_TABLE",
+                new me.herry.minecraftAI.ai.primitive.control.PrimitiveCommand.PlaceBlock(point, "CRAFTING_TABLE"),
+                null, null, new PolicyFrame.Option("place:1,64,2:CRAFTING_TABLE", new double[PolicyFrame.ACTION_SIZE]))
+                .committed(20);
+        assertEquals(List.of(), PolicyCandidates.compatibleReconsiderations(place));
+
+        var move = new PolicyCandidates.Candidate("move:1,64,2",
+                new me.herry.minecraftAI.ai.primitive.control.PrimitiveCommand.MoveTo(point, 0.5),
+                null, null, new PolicyFrame.Option("move:1,64,2", new double[PolicyFrame.ACTION_SIZE])).committed(20);
+        assertEquals(List.of(80), PolicyCandidates.compatibleReconsiderations(move).stream()
+                .map(PolicyCandidates.Candidate::reconsiderAfterTicks).toList());
+        assertEquals(12, PolicyCandidates.MOVEMENT_INPUT_CHOICES_PER_FRAME);
+    }
 }

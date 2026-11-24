@@ -33,6 +33,9 @@ import java.util.function.BooleanSupplier;
 public final class PolicyCandidates {
     private static final List<Integer> RECONSIDERATION_TICKS = List.of(5, 20, 80, 600);
     private static final List<Integer> MINING_RECONSIDERATION_TICKS = List.of(5, 20, 80);
+    private static final List<Integer> MOVE_RECONSIDERATION_TICKS = List.of(20, 80);
+    private static final List<Integer> INPUT_RECONSIDERATION_TICKS = List.of(5, 20);
+    static final int MOVEMENT_INPUT_CHOICES_PER_FRAME = 12;
     public record Candidate(String id, PrimitiveCommand command, RecipeOption recipe,
             SurvivalObservation.Item consumable,
             PolicyFrame.Option encoded, int commitmentTicks, String inputId, ExactEquipment.Choice equipment,
@@ -338,7 +341,10 @@ public final class PolicyCandidates {
                     || candidate.command() instanceof PrimitiveCommand.FillBucket
                     || candidate.command() instanceof PrimitiveCommand.PourBucket
                     || candidate.command() instanceof PrimitiveCommand.ThrowEnderEye
-                    || candidate.command() instanceof PrimitiveCommand.SocketEnderEye)
+                    || candidate.command() instanceof PrimitiveCommand.SocketEnderEye
+                    || candidate.command() instanceof PrimitiveCommand.LookAt
+                    || candidate.command() instanceof PrimitiveCommand.Jump
+                    || candidate.command() instanceof PrimitiveCommand.PlaceBlock)
                 expanded.add(candidate.committed(20));
             else if (candidate.equipment() != null || candidate.command() instanceof PrimitiveCommand.DropExact
                     || candidate.command() instanceof PrimitiveCommand.ToggleBlock)
@@ -413,85 +419,81 @@ public final class PolicyCandidates {
                 && !ai.getWorkBudget().isExhausted(); step++) {
             var ray = rays.get((startRay + step) % rayCount);
             var observed = ray.block();
-            if (observed == null || ray.distance() <= PrimitiveAdapter.BLOCK_REACH)
-                continue;
-            var material = Material.getMaterial(observed.material());
-            if (material == null || !material.isSolid())
-                continue;
-            var block = new BlockPoint(observed.x(), observed.y(), observed.z());
-            if (!visited.add(block))
-                continue;
-            double dx = block.x() - origin.x();
-            double dz = block.z() - origin.z();
-            double distance = Math.hypot(dx, dz);
-            if (distance <= PrimitiveAdapter.BLOCK_REACH)
-                continue;
-            // Stop short of the observed face. The move executor still plans and walks the
-            // actual route.
-            double fraction = (distance - 2.5) / distance;
-            int standX = origin.x() + (int) Math.round(dx * fraction);
-            int standZ = origin.z() + (int) Math.round(dz * fraction);
-            int sideX = (int) Math.round(-dz / distance);
-            int sideZ = (int) Math.round(dx / distance);
-            int[] elevations = approachElevationCandidates(origin.y(), block.y());
-            boolean offered = false;
-            for (int side : new int[] { 0, -1, 1 }) {
-                for (int y : elevations) {
-                    if (ai.getWorkBudget().isExhausted())
-                        return;
-                    if (y <= world.getMinHeight() || y + 1 >= world.getMaxHeight())
-                        continue;
-                    var stand = new BlockPoint(standX + side * sideX, y, standZ + side * sideZ);
-                    if (!Positions.isLoaded(world, stand) || !visibleStandingPoint(sight, opacity, stand))
-                        continue;
-                    if (add(ai, found, "approach:" + block.encode() + ":" + stand.encode(),
-                            new PrimitiveCommand.MoveTo(stand, 0.5),
-                            null, null, stand.x() - origin.x(), y - origin.y(), stand.z() - origin.z(),
-                            observed.material(), true, actionContext)) {
-                        offeredCount++;
-                        offered = true;
-                        break;
-                    }
-                }
-                if (offered)
-                    break;
-            }
-        }
-
-        for (int step = 0; step < rayCount && offeredCount < MAX_VISIBLE_APPROACH_CANDIDATES
-                && !ai.getWorkBudget().isExhausted(); step++) {
-            var ray = rays.get((startRay + step) % rayCount);
-            if (!"CLEAR".equals(ray.status()))
-                continue;
-            double rad = Math.toRadians(sight.yaw() + DirectionalPolicyContext.rayAngle(ray.index()));
-            double ux = -Math.sin(rad);
-            double uz = Math.cos(rad);
-            boolean offered = false;
-            for (int stride : new int[] { 10, 6 }) {
-                int standX = origin.x() + (int) Math.round(ux * stride);
-                int standZ = origin.z() + (int) Math.round(uz * stride);
-                if (!world.isChunkLoaded(standX >> 4, standZ >> 4))
+            if (observed != null) {
+                if (ray.distance() <= PrimitiveAdapter.BLOCK_REACH)
                     continue;
-                for (int dy : new int[] { 0, 1, -1, 2, -2, 3, -3 }) {
-                    if (ai.getWorkBudget().isExhausted())
-                        return;
-                    int y = origin.y() + dy;
-                    if (y <= world.getMinHeight() || y + 1 >= world.getMaxHeight())
-                        continue;
-                    var stand = new BlockPoint(standX, y, standZ);
-                    if (!visibleStandingPoint(sight, opacity, stand))
-                        continue;
-                    if (add(ai, found, "approach:clear:" + ray.index() + ":" + stand.encode(),
-                            new PrimitiveCommand.MoveTo(stand, 0.5),
-                            null, null, stand.x() - origin.x(), dy, stand.z() - origin.z(),
-                            "HORIZON", true, actionContext)) {
-                        offeredCount++;
-                        offered = true;
-                        break;
+                var material = Material.getMaterial(observed.material());
+                if (material == null || !material.isSolid())
+                    continue;
+                var block = new BlockPoint(observed.x(), observed.y(), observed.z());
+                if (!visited.add(block))
+                    continue;
+                double dx = block.x() - origin.x();
+                double dz = block.z() - origin.z();
+                double distance = Math.hypot(dx, dz);
+                if (distance <= PrimitiveAdapter.BLOCK_REACH)
+                    continue;
+                // Stop short of the observed face. The move executor still plans and walks the
+                // actual route.
+                double fraction = (distance - 2.5) / distance;
+                int standX = origin.x() + (int) Math.round(dx * fraction);
+                int standZ = origin.z() + (int) Math.round(dz * fraction);
+                int sideX = (int) Math.round(-dz / distance);
+                int sideZ = (int) Math.round(dx / distance);
+                int[] elevations = approachElevationCandidates(origin.y(), block.y());
+                boolean offered = false;
+                for (int side : new int[] { 0, -1, 1 }) {
+                    for (int y : elevations) {
+                        if (ai.getWorkBudget().isExhausted())
+                            return;
+                        if (y <= world.getMinHeight() || y + 1 >= world.getMaxHeight())
+                            continue;
+                        var stand = new BlockPoint(standX + side * sideX, y, standZ + side * sideZ);
+                        if (!Positions.isLoaded(world, stand) || !visibleStandingPoint(sight, opacity, stand))
+                            continue;
+                        if (add(ai, found, "approach:" + block.encode() + ":" + stand.encode(),
+                                new PrimitiveCommand.MoveTo(stand, 0.5),
+                                null, null, stand.x() - origin.x(), y - origin.y(), stand.z() - origin.z(),
+                                observed.material(), true, actionContext)) {
+                            offeredCount++;
+                            offered = true;
+                            break;
+                        }
                     }
+                    if (offered)
+                        break;
                 }
-                if (offered)
-                    break;
+            } else if ("CLEAR".equals(ray.status())) {
+                double rad = Math.toRadians(sight.yaw() + DirectionalPolicyContext.rayAngle(ray.index()));
+                double ux = -Math.sin(rad);
+                double uz = Math.cos(rad);
+                boolean offered = false;
+                for (int stride : new int[] { 10, 6 }) {
+                    int standX = origin.x() + (int) Math.round(ux * stride);
+                    int standZ = origin.z() + (int) Math.round(uz * stride);
+                    if (!world.isChunkLoaded(standX >> 4, standZ >> 4))
+                        continue;
+                    for (int dy : new int[] { 0, 1, -1, 2, -2, 3, -3 }) {
+                        if (ai.getWorkBudget().isExhausted())
+                            return;
+                        int y = origin.y() + dy;
+                        if (y <= world.getMinHeight() || y + 1 >= world.getMaxHeight())
+                            continue;
+                        var stand = new BlockPoint(standX, y, standZ);
+                        if (!visibleStandingPoint(sight, opacity, stand))
+                            continue;
+                        if (add(ai, found, "approach:clear:" + ray.index() + ":" + stand.encode(),
+                                new PrimitiveCommand.MoveTo(stand, 0.5),
+                                null, null, stand.x() - origin.x(), dy, stand.z() - origin.z(),
+                                "HORIZON", true, actionContext)) {
+                            offeredCount++;
+                            offered = true;
+                            break;
+                        }
+                    }
+                    if (offered)
+                        break;
+                }
             }
         }
     }
@@ -502,9 +504,11 @@ public final class PolicyCandidates {
                 stand.x() + 0.5, stand.y() + 0.25, stand.z() + 0.5);
     }
 
+    static final int[] LOOK_YAW_OFFSETS = { -90, -45, 0, 45, 90 };
+
     private void look(AIPlayer ai, Map<String, Candidate> found, CandidateActionContext.Context actionContext) {
         var p = ai.getPlayer();
-        for (int yaw : new int[] { -90, -45, 45, 90 }) {
+        for (int yaw : LOOK_YAW_OFFSETS) {
             double angle = Math.toRadians(p.getLocation().getYaw() + yaw);
             var eye = p.getEyeLocation();
             var target = new PrimitiveTarget.Point(eye.getX() - Math.sin(angle) * 4, eye.getY(),
@@ -1233,7 +1237,7 @@ public final class PolicyCandidates {
         if (ai.getWorkBudget().isExhausted())
             return false;
         for (var input : MovementInput.choices(ai.getWorldId(), ai.getPlayer().getLocation().getYaw(),
-                movementInputCursor, 24)) {
+                movementInputCursor, MOVEMENT_INPUT_CHOICES_PER_FRAME)) {
             if (ai.getWorkBudget().isExhausted())
                 break;
             double[] features = new double[PolicyFrame.ACTION_SIZE];
@@ -1799,7 +1803,10 @@ public final class PolicyCandidates {
                 || active.command() instanceof PrimitiveCommand.FillBucket
                 || active.command() instanceof PrimitiveCommand.PourBucket
                 || active.command() instanceof PrimitiveCommand.ThrowEnderEye
-                || active.command() instanceof PrimitiveCommand.SocketEnderEye)
+                || active.command() instanceof PrimitiveCommand.SocketEnderEye
+                || active.command() instanceof PrimitiveCommand.LookAt
+                || active.command() instanceof PrimitiveCommand.Jump
+                || active.command() instanceof PrimitiveCommand.PlaceBlock)
             return List.of();
         List<Candidate> result = new ArrayList<>();
         for (int ticks : reconsiderationTicks(active)) {
@@ -1817,7 +1824,14 @@ public final class PolicyCandidates {
     }
 
     private static List<Integer> reconsiderationTicks(Candidate candidate) {
-        return candidate.command() instanceof PrimitiveCommand.BreakBlock
-                ? MINING_RECONSIDERATION_TICKS : RECONSIDERATION_TICKS;
+        if (candidate.movement() != null)
+            return INPUT_RECONSIDERATION_TICKS;
+        if (candidate.command() instanceof PrimitiveCommand.BreakBlock)
+            return MINING_RECONSIDERATION_TICKS;
+        if (candidate.command() instanceof PrimitiveCommand.MoveTo
+                || candidate.command() instanceof PrimitiveCommand.Pickup
+                || candidate.command() instanceof PrimitiveCommand.PickupExact)
+            return MOVE_RECONSIDERATION_TICKS;
+        return RECONSIDERATION_TICKS;
     }
 }
