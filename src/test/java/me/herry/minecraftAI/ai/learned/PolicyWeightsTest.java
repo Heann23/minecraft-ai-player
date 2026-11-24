@@ -530,7 +530,10 @@ class PolicyWeightsTest {
         var move = new PolicyCandidates.Candidate("move:1,64,2",
                 new me.herry.minecraftAI.ai.primitive.control.PrimitiveCommand.MoveTo(point, 0.5),
                 null, null, new PolicyFrame.Option("move:1,64,2", new double[PolicyFrame.ACTION_SIZE])).committed(20);
-        assertEquals(List.of(80), PolicyCandidates.compatibleReconsiderations(move).stream()
+        var moveReconsiderations = PolicyCandidates.compatibleReconsiderations(move);
+        assertEquals(List.of(80), moveReconsiderations.stream()
+                .map(PolicyCandidates.Candidate::commitmentTicks).toList());
+        assertEquals(List.of(20), moveReconsiderations.stream()
                 .map(PolicyCandidates.Candidate::reconsiderAfterTicks).toList());
         assertEquals(12, PolicyCandidates.MOVEMENT_INPUT_CHOICES_PER_FRAME);
     }
