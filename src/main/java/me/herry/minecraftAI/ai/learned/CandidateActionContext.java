@@ -66,6 +66,7 @@ public final class CandidateActionContext {
     public static final int CRAFT_UPGRADES_HARVEST_TIER = 246;
     public static final int CRAFT_DUPLICATES_OWNED_DURABLE = 247;
     public static final int MATERIAL_CRAFTING_DEAD_END = 248;
+    public static final int BREAKS_REACHABLE_WORKSTATION = 249;
     private static final int IMPACT_START = CONSUMES_OBJECTIVE_INGREDIENT;
     private static final int IMPACT_END = ENABLES_TABLE_AND_OBJECTIVE_FEASIBILITY;
     private static final int ALLOCATION_SEARCH_LIMIT = 4096;
@@ -282,12 +283,17 @@ public final class CandidateActionContext {
         features[PLACES_NEEDED_WORKSTATION] = 0;
         features[CRAFTS_REDUNDANT_WORKSTATION] = 0;
         features[PLACES_REDUNDANT_WORKSTATION] = 0;
+        features[BREAKS_REACHABLE_WORKSTATION] = 0;
         if ("CRAFTING_TABLE".equals(material)) {
             if (type == PrimitiveType.PLACE_BLOCK) {
                 features[PLACES_NEEDED_WORKSTATION] = tableReachable ? 0 : 1;
                 features[PLACES_REDUNDANT_WORKSTATION] = tableReachable ? 1 : 0;
             } else if (type == PrimitiveType.CRAFT_ITEM) {
                 features[CRAFTS_REDUNDANT_WORKSTATION] = (tableReachable || ownsTable) ? 1 : 0;
+                if (tableReachable) features[UNOWNED_MATERIAL] = 0;
+            } else if (type == PrimitiveType.BREAK_BLOCK && tableReachable) {
+                features[BREAKS_REACHABLE_WORKSTATION] = 1;
+                features[UNOWNED_MATERIAL] = 0;
             }
         } else if ("FURNACE".equals(material)) {
             if (type == PrimitiveType.PLACE_BLOCK) {
@@ -295,6 +301,10 @@ public final class CandidateActionContext {
                 features[PLACES_REDUNDANT_WORKSTATION] = furnaceReachable ? 1 : 0;
             } else if (type == PrimitiveType.CRAFT_ITEM) {
                 features[CRAFTS_REDUNDANT_WORKSTATION] = (furnaceReachable || ownsFurnace) ? 1 : 0;
+                if (furnaceReachable) features[UNOWNED_MATERIAL] = 0;
+            } else if (type == PrimitiveType.BREAK_BLOCK && furnaceReachable) {
+                features[BREAKS_REACHABLE_WORKSTATION] = 1;
+                features[UNOWNED_MATERIAL] = 0;
             }
         }
     }

@@ -1227,6 +1227,17 @@ class BridgeProtocolTests(unittest.TestCase):
         self.assertLess(float(model.params["value_bias"][0]), -5.0)
         self.assertGreater(float(np.mean(1.0 - vh ** 2)), 0.5)
 
+    def test_actor_weight_decay_shrinks_unused_columns_deterministically(self):
+        model = ActorCritic(19, hidden=8)
+        initial_actor_w = model.params["actor_w"].copy()
+        zero_grads = {key: np.zeros_like(val) for key, val in model.params.items()}
+        model.apply(zero_grads)
+        np.testing.assert_allclose(model.params["actor_w"], initial_actor_w * 0.9997, rtol=0, atol=1e-12)
+        self.assertTrue(np.isfinite(model.params["actor_w"]).all())
+        model.version = 1
+        restored = ActorCritic.from_optimizer_state(model.optimizer_state())
+        np.testing.assert_array_equal(restored.params["actor_w"], model.params["actor_w"])
+
 
 if __name__ == "__main__":
     unittest.main()

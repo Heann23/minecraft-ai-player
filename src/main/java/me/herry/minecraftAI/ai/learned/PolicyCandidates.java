@@ -600,8 +600,8 @@ public final class PolicyCandidates {
         floorMiningCursor = belowPairs == 0 ? 0 : nextCoprimeCursor(floorMiningCursor, belowAttempted, belowPairs);
     }
 
-    static final int MAX_ABOVE_FLOOR_MINING_CANDIDATES = 12;
-    static final int MAX_BELOW_FLOOR_MINING_CANDIDATES = 6;
+    static final int MAX_ABOVE_FLOOR_MINING_CANDIDATES = 8;
+    static final int MAX_BELOW_FLOOR_MINING_CANDIDATES = 8;
 
     static int miningBlockIndex(int pairIndex, int blockCount) {
         if (pairIndex < 0 || blockCount <= 0)
@@ -1210,7 +1210,8 @@ public final class PolicyCandidates {
                 candidate.consumable(), pickupAmount, context.storageStock(), context.storageSlots());
         CandidateActionContext.encodeMaterialImpact(features, delta, context, tableMissing, smeltingOutput);
         String workstationMaterial = candidate.recipe() != null ? candidate.recipe().result()
-                : candidate.command() instanceof PrimitiveCommand.PlaceBlock place ? place.material() : null;
+                : candidate.command() instanceof PrimitiveCommand.PlaceBlock place ? place.material()
+                        : block != null ? block.material() : null;
         boolean ownsTable = context.stock().getOrDefault(Material.CRAFTING_TABLE.name(), 0) > 0;
         boolean ownsFurnace = context.stock().getOrDefault(Material.FURNACE.name(), 0) > 0;
         CandidateActionContext.encodeWorkstationContext(features, candidate.type(), workstationMaterial,
@@ -1529,18 +1530,24 @@ public final class PolicyCandidates {
     static List<me.herry.minecraftAI.ai.primitive.control.PrimitiveSnapshot.ItemSlot> miningSlots(
             List<me.herry.minecraftAI.ai.primitive.control.PrimitiveSnapshot.ItemSlot> inventory) {
         var slots = new ArrayList<me.herry.minecraftAI.ai.primitive.control.PrimitiveSnapshot.ItemSlot>();
-        boolean empty = false;
+        me.herry.minecraftAI.ai.primitive.control.PrimitiveSnapshot.ItemSlot bareHand = null;
         for (var slot : inventory) {
             if (slot.slot() >= 36)
                 continue;
-            if (slot.amount() == 0) {
-                if (empty)
-                    continue;
-                empty = true;
+            boolean durableOrEnchanted = slot.amount() > 0
+                    && (slot.maxDamage() > 0 || !slot.enchantments().isEmpty());
+            if (durableOrEnchanted) {
+                slots.add(slot);
+            } else if (bareHand == null || (bareHand.amount() > 0 && slot.amount() == 0)) {
+                // Non-durable unenchanted items share identical mining speed and drops with an empty hand.
+                bareHand = slot;
             }
-            // Occupied slots retain their exact component identity. No best-tool preference
-            // or material merging.
-            slots.add(slot);
+        }
+        if (bareHand != null) {
+            int insert = 0;
+            while (insert < slots.size() && slots.get(insert).slot() < bareHand.slot())
+                insert++;
+            slots.add(insert, bareHand);
         }
         return List.copyOf(slots);
     }

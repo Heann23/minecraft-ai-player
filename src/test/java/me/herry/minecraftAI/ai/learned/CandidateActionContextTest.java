@@ -576,4 +576,38 @@ class CandidateActionContextTest {
                 cobbleSlab, ownsWoodCaps, 0);
         assertEquals(1.0, slabFeat[CandidateActionContext.MATERIAL_CRAFTING_DEAD_END]);
     }
+
+    @Test void reachableWorkstationClearsPhantomUnownedAndFlagsBreaking() {
+        var ctx = new CandidateActionContext.Context(Map.of(), null, false, Set.of());
+
+        double[] breakReachableTable = new double[PolicyFrame.ACTION_SIZE];
+        CandidateActionContext.encode(breakReachableTable, PrimitiveType.BREAK_BLOCK, "CRAFTING_TABLE", null, ctx);
+        assertEquals(1.0, breakReachableTable[CandidateActionContext.UNOWNED_MATERIAL]);
+        CandidateActionContext.encodeWorkstationContext(breakReachableTable, PrimitiveType.BREAK_BLOCK, "CRAFTING_TABLE",
+                true, false, false, false);
+        assertEquals(1.0, breakReachableTable[CandidateActionContext.BREAKS_REACHABLE_WORKSTATION]);
+        assertEquals(0.0, breakReachableTable[CandidateActionContext.UNOWNED_MATERIAL]);
+
+        double[] craftRedundantTable = new double[PolicyFrame.ACTION_SIZE];
+        CandidateActionContext.encode(craftRedundantTable, PrimitiveType.CRAFT_ITEM, "CRAFTING_TABLE", null, ctx);
+        assertEquals(1.0, craftRedundantTable[CandidateActionContext.UNOWNED_MATERIAL]);
+        CandidateActionContext.encodeWorkstationContext(craftRedundantTable, PrimitiveType.CRAFT_ITEM, "CRAFTING_TABLE",
+                true, false, false, false);
+        assertEquals(1.0, craftRedundantTable[CandidateActionContext.CRAFTS_REDUNDANT_WORKSTATION]);
+        assertEquals(0.0, craftRedundantTable[CandidateActionContext.UNOWNED_MATERIAL]);
+
+        double[] craftNeededTable = new double[PolicyFrame.ACTION_SIZE];
+        CandidateActionContext.encode(craftNeededTable, PrimitiveType.CRAFT_ITEM, "CRAFTING_TABLE", null, ctx);
+        CandidateActionContext.encodeWorkstationContext(craftNeededTable, PrimitiveType.CRAFT_ITEM, "CRAFTING_TABLE",
+                false, false, false, false);
+        assertEquals(0.0, craftNeededTable[CandidateActionContext.CRAFTS_REDUNDANT_WORKSTATION]);
+        assertEquals(1.0, craftNeededTable[CandidateActionContext.UNOWNED_MATERIAL]);
+
+        double[] breakReachableFurnace = new double[PolicyFrame.ACTION_SIZE];
+        CandidateActionContext.encode(breakReachableFurnace, PrimitiveType.BREAK_BLOCK, "FURNACE", null, ctx);
+        CandidateActionContext.encodeWorkstationContext(breakReachableFurnace, PrimitiveType.BREAK_BLOCK, "FURNACE",
+                false, false, true, false);
+        assertEquals(1.0, breakReachableFurnace[CandidateActionContext.BREAKS_REACHABLE_WORKSTATION]);
+        assertEquals(0.0, breakReachableFurnace[CandidateActionContext.UNOWNED_MATERIAL]);
+    }
 }

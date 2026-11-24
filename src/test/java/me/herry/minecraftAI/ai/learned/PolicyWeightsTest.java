@@ -402,9 +402,38 @@ class PolicyWeightsTest {
     }
 
     @Test
+    void miningSlotsCollapsesNonDurableUnenchantedJunkWhileKeepingToolsAndEnchantedItems() {
+        var slots = new java.util.ArrayList<me.herry.minecraftAI.ai.primitive.control.PrimitiveSnapshot.ItemSlot>();
+        for (int i = 0; i < 20; i++) {
+            if (i == 2) {
+                slots.add(new me.herry.minecraftAI.ai.primitive.control.PrimitiveSnapshot.ItemSlot(
+                        2, "WOODEN_PICKAXE", 1, 5, 59, java.util.Map.of()));
+            } else if (i == 5) {
+                slots.add(new me.herry.minecraftAI.ai.primitive.control.PrimitiveSnapshot.ItemSlot(
+                        5, "AIR", 0, 0, 0, java.util.Map.of()));
+            } else if (i == 11) {
+                slots.add(new me.herry.minecraftAI.ai.primitive.control.PrimitiveSnapshot.ItemSlot(
+                        11, "STICK", 1, 0, 0, java.util.Map.of("minecraft:silk_touch", 1)));
+            } else if (i == 18) {
+                slots.add(new me.herry.minecraftAI.ai.primitive.control.PrimitiveSnapshot.ItemSlot(
+                        18, "STONE_PICKAXE", 1, 0, 131, java.util.Map.of()));
+            } else {
+                slots.add(new me.herry.minecraftAI.ai.primitive.control.PrimitiveSnapshot.ItemSlot(
+                        i, i % 2 == 0 ? "DIRT" : "OAK_BUTTON", 4, 0, 0, java.util.Map.of()));
+            }
+        }
+        assertEquals(List.of(2, 5, 11, 18), PolicyCandidates.miningSlots(slots).stream().map(s -> s.slot()).toList());
+
+        var noEmpty = new java.util.ArrayList<>(slots);
+        noEmpty.set(5, new me.herry.minecraftAI.ai.primitive.control.PrimitiveSnapshot.ItemSlot(
+                5, "COBBLESTONE", 8, 0, 0, java.util.Map.of()));
+        assertEquals(List.of(0, 2, 11, 18), PolicyCandidates.miningSlots(noEmpty).stream().map(s -> s.slot()).toList());
+    }
+
+    @Test
     void miningPairBijectionCoversAllBlockToolPairsAndSpreadsBlocksFirst() {
-        assertEquals(12, PolicyCandidates.MAX_ABOVE_FLOOR_MINING_CANDIDATES);
-        assertEquals(6, PolicyCandidates.MAX_BELOW_FLOOR_MINING_CANDIDATES);
+        assertEquals(8, PolicyCandidates.MAX_ABOVE_FLOOR_MINING_CANDIDATES);
+        assertEquals(8, PolicyCandidates.MAX_BELOW_FLOOR_MINING_CANDIDATES);
         for (int[] shape : new int[][] { { 1, 1 }, { 4, 6 }, { 6, 12 }, { 8, 8 }, { 10, 15 } }) {
             int blocks = shape[0], tools = shape[1], pairs = blocks * tools;
             var allPairs = new java.util.HashSet<String>();
