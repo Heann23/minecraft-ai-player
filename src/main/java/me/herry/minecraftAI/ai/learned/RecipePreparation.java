@@ -10,19 +10,21 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-/** Actual ingredient availability in crafting-accessible slots at a PPO endpoint. */
+/** Actual ingredient availability across all owned inventory slots at a PPO endpoint. */
 final class RecipePreparation {
     private RecipePreparation() {}
+
+    static Map<String, Integer> preparationStock(PolicyCandidates.Observed observed) {
+        return observed.stock();
+    }
 
     static PpoBridge.RecipeStock observe(CraftingSystem crafting, PolicyCandidates.Observed observed,
                                          PolicyTaskMemory.View task) {
         if (task == null || task.objective() == null || !task.worldMatches()) return null;
         Material target = Material.getMaterial(task.objective().goal().item());
         if (target == null) return null;
-        Map<String, Integer> stock = new HashMap<>();
-        for (var slot : observed.snapshot().inventory()) {
-            if (slot.slot() < 36 && slot.amount() > 0) stock.merge(slot.material(), slot.amount(), Integer::sum);
-        }
+        // Include worn/off-hand slots from observed.stock() so slot-40 ping-pong swaps never manufacture reward.
+        Map<String, Integer> stock = preparationStock(observed);
         int goalCount = task.objective().goal().count();
         int ownedGoal = Math.max(0, stock.getOrDefault(target.name(), 0));
         boolean tableReachable = observed.features()[WorldPolicyContext.TABLE_REACHABLE] == 1;

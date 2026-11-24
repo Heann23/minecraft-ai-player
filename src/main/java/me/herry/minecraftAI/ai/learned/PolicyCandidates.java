@@ -114,6 +114,8 @@ public final class PolicyCandidates {
     private final CandidateActionContext candidateContext = new CandidateActionContext();
     private final Map<Material, CandidateActionContext.MaterialProperties> materialPropertiesCache =
             new EnumMap<>(Material.class);
+    private CandidateActionContext.HarvestCapabilities ownedHarvestCaps =
+            CandidateActionContext.HarvestCapabilities.NONE;
     private long materialPropertiesRevision = Long.MIN_VALUE;
     private int recipeOptions;
     private int recipesChecked;
@@ -260,6 +262,7 @@ public final class PolicyCandidates {
 
     public Capture capture(AIPlayer ai, Candidate active, int activeTicks) {
         var observed = observe(ai, active, activeTicks);
+        ownedHarvestCaps = computeOwnedHarvestCapabilities(ai, observed.stock());
         var state = observed.snapshot();
         var body = observed.features();
         var taskView = ai.getPolicyTaskMemory().observe(ai.getWorldId(), observed.stock());
@@ -1280,7 +1283,7 @@ public final class PolicyCandidates {
         return List.copyOf(selected);
     }
 
-    static final int MAX_EQUIPMENT_CANDIDATES = 4;
+    static final int MAX_EQUIPMENT_CANDIDATES = 2;
 
     static int equipmentPairIndex(int cursor, int step, int pairs) {
         if (pairs <= 0 || step < 0)
@@ -1377,7 +1380,11 @@ public final class PolicyCandidates {
             String equipMaterial = from.amount() > 0 ? from.material() : null;
             CandidateActionContext.encode(features, PrimitiveType.EQUIP_ITEM,
                     equipMaterial, null, actionContext);
-            CandidateActionContext.encodeMaterialProperties(features, resolveMaterialProperties(ai, equipMaterial));
+            var equipProps = resolveMaterialProperties(ai, equipMaterial);
+            CandidateActionContext.encodeMaterialProperties(features, equipProps);
+            int equipOwned = equipMaterial == null ? 0 : actionContext.stock().getOrDefault(equipMaterial, 0);
+            CandidateActionContext.encodeCraftUtility(features, PrimitiveType.EQUIP_ITEM,
+                    equipMaterial, equipProps, ownedHarvestCaps, equipOwned);
             if (found.putIfAbsent(id,
                     new Candidate(id, null, null, null, new PolicyFrame.Option(id, features), 0, id, choice)) == null)
                 offered++;
@@ -1664,7 +1671,10 @@ public final class PolicyCandidates {
                 || command instanceof PrimitiveCommand.FurnaceTransfer transfer
                         && transfer.slot() == PrimitiveCommand.FurnaceSlot.RESULT;
         CandidateActionContext.encode(features, type, directMaterial, recipe, actionContext, takesObservedItem);
-        CandidateActionContext.encodeMaterialProperties(features, resolveMaterialProperties(ai, directMaterial));
+        var materialProps = resolveMaterialProperties(ai, directMaterial);
+        CandidateActionContext.encodeMaterialProperties(features, materialProps);
+        int ownedCount = directMaterial == null ? 0 : actionContext.stock().getOrDefault(directMaterial, 0);
+        CandidateActionContext.encodeCraftUtility(features, type, directMaterial, materialProps, ownedHarvestCaps, ownedCount);
         found.put(id,
                 new Candidate(id, command, recipe, consumable, new PolicyFrame.Option(id, features, blockEvidence)));
         return true;
@@ -1698,6 +1708,20 @@ public final class PolicyCandidates {
         return List.copyOf(selected);
     }
 
+    private CandidateActionContext.HarvestCapabilities computeOwnedHarvestCapabilities(
+            AIPlayer ai, Map<String, Integer> stock) {
+        boolean stone = false, iron = false, diamond = false, obsidian = false;
+        for (var entry : stock.entrySet()) {
+            if (entry.getValue() == null || entry.getValue() <= 0) continue;
+            var props = resolveMaterialProperties(ai, entry.getKey());
+            stone |= props.harvestsStone();
+            iron |= props.harvestsIronOre();
+            diamond |= props.harvestsDiamondOre();
+            obsidian |= props.harvestsObsidian();
+        }
+        return new CandidateActionContext.HarvestCapabilities(stone, iron, diamond, obsidian);
+    }
+
     private CandidateActionContext.MaterialProperties resolveMaterialProperties(AIPlayer ai, String directMaterial) {
         if (directMaterial == null || directMaterial.isBlank() || Bukkit.getServer() == null) {
             return CandidateActionContext.MaterialProperties.EMPTY;
@@ -1714,7 +1738,7 @@ public final class PolicyCandidates {
         return materialPropertiesCache.computeIfAbsent(mat, m -> {
             if (!m.isItem()) {
                 return new CandidateActionContext.MaterialProperties(
-                        0, false, false, false, 0.0, false, m.isBlock(), false, false);
+                        0, false, false, false, 0.0, false, false, m.isBlock(), false, false);
             }
             var sample = new org.bukkit.inventory.ItemStack(m);
             var nms = org.bukkit.craftbukkit.inventory.CraftItemStack.asNMSCopy(sample);
@@ -1722,15 +1746,17 @@ public final class PolicyCandidates {
             boolean durability = nms.has(net.minecraft.core.component.DataComponents.MAX_DAMAGE);
             var stone = net.minecraft.world.level.block.Blocks.STONE.defaultBlockState();
             var ironOre = net.minecraft.world.level.block.Blocks.IRON_ORE.defaultBlockState();
+            var diamondOre = net.minecraft.world.level.block.Blocks.DIAMOND_ORE.defaultBlockState();
             var obsidian = net.minecraft.world.level.block.Blocks.OBSIDIAN.defaultBlockState();
             boolean harvestsStone = nms.isCorrectToolForDrops(stone);
             boolean harvestsIron = nms.isCorrectToolForDrops(ironOre);
             double stoneSpeed = nms.getDestroySpeed(stone);
+            boolean harvestsDiamond = nms.isCorrectToolForDrops(diamondOre);
             boolean harvestsObsidian = nms.isCorrectToolForDrops(obsidian);
             boolean food = nms.has(net.minecraft.core.component.DataComponents.FOOD);
             boolean fuel = nms.has(net.minecraft.core.component.DataComponents.COOKING_FUEL);
             return new CandidateActionContext.MaterialProperties(
-                    dep, durability, harvestsStone, harvestsIron, stoneSpeed, harvestsObsidian,
+                    dep, durability, harvestsStone, harvestsIron, stoneSpeed, harvestsDiamond, harvestsObsidian,
                     m.isBlock(), food, fuel);
         });
     }

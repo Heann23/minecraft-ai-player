@@ -62,6 +62,10 @@ public final class CandidateActionContext {
     public static final int PLACES_NEEDED_WORKSTATION = 242;
     public static final int CRAFTS_REDUNDANT_WORKSTATION = 243;
     public static final int PLACES_REDUNDANT_WORKSTATION = 244;
+    public static final int MATERIAL_HARVESTS_DIAMOND_ORE = 245;
+    public static final int CRAFT_UPGRADES_HARVEST_TIER = 246;
+    public static final int CRAFT_DUPLICATES_OWNED_DURABLE = 247;
+    public static final int MATERIAL_CRAFTING_DEAD_END = 248;
     private static final int IMPACT_START = CONSUMES_OBJECTIVE_INGREDIENT;
     private static final int IMPACT_END = ENABLES_TABLE_AND_OBJECTIVE_FEASIBILITY;
     private static final int ALLOCATION_SEARCH_LIMIT = 4096;
@@ -216,11 +220,22 @@ public final class CandidateActionContext {
         }
     }
 
+    public record HarvestCapabilities(boolean stone, boolean ironOre, boolean diamondOre, boolean obsidian) {
+        public static final HarvestCapabilities NONE = new HarvestCapabilities(false, false, false, false);
+    }
+
     public record MaterialProperties(int dependentRecipes, boolean hasDurability, boolean harvestsStone,
-                                     boolean harvestsIronOre, double stoneDestroySpeed, boolean harvestsObsidian,
-                                     boolean block, boolean food, boolean fuel) {
+                                     boolean harvestsIronOre, double stoneDestroySpeed, boolean harvestsDiamondOre,
+                                     boolean harvestsObsidian, boolean block, boolean food, boolean fuel) {
         public static final MaterialProperties EMPTY =
-                new MaterialProperties(0, false, false, false, 0.0, false, false, false, false);
+                new MaterialProperties(0, false, false, false, 0.0, false, false, false, false, false);
+
+        public MaterialProperties(int dependentRecipes, boolean hasDurability, boolean harvestsStone,
+                                  boolean harvestsIronOre, double stoneDestroySpeed, boolean harvestsObsidian,
+                                  boolean block, boolean food, boolean fuel) {
+            this(dependentRecipes, hasDurability, harvestsStone, harvestsIronOre, stoneDestroySpeed,
+                    false, harvestsObsidian, block, food, fuel);
+        }
     }
 
     public static void encodeMaterialProperties(double[] features, MaterialProperties props) {
@@ -231,10 +246,33 @@ public final class CandidateActionContext {
         features[MATERIAL_HARVESTS_STONE] = props.harvestsStone() ? 1 : 0;
         features[MATERIAL_HARVESTS_IRON_ORE] = props.harvestsIronOre() ? 1 : 0;
         features[MATERIAL_STONE_DESTROY_SPEED] = Math.clamp(props.stoneDestroySpeed() / 16.0, 0, 1);
+        features[MATERIAL_HARVESTS_DIAMOND_ORE] = props.harvestsDiamondOre() ? 1 : 0;
         features[MATERIAL_HARVESTS_OBSIDIAN] = props.harvestsObsidian() ? 1 : 0;
         features[MATERIAL_IS_BLOCK] = props.block() ? 1 : 0;
         features[MATERIAL_IS_FOOD] = props.food() ? 1 : 0;
         features[MATERIAL_IS_FUEL] = props.fuel() ? 1 : 0;
+    }
+
+    public static void encodeCraftUtility(double[] features, PrimitiveType type, String directMaterial,
+                                          MaterialProperties props, HarvestCapabilities ownedCaps, int ownedCount) {
+        if (features.length != PolicyFrame.ACTION_SIZE)
+            throw new IllegalArgumentException("candidate action context shape");
+        features[CRAFT_UPGRADES_HARVEST_TIER] = 0;
+        features[CRAFT_DUPLICATES_OWNED_DURABLE] = 0;
+        features[MATERIAL_CRAFTING_DEAD_END] = 0;
+        if (directMaterial == null || directMaterial.isBlank() || props == null) return;
+        boolean workstation = isWorkstationMaterial(directMaterial);
+        features[MATERIAL_CRAFTING_DEAD_END] =
+                (props.dependentRecipes() == 0 && !props.hasDurability() && !workstation && !props.food()) ? 1 : 0;
+        if (type == PrimitiveType.CRAFT_ITEM) {
+            HarvestCapabilities caps = ownedCaps == null ? HarvestCapabilities.NONE : ownedCaps;
+            boolean upgrades = (props.harvestsStone() && !caps.stone())
+                    || (props.harvestsIronOre() && !caps.ironOre())
+                    || (props.harvestsDiamondOre() && !caps.diamondOre())
+                    || (props.harvestsObsidian() && !caps.obsidian());
+            features[CRAFT_UPGRADES_HARVEST_TIER] = upgrades ? 1 : 0;
+            features[CRAFT_DUPLICATES_OWNED_DURABLE] = (props.hasDurability() && ownedCount > 0) ? 1 : 0;
+        }
     }
 
     public static void encodeWorkstationContext(double[] features, PrimitiveType type, String material,

@@ -498,4 +498,82 @@ class CandidateActionContextTest {
                 false, false, false, true);
         assertEquals(1.0, redundantCraft[CandidateActionContext.CRAFTS_REDUNDANT_WORKSTATION]);
     }
+
+    @Test void recipePreparationStockIncludesOffhandAndWornItems() {
+        UUID world = UUID.randomUUID();
+        var storageOnlySlot = List.of(new me.herry.minecraftAI.ai.primitive.control.PrimitiveSnapshot.ItemSlot(
+                0, "OAK_PLANKS", 2, 0, 0, Map.of()));
+        var snapshot = new me.herry.minecraftAI.ai.primitive.control.PrimitiveSnapshot(
+                1, 10, world, new me.herry.minecraftAI.ai.primitive.PrimitiveTarget.Point(0, 64, 0),
+                20.0, 20, 300, true, false, false, storageOnlySlot);
+        var body = new me.herry.minecraftAI.ai.observation.SurvivalObservation.Body(20, 20, 0, 20, 0, 0, 300, 300);
+        // Simulate 1 OAK_PLANKS + 2 STICK held in off-hand slot 40: observed.stock() includes them while snapshot < 36 does not.
+        Map<String, Integer> fullOwnedStock = Map.of("OAK_PLANKS", 3, "STICK", 2);
+        var observed = new PolicyCandidates.Observed(snapshot, body, fullOwnedStock, new double[PolicyFrame.STATE_SIZE]);
+        assertEquals(fullOwnedStock, RecipePreparation.preparationStock(observed));
+    }
+
+    @Test void craftUtilityEncodesHarvestTierUpgradesDuplicateDurablesAndDeadEnds() {
+        var woodenPick = new CandidateActionContext.MaterialProperties(
+                0, true, true, false, 2.0, false, false, false, false, false);
+        var stonePick = new CandidateActionContext.MaterialProperties(
+                0, true, true, true, 4.0, false, false, false, false, false);
+        var ironPick = new CandidateActionContext.MaterialProperties(
+                0, true, true, true, 6.0, true, false, false, false, false);
+        var furnace = new CandidateActionContext.MaterialProperties(
+                1, false, false, false, 1.0, false, false, true, false, false);
+        var stick = new CandidateActionContext.MaterialProperties(
+                16, false, false, false, 1.0, false, false, false, false, true);
+        var cobbleSlab = new CandidateActionContext.MaterialProperties(
+                0, false, false, false, 1.0, false, false, true, false, false);
+
+        double[] emptyWooden = new double[PolicyFrame.ACTION_SIZE];
+        CandidateActionContext.encodeMaterialProperties(emptyWooden, woodenPick);
+        CandidateActionContext.encodeCraftUtility(emptyWooden, PrimitiveType.CRAFT_ITEM, "WOODEN_PICKAXE",
+                woodenPick, CandidateActionContext.HarvestCapabilities.NONE, 0);
+        assertEquals(0.0, emptyWooden[CandidateActionContext.MATERIAL_HARVESTS_DIAMOND_ORE]);
+        assertEquals(1.0, emptyWooden[CandidateActionContext.CRAFT_UPGRADES_HARVEST_TIER]);
+        assertEquals(0.0, emptyWooden[CandidateActionContext.CRAFT_DUPLICATES_OWNED_DURABLE]);
+        assertEquals(0.0, emptyWooden[CandidateActionContext.MATERIAL_CRAFTING_DEAD_END]);
+
+        var ownsWoodCaps = new CandidateActionContext.HarvestCapabilities(true, false, false, false);
+        double[] dupWooden = new double[PolicyFrame.ACTION_SIZE];
+        CandidateActionContext.encodeCraftUtility(dupWooden, PrimitiveType.CRAFT_ITEM, "WOODEN_PICKAXE",
+                woodenPick, ownsWoodCaps, 1);
+        assertEquals(0.0, dupWooden[CandidateActionContext.CRAFT_UPGRADES_HARVEST_TIER]);
+        assertEquals(1.0, dupWooden[CandidateActionContext.CRAFT_DUPLICATES_OWNED_DURABLE]);
+        assertEquals(0.0, dupWooden[CandidateActionContext.MATERIAL_CRAFTING_DEAD_END]);
+
+        double[] upStone = new double[PolicyFrame.ACTION_SIZE];
+        CandidateActionContext.encodeCraftUtility(upStone, PrimitiveType.CRAFT_ITEM, "STONE_PICKAXE",
+                stonePick, ownsWoodCaps, 0);
+        assertEquals(1.0, upStone[CandidateActionContext.CRAFT_UPGRADES_HARVEST_TIER]);
+        assertEquals(0.0, upStone[CandidateActionContext.CRAFT_DUPLICATES_OWNED_DURABLE]);
+
+        var ownsStoneCaps = new CandidateActionContext.HarvestCapabilities(true, true, false, false);
+        double[] upIron = new double[PolicyFrame.ACTION_SIZE];
+        CandidateActionContext.encodeMaterialProperties(upIron, ironPick);
+        CandidateActionContext.encodeCraftUtility(upIron, PrimitiveType.CRAFT_ITEM, "IRON_PICKAXE",
+                ironPick, ownsStoneCaps, 0);
+        assertEquals(1.0, upIron[CandidateActionContext.MATERIAL_HARVESTS_DIAMOND_ORE]);
+        assertEquals(1.0, upIron[CandidateActionContext.CRAFT_UPGRADES_HARVEST_TIER]);
+        assertEquals(0.0, upIron[CandidateActionContext.CRAFT_DUPLICATES_OWNED_DURABLE]);
+
+        double[] furnFeat = new double[PolicyFrame.ACTION_SIZE];
+        CandidateActionContext.encodeCraftUtility(furnFeat, PrimitiveType.CRAFT_ITEM, "FURNACE",
+                furnace, ownsWoodCaps, 0);
+        assertEquals(0.0, furnFeat[CandidateActionContext.CRAFT_UPGRADES_HARVEST_TIER]);
+        assertEquals(0.0, furnFeat[CandidateActionContext.CRAFT_DUPLICATES_OWNED_DURABLE]);
+        assertEquals(0.0, furnFeat[CandidateActionContext.MATERIAL_CRAFTING_DEAD_END]);
+
+        double[] stickFeat = new double[PolicyFrame.ACTION_SIZE];
+        CandidateActionContext.encodeCraftUtility(stickFeat, PrimitiveType.CRAFT_ITEM, "STICK",
+                stick, ownsWoodCaps, 0);
+        assertEquals(0.0, stickFeat[CandidateActionContext.MATERIAL_CRAFTING_DEAD_END]);
+
+        double[] slabFeat = new double[PolicyFrame.ACTION_SIZE];
+        CandidateActionContext.encodeCraftUtility(slabFeat, PrimitiveType.CRAFT_ITEM, "COBBLESTONE_SLAB",
+                cobbleSlab, ownsWoodCaps, 0);
+        assertEquals(1.0, slabFeat[CandidateActionContext.MATERIAL_CRAFTING_DEAD_END]);
+    }
 }

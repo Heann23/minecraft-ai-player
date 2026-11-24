@@ -386,7 +386,7 @@ class PolicyWeightsTest {
 
     @Test
     void equipmentCandidateCapRotatesAcrossAllSlotTargetPairs() {
-        assertEquals(4, PolicyCandidates.MAX_EQUIPMENT_CANDIDATES);
+        assertEquals(2, PolicyCandidates.MAX_EQUIPMENT_CANDIDATES);
         for (int pairs : new int[] { 1, 2, 6, 8, 12, 24, 30 }) {
             var visited = new java.util.HashSet<Integer>();
             int cursor = 0;
