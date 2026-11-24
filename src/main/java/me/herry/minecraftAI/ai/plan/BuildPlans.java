@@ -17,7 +17,6 @@ import me.herry.minecraftAI.ai.crafting.CraftingSystem;
 import me.herry.minecraftAI.ai.goal.Milestone;
 import me.herry.minecraftAI.ai.goal.Situation;
 import me.herry.minecraftAI.ai.navigation.PathGoal;
-import me.herry.minecraftAI.ai.team.Phrases;
 import me.herry.minecraftAI.ai.util.BlockPoint;
 import me.herry.minecraftAI.ai.util.Positions;
 import me.herry.minecraftAI.ai.world.Base;
@@ -313,7 +312,6 @@ public final class BuildPlans {
         }
         home.setBounds(job.min(), job.max());
         ai.debug("Building a shelter at " + site);
-        ai.getTeam().say(ai, Phrases.shelterSite(), true);
         return job;
     }
 
@@ -339,7 +337,6 @@ public final class BuildPlans {
         home.setSheltered(true);
         ai.setBuildJob(null);
         ai.debug("Shelter finished at " + job.origin());
-        ai.getTeam().say(ai, Phrases.shelterDone(), true);
     }
 
     private static boolean isComplete(AIPlayer ai, World world, BuildJob job) {

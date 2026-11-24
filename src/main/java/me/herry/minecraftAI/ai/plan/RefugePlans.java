@@ -13,7 +13,6 @@ import me.herry.minecraftAI.ai.navigation.PathGoal;
 import me.herry.minecraftAI.ai.navigation.RefugeSearch;
 import me.herry.minecraftAI.ai.perception.PerceptionSystem;
 import me.herry.minecraftAI.ai.perception.Visibility;
-import me.herry.minecraftAI.ai.team.Phrases;
 import me.herry.minecraftAI.ai.util.BlockPoint;
 import me.herry.minecraftAI.ai.util.Positions;
 import me.herry.minecraftAI.ai.world.Base;
@@ -80,7 +79,6 @@ public final class RefugePlans {
         if (refuge == null) return List.of();
 
         ai.debug("Digging in at " + refuge.cell() + " (breaking " + refuge.toBreak().size() + ", sealing " + refuge.toSeal().size() + ")");
-        ai.getTeam().say(ai, Phrases.takingRefuge(), false);
         ai.getCombatMemory().onRefuge(now);
         List<Action> actions = new ArrayList<>();
         for (BlockPoint block : refuge.toBreak()) actions.add(new BreakBlockAction(block));

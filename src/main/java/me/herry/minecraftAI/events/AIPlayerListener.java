@@ -23,9 +23,7 @@ import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.entity.EntityPickupItemEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
-import io.papermc.paper.event.player.AsyncChatEvent;
 import io.papermc.paper.event.server.ServerResourcesReloadedEvent;
-import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
 import org.bukkit.event.player.PlayerChangedWorldEvent;
 import org.bukkit.event.player.PlayerPortalEvent;
 import org.bukkit.event.player.PlayerTeleportEvent;
@@ -124,13 +122,6 @@ public class AIPlayerListener implements Listener {
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onKick(PlayerKickEvent event) {
         controller.handleKick(event.getPlayer());
-    }
-
-    // 사람이 채팅에서 AI 의 이름을 부르면 AI 가 대답한다. 채팅 이벤트는 다른 스레드에서 오므로 메인 스레드로 넘긴다.
-    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
-    public void onChat(AsyncChatEvent event) {
-        String message = PlainTextComponentSerializer.plainText().serialize(event.message());
-        controller.handlePlayerChat(event.getPlayer().getUniqueId(), event.getPlayer().getName(), message);
     }
 
     // 데이터팩을 다시 불러오면 레시피가 바뀔 수 있다.

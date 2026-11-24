@@ -16,7 +16,6 @@ import me.herry.minecraftAI.ai.goal.Situation;
 import me.herry.minecraftAI.ai.memory.MemoryEntry;
 import me.herry.minecraftAI.ai.memory.MemoryType;
 import me.herry.minecraftAI.ai.navigation.PathGoal;
-import me.herry.minecraftAI.ai.team.Phrases;
 import me.herry.minecraftAI.ai.util.BlockPoint;
 import me.herry.minecraftAI.ai.util.Positions;
 import me.herry.minecraftAI.ai.world.Base;
@@ -74,7 +73,6 @@ public final class CraftPlans {
         List<Action> actions = new ArrayList<>();
         if (plan.needsTable() && !ensureTable(ai, actions)) return List.of();
         actions.add(new CraftItemAction(target, 1));
-        ai.getTeam().say(ai, Phrases.willCraft(milestone), true);
         return actions;
     }
 
@@ -179,7 +177,6 @@ public final class CraftPlans {
         int batch = Math.min(ai.getInventory().count(raw), hungry ? HUNGRY_COOK_BATCH : SMELT_BATCH);
         FurnacePlans.splitLogsForFuel(ai, actions, batch);
         actions.add(new SmeltItemAction(raw, batch));
-        ai.getTeam().say(ai, Phrases.cooking(), false);
         return actions;
     }
 

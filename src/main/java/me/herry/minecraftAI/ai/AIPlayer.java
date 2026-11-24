@@ -35,7 +35,6 @@ import me.herry.minecraftAI.ai.plan.TreeJob;
 import me.herry.minecraftAI.ai.survival.FoodSearch;
 import me.herry.minecraftAI.ai.survival.LightingSystem;
 import me.herry.minecraftAI.ai.survival.SurvivalSystem;
-import me.herry.minecraftAI.ai.team.Phrases;
 import me.herry.minecraftAI.ai.team.TeamChat;
 import me.herry.minecraftAI.ai.util.BlockPoint;
 import me.herry.minecraftAI.ai.util.Positions;
@@ -188,7 +187,6 @@ public final class AIPlayer {
         if (explicit) recordExecutionIntent(true);
         debug("Autonomous behavior started");
         if (!services.config().learnedControl) brain.getJournal().beginEpisode(Experience.StartReason.START);
-        getTeam().say(this, Phrases.hello(getTeam().teamSize()), true);
         return true;
     }
 
@@ -309,7 +307,6 @@ public final class AIPlayer {
         treeJob = null;
         state = AIState.DEAD;
         debug("Died");
-        getTeam().say(this, Phrases.died(), true);
     }
 
     public void onRespawn() {
@@ -321,7 +318,6 @@ public final class AIPlayer {
         debug("Respawned");
         if (state != AIState.RUNNING) return;
         if (!services.config().learnedControl) brain.getJournal().beginEpisode(Experience.StartReason.RESPAWN);
-        getTeam().say(this, Phrases.respawned(), true);
     }
 
     public void onAttacked(Entity attacker) {

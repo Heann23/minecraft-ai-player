@@ -19,7 +19,6 @@ import me.herry.minecraftAI.ai.memory.MemoryType;
 import me.herry.minecraftAI.ai.navigation.BlockClass;
 import me.herry.minecraftAI.ai.navigation.BukkitTerrainView;
 import me.herry.minecraftAI.ai.navigation.PathGoal;
-import me.herry.minecraftAI.ai.team.Phrases;
 import me.herry.minecraftAI.ai.util.BlockPoint;
 import me.herry.minecraftAI.ai.util.Positions;
 import me.herry.minecraftAI.ai.world.Base;
@@ -64,7 +63,6 @@ public final class PortalPlans {
         Base home = model.homeIn(world.getUID());
         if (home != null) home.setPortal(inside);
         ai.debug("Nether portal ready at " + inside);
-        ai.getTeam().say(ai, Phrases.portalDone(), true);
     }
 
     /**
@@ -107,7 +105,6 @@ public final class PortalPlans {
             }
             ai.getMemory().rememberPermanent(MemoryType.PORTAL_SITE, world.getUID(), origin, ai.getTicks());
             ai.debug("Building a nether portal at " + origin);
-            ai.getTeam().say(ai, Phrases.portalSite(), true);
         }
         if (!Positions.isLoaded(world, origin)) return List.of(new MoveToAction(PathGoal.arrive(origin, 1.5), false));
 

@@ -5,7 +5,6 @@ import me.herry.minecraftAI.ai.inventory.InventorySystem;
 import me.herry.minecraftAI.ai.primitive.PrimitiveAction;
 import me.herry.minecraftAI.ai.primitive.PrimitiveTarget;
 import me.herry.minecraftAI.ai.primitive.PrimitiveType;
-import me.herry.minecraftAI.ai.team.Phrases;
 import me.herry.minecraftAI.ai.util.Positions;
 import org.bukkit.Location;
 import org.bukkit.entity.Item;
@@ -59,7 +58,6 @@ public final class GiveFoodAction extends AbstractAction implements PrimitiveAct
             return;
         }
         ai.debug("Gave " + given + " food item(s) to " + receiver.getName());
-        ai.getTeam().say(ai, Phrases.hereIsFood(receiver.getName()), true);
         succeed();
     }
 

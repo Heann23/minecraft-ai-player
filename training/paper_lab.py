@@ -884,7 +884,6 @@ def run(args):
         (plugin / "models").mkdir()
         shutil.copy2(args.model, plugin / "models/minecraft-rl-actor.json")
     (plugin / "config.yml").write_text(config, encoding="utf-8")
-    (plugin / "discord.yml").write_text("enabled: false\n", encoding="utf-8")
     (server / "server.properties").write_text(
         f"server-ip=127.0.0.1\nserver-port={args.port}\nonline-mode=false\nenable-rcon=false\n"
         f"level-name=world\nlevel-seed={args.world_seed}\nlevel-type=minecraft:normal\n"
@@ -1239,7 +1238,6 @@ def run_parallel(args, source: Path, objectives: list[dict], objective_chain, pl
         plugin.mkdir(parents=True)
         shutil.copy2(args.plugin, plugin.parent / "MinecraftAI.jar")
         (plugin / "config.yml").write_text(base_config, encoding="utf-8")
-        (plugin / "discord.yml").write_text("enabled: false\n", encoding="utf-8")
         port = args.port + idx - 1
         (server / "server.properties").write_text(
             f"server-ip=127.0.0.1\nserver-port={port}\nonline-mode=false\nenable-rcon=false\n"

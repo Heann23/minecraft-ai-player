@@ -6,7 +6,6 @@ import me.herry.minecraftAI.ai.inventory.StoragePolicy;
 import me.herry.minecraftAI.ai.primitive.PrimitiveAction;
 import me.herry.minecraftAI.ai.primitive.PrimitiveTarget;
 import me.herry.minecraftAI.ai.primitive.PrimitiveType;
-import me.herry.minecraftAI.ai.team.Phrases;
 import me.herry.minecraftAI.ai.util.BlockPoint;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.Inventory;
@@ -54,7 +53,6 @@ public final class DepositItemsAction extends ChestAction implements PrimitiveAc
             return;
         }
         ai.debug("Stored " + moved + " stack(s) in the chest at " + chest);
-        if (moved > 0) ai.getTeam().say(ai, Phrases.stored(moved), false);
         succeed();
     }
 

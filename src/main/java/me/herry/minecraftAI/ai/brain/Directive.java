@@ -1,20 +1,21 @@
 package me.herry.minecraftAI.ai.brain;
 
-import me.herry.minecraftAI.ai.comm.Intent;
 import me.herry.minecraftAI.ai.goal.GoalType;
 import me.herry.minecraftAI.ai.goal.Situation;
 import org.jetbrains.annotations.Nullable;
 
 /**
- * 사람이 대화로 부탁한 일. 관리자의 목표 고정(/ai goal)과 달리, 위험 탈출 같은 긴급 목표가 생기면 그쪽을 먼저 하고
+ * 플레이에 적용하는 임시 지시. 관리자의 목표 고정(/ai goal)과 달리, 위험 탈출 같은 긴급 목표가 생기면 그쪽을 먼저 하고
  * 정해진 시간이 지나거나 일을 마치면 스스로 판단하는 상태로 돌아간다.
  * 부탁은 "무엇을"까지만 정하고, 그것을 위해 지금 할 단기 목표는 그때의 상황을 보고 고른다. Bukkit 에 의존하지 않는다.
  *
  * @param subject     구해 올 자원. GO_HOME 이면 NONE.
  * @param requestedBy 부탁한 사람의 이름
  */
-public record Directive(Kind kind, Intent.Subject subject, String requestedBy, long expiresAt) {
+public record Directive(Kind kind, Subject subject, String requestedBy, long expiresAt) {
     public enum Kind { GO_HOME, GATHER }
+
+    public enum Subject { NONE, WOOD, STONE, COAL, IRON, DIAMOND, FOOD }
 
     // 자원을 구해 오라는 부탁은 이 시간 동안 따른다. 그 뒤에는 하던 진행으로 돌아간다.
     public static final long GATHER_TICKS = 3600L;
@@ -22,10 +23,10 @@ public record Directive(Kind kind, Intent.Subject subject, String requestedBy, l
     private static final double HOME_ARRIVED_RANGE = 4.0;
 
     public static Directive goHome(String requestedBy, long now) {
-        return new Directive(Kind.GO_HOME, Intent.Subject.NONE, requestedBy, now + GO_HOME_TICKS);
+        return new Directive(Kind.GO_HOME, Subject.NONE, requestedBy, now + GO_HOME_TICKS);
     }
 
-    public static Directive gather(Intent.Subject subject, String requestedBy, long now) {
+    public static Directive gather(Subject subject, String requestedBy, long now) {
         return new Directive(Kind.GATHER, subject, requestedBy, now + GATHER_TICKS);
     }
 
@@ -73,7 +74,7 @@ public record Directive(Kind kind, Intent.Subject subject, String requestedBy, l
         return requestedBy + " 님이 " + subjectLabel(subject) + " 구해 오라고 해서요";
     }
 
-    public static String subjectLabel(Intent.Subject subject) {
+    public static String subjectLabel(Subject subject) {
         return switch (subject) {
             case WOOD -> "나무를";
             case STONE -> "돌을";

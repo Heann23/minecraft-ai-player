@@ -732,7 +732,6 @@ final class AIBrain {
         activeTrace = trace;
         log.record(trace);
         ai.debug("Reason: " + trace.reason());
-        ai.getTeam().announceGoal(ai, choice.goal());
     }
 
     private DecisionTrace trace(Choice choice, Situation situation, long now, @Nullable GoalType previous) {

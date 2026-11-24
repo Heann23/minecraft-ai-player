@@ -5,7 +5,6 @@ import me.herry.minecraftAI.ai.memory.MemoryType;
 import me.herry.minecraftAI.ai.primitive.PrimitiveAction;
 import me.herry.minecraftAI.ai.primitive.PrimitiveTarget;
 import me.herry.minecraftAI.ai.primitive.PrimitiveType;
-import me.herry.minecraftAI.ai.team.Phrases;
 import me.herry.minecraftAI.ai.util.BlockPoint;
 import me.herry.minecraftAI.ai.util.Positions;
 import org.bukkit.Location;
@@ -80,7 +79,6 @@ public final class LootChestAction extends AbstractAction implements PrimitiveAc
         ai.getMemory().forget(MemoryType.LOOT_CHEST, world.getUID(), chest);
         ai.getInventory().wearBestArmor();
         ai.debug("Looted " + taken + " item stack(s) from the chest at " + chest);
-        ai.getTeam().say(ai, Phrases.lootedChest(taken), true);
         succeed();
     }
 
