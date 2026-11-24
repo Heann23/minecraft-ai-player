@@ -665,4 +665,46 @@ class CandidateActionContextTest {
         assertEquals("RAW_IRON", CandidateActionContext.observedDropMaterial("IRON_ORE", true, false, false));
         assertNull(CandidateActionContext.observedDropMaterial("OAK_LEAVES", true, false, false));
     }
+
+    @Test void disjointTableRecipeDoesNotPenalizeLeavingTableBeforeIngredientsAreGathered() {
+        var woods = List.of("OAK_PLANKS", "BIRCH_PLANKS");
+        var table = new RecipeOption("minecraft:crafting_table", "CRAFTING_TABLE", 1, false, false,
+                List.of(new RecipeOption.Ingredient(4, woods, false)));
+        var tables = List.of(table);
+        var stonePick = new RecipeOption("minecraft:stone_pickaxe", "STONE_PICKAXE", 1, true, false, List.of(
+                new RecipeOption.Ingredient(3, List.of("COBBLESTONE"), false),
+                new RecipeOption.Ingredient(2, List.of("STICK"), false)));
+        var furnace = new RecipeOption("minecraft:furnace", "FURNACE", 1, true, false, List.of(
+                new RecipeOption.Ingredient(8, List.of("COBBLESTONE"), false)));
+
+        var twoSticks = Map.of("STICK", 2);
+        var atTable = RecipePreparation.withTable(stonePick, tables, twoSticks, true, false);
+        var awayFromTable = RecipePreparation.withTable(stonePick, tables, twoSticks, false, false);
+        assertEquals(2, atTable.filled());
+        assertEquals(7, atTable.required());
+        assertEquals(atTable, awayFromTable);
+
+        var stoneReady = Map.of("COBBLESTONE", 3, "STICK", 2);
+        var spAway = RecipePreparation.withTable(stonePick, tables, stoneReady, false, false);
+        var spOwns = RecipePreparation.withTable(stonePick, tables, stoneReady, false, true);
+        var spReach = RecipePreparation.withTable(stonePick, tables, stoneReady, true, false);
+        assertEquals(5, spAway.filled());
+        assertEquals(7, spAway.required());
+        assertEquals(6, spOwns.filled());
+        assertEquals(7, spOwns.required());
+        assertEquals(7, spReach.filled());
+        assertEquals(7, spReach.required());
+
+        var fAtTable = RecipePreparation.withTable(furnace, tables, Map.of(), true, false);
+        var fAway = RecipePreparation.withTable(furnace, tables, Map.of(), false, false);
+        assertEquals(0, fAtTable.filled());
+        assertEquals(10, fAtTable.required());
+        assertEquals(fAtTable, fAway);
+
+        var eightCobble = Map.of("COBBLESTONE", 8);
+        assertEquals(8, RecipePreparation.withTable(furnace, tables, eightCobble, false, false).filled());
+        assertEquals(9, RecipePreparation.withTable(furnace, tables, eightCobble, false, true).filled());
+        assertEquals(10, RecipePreparation.withTable(furnace, tables, eightCobble, true, false).filled());
+        assertEquals(10, RecipePreparation.withTable(furnace, tables, eightCobble, true, false).required());
+    }
 }

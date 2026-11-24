@@ -107,6 +107,17 @@ final class RecipePreparation {
         return best;
     }
 
+    private static boolean sharesIngredients(RecipeOption recipe, RecipeOption workstation) {
+        var materials = new HashSet<String>();
+        for (var ingredient : recipe.ingredients()) materials.addAll(ingredient.alternatives());
+        for (var ingredient : workstation.ingredients()) {
+            for (String alt : ingredient.alternatives()) {
+                if (materials.contains(alt)) return true;
+            }
+        }
+        return false;
+    }
+
     static PpoBridge.RecipeStock withTable(RecipeOption recipe, List<RecipeOption> tableOptions,
                                           Map<String, Integer> stock, boolean tableReachable, boolean ownsTable) {
         if (recipe.smelting() || !recipe.countPlannable()) return null;
@@ -115,10 +126,18 @@ final class RecipePreparation {
         PpoBridge.RecipeStock best = null;
         for (var table : tableOptions) {
             if (table.smelting() || table.needsTable() || !table.countPlannable()) continue;
-            int tableUnits = table.ingredients().stream().mapToInt(RecipeOption.Ingredient::amount).sum();
-            int securedUnits = tableReachable ? tableUnits + 1 : ownsTable ? tableUnits : 0;
-            var candidate = measure(recipe.id(), recipe.ingredients(), hasTable ? List.of() : table.ingredients(),
-                    stock, securedUnits, extraRequired);
+            PpoBridge.RecipeStock candidate;
+            if (sharesIngredients(recipe, table)) {
+                int tableUnits = table.ingredients().stream().mapToInt(RecipeOption.Ingredient::amount).sum();
+                int securedUnits = tableReachable ? tableUnits + 1 : ownsTable ? tableUnits : 0;
+                candidate = measure(recipe.id(), recipe.ingredients(), hasTable ? List.of() : table.ingredients(),
+                        stock, securedUnits, extraRequired);
+            } else {
+                var base = measure(recipe, stock);
+                if (base == null || base.required() + 2 > 18) continue;
+                int tableCredit = base.filled() == base.required() ? (tableReachable ? 2 : ownsTable ? 1 : 0) : 0;
+                candidate = new PpoBridge.RecipeStock(recipe.id(), base.filled() + tableCredit, base.required() + 2);
+            }
             if (candidate != null && (best == null || candidate.fraction() > best.fraction()))
                 best = candidate;
         }

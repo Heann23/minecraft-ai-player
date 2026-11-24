@@ -178,7 +178,7 @@ class ActorCritic:
             if key in ("value_w", "value_b"):
                 self.params[key] *= 0.999
             elif key == "actor_w":
-                self.params[key] *= 0.9997
+                self.params[key] *= 0.99995
         if not all(np.isfinite(value).all() for value in self.params.values()):
             raise ValueError("non-finite updated policy")
 

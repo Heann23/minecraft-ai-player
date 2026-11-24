@@ -143,6 +143,9 @@ public final class PolicyCandidates {
     private int movementInputCursor;
     private int pickupCursor;
     static final int NEARBY_TARGET_COUNT = 114;
+    static final int STATE_OWNED_HARVEST_TIER = 415;
+    private static final Map<Material, CandidateActionContext.HarvestCapabilities> HARVEST_CAP_CACHE =
+            new EnumMap<>(Material.class);
     private static final List<BlockPoint> MOVE_OFFSETS = movementOffsets();
     private static final List<BlockPoint> PLACE_OFFSETS = placementOffsets();
 
@@ -259,6 +262,7 @@ public final class PolicyCandidates {
             body[413] = Math.clamp(eye.dy() / 16, -1, 1);
             body[414] = Math.clamp(eye.dz() / 16, -1, 1);
         }
+        body[STATE_OWNED_HARVEST_TIER] = ownedHarvestTier(observeOwnedHarvestCapabilities(counts));
         WorldPolicyContext.capture(ai, body);
         return new Observed(state, survival, counts, body, sight, eye);
     }
@@ -347,7 +351,8 @@ public final class PolicyCandidates {
                     || candidate.command() instanceof PrimitiveCommand.PlaceBlock)
                 expanded.add(candidate.committed(20));
             else if (candidate.equipment() != null || candidate.command() instanceof PrimitiveCommand.DropExact
-                    || candidate.command() instanceof PrimitiveCommand.ToggleBlock)
+                    || candidate.command() instanceof PrimitiveCommand.ToggleBlock
+                    || candidate.command() instanceof PrimitiveCommand.Wait)
                 expanded.add(candidate.committed(5));
             else
                 for (int ticks : reconsiderationTicks(candidate))
@@ -1739,6 +1744,42 @@ public final class PolicyCandidates {
         return List.copyOf(selected);
     }
 
+    static double ownedHarvestTier(CandidateActionContext.HarvestCapabilities caps) {
+        if (caps == null) return 0.0;
+        if (caps.obsidian()) return 1.0;
+        if (caps.diamondOre()) return 0.75;
+        if (caps.ironOre()) return 0.5;
+        if (caps.stone()) return 0.25;
+        return 0.0;
+    }
+
+    private static CandidateActionContext.HarvestCapabilities observeOwnedHarvestCapabilities(
+            Map<String, Integer> stock) {
+        if (Bukkit.getServer() == null || stock == null || stock.isEmpty()) {
+            return CandidateActionContext.HarvestCapabilities.NONE;
+        }
+        boolean stone = false, iron = false, diamond = false, obsidian = false;
+        for (var entry : stock.entrySet()) {
+            if (entry.getValue() == null || entry.getValue() <= 0) continue;
+            Material mat = Material.getMaterial(entry.getKey());
+            if (mat == null || mat.isAir() || !mat.isItem()) continue;
+            var caps = HARVEST_CAP_CACHE.computeIfAbsent(mat, m -> {
+                var sample = new org.bukkit.inventory.ItemStack(m);
+                var nms = org.bukkit.craftbukkit.inventory.CraftItemStack.asNMSCopy(sample);
+                return new CandidateActionContext.HarvestCapabilities(
+                        nms.isCorrectToolForDrops(net.minecraft.world.level.block.Blocks.STONE.defaultBlockState()),
+                        nms.isCorrectToolForDrops(net.minecraft.world.level.block.Blocks.IRON_ORE.defaultBlockState()),
+                        nms.isCorrectToolForDrops(net.minecraft.world.level.block.Blocks.DIAMOND_ORE.defaultBlockState()),
+                        nms.isCorrectToolForDrops(net.minecraft.world.level.block.Blocks.OBSIDIAN.defaultBlockState()));
+            });
+            stone |= caps.stone();
+            iron |= caps.ironOre();
+            diamond |= caps.diamondOre();
+            obsidian |= caps.obsidian();
+        }
+        return new CandidateActionContext.HarvestCapabilities(stone, iron, diamond, obsidian);
+    }
+
     private CandidateActionContext.HarvestCapabilities computeOwnedHarvestCapabilities(
             AIPlayer ai, Map<String, Integer> stock) {
         boolean stone = false, iron = false, diamond = false, obsidian = false;
@@ -1825,6 +1866,7 @@ public final class PolicyCandidates {
                 || active.command() instanceof PrimitiveCommand.SocketEnderEye
                 || active.command() instanceof PrimitiveCommand.LookAt
                 || active.command() instanceof PrimitiveCommand.Jump
+                || active.command() instanceof PrimitiveCommand.Wait
                 || active.command() instanceof PrimitiveCommand.PlaceBlock)
             return List.of();
         List<Candidate> result = new ArrayList<>();

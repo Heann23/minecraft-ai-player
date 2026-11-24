@@ -536,5 +536,20 @@ class PolicyWeightsTest {
         assertEquals(List.of(20), moveReconsiderations.stream()
                 .map(PolicyCandidates.Candidate::reconsiderAfterTicks).toList());
         assertEquals(12, PolicyCandidates.MOVEMENT_INPUT_CHOICES_PER_FRAME);
+
+        var wait = new PolicyCandidates.Candidate("wait:5",
+                new me.herry.minecraftAI.ai.primitive.control.PrimitiveCommand.Wait(5),
+                null, null, new PolicyFrame.Option("wait:5", new double[PolicyFrame.ACTION_SIZE])).committed(5);
+        assertEquals(List.of(), PolicyCandidates.compatibleReconsiderations(wait));
+
+        assertEquals(0.0, PolicyCandidates.ownedHarvestTier(CandidateActionContext.HarvestCapabilities.NONE));
+        assertEquals(0.25, PolicyCandidates.ownedHarvestTier(
+                new CandidateActionContext.HarvestCapabilities(true, false, false, false)));
+        assertEquals(0.5, PolicyCandidates.ownedHarvestTier(
+                new CandidateActionContext.HarvestCapabilities(true, true, false, false)));
+        assertEquals(0.75, PolicyCandidates.ownedHarvestTier(
+                new CandidateActionContext.HarvestCapabilities(true, true, true, false)));
+        assertEquals(1.0, PolicyCandidates.ownedHarvestTier(
+                new CandidateActionContext.HarvestCapabilities(true, true, true, true)));
     }
 }
