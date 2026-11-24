@@ -68,6 +68,7 @@ public final class CandidateActionContext {
     public static final int MATERIAL_CRAFTING_DEAD_END = 248;
     public static final int BREAKS_REACHABLE_WORKSTATION = 249;
     public static final int BREAK_REQUIRES_CORRECT_TOOL = 250;
+    public static final int BREAK_BELOW_FEET = 251;
     private static final int IMPACT_START = CONSUMES_OBJECTIVE_INGREDIENT;
     private static final int IMPACT_END = ENABLES_TABLE_AND_OBJECTIVE_FEASIBILITY;
     private static final int ALLOCATION_SEARCH_LIMIT = 4096;
@@ -256,10 +257,33 @@ public final class CandidateActionContext {
     }
 
     public static void encodeMiningPhysics(double[] features, boolean harvestsDrops, boolean requiresCorrectTool) {
+        encodeMiningPhysics(features, harvestsDrops, requiresCorrectTool, false);
+    }
+
+    public static void encodeMiningPhysics(double[] features, boolean harvestsDrops, boolean requiresCorrectTool,
+                                           boolean belowFeet) {
         if (features.length != PolicyFrame.ACTION_SIZE)
             throw new IllegalArgumentException("candidate action context shape");
         features[BREAK_HARVESTS_DROPS] = harvestsDrops ? 1 : 0;
         features[BREAK_REQUIRES_CORRECT_TOOL] = requiresCorrectTool ? 1 : 0;
+        features[BREAK_BELOW_FEET] = belowFeet ? 1 : 0;
+    }
+
+    /**
+     * Truthfully encodes block-identity facts for a BreakBlock candidate that produces no guaranteed item drop
+     * (e.g. leaves/grass without shears/silk touch, or rock/ore with an inadequate tool). Preserves zero
+     * acquisition/ownership/objective-match flags while preventing zero-drop blocks from masquerading as
+     * material-less actions.
+     */
+    public static void encodeNonDroppingBlock(double[] features, String blockMaterial) {
+        if (features.length != PolicyFrame.ACTION_SIZE)
+            throw new IllegalArgumentException("candidate action context shape");
+        if (blockMaterial == null || blockMaterial.isBlank()) return;
+        features[OFFSET + Math.floorMod(blockMaterial.hashCode(), 16)] = 1;
+        features[HAS_MATERIAL] = 1;
+        features[MATERIAL_IS_WORKSTATION] = isWorkstationMaterial(blockMaterial) ? 1 : 0;
+        features[MATERIAL_IS_BLOCK] = 1;
+        features[MATERIAL_CRAFTING_DEAD_END] = 1;
     }
 
     public static void encodeCraftUtility(double[] features, PrimitiveType type, String directMaterial,

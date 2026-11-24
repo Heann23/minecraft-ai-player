@@ -1172,14 +1172,29 @@ public final class PolicyCandidates {
         }
     }
 
+    private static String breakDropMaterialForOption(AIPlayer ai, PolicyFrame.BlockEvidence block,
+                                                     PrimitiveCommand.BreakBlock mine, boolean harvestsDrops) {
+        if (!harvestsDrops || block == null) return null;
+        var tool = ai.getPlayer().getInventory().getItem(mine.tool().slot());
+        boolean silkTouch = tool != null && !tool.isEmpty()
+                && tool.containsEnchantment(org.bukkit.enchantments.Enchantment.SILK_TOUCH);
+        boolean shears = tool != null && !tool.isEmpty() && tool.getType() == Material.SHEARS;
+        return CandidateActionContext.observedDropMaterial(block.material(), true, silkTouch, shears);
+    }
+
     private static PolicyFrame.Option option(AIPlayer ai, Candidate candidate, BlockPoint feet,
             EnderEyeTrack.Observation eye,
             CandidateActionContext.Context context, TableAccess tableAccess,
             boolean tableReachable, boolean furnaceReachable) {
         double[] features = candidate.encoded().features();
+        features[CandidateActionContext.OBJECTIVE_INDIRECT_INGREDIENT_MATCH] = 0;
+        features[CandidateActionContext.ACQUIRES_REQUIRED_CRAFTING_TABLE] = 0;
+        features[CandidateActionContext.PLACES_REQUIRED_CRAFTING_TABLE] = 0;
         var block = candidate.encoded().blockEvidence();
         String material = candidate.recipe() != null ? candidate.recipe().result()
-                : block != null ? block.material()
+                : block != null && candidate.command() instanceof PrimitiveCommand.BreakBlock mine
+                        ? breakDropMaterialForOption(ai, block, mine,
+                                features[CandidateActionContext.BREAK_HARVESTS_DROPS] == 1.0)
                         : candidate.command() instanceof PrimitiveCommand.PickupExact pickup ? pickup.material()
                                 : candidate.command() instanceof PrimitiveCommand.FurnaceTransfer transfer
                                         && transfer.slot() == PrimitiveCommand.FurnaceSlot.RESULT ? transfer.material()
@@ -1639,12 +1654,13 @@ public final class PolicyCandidates {
             features[57] = Math.clamp(observedBlock.getBlockData().getDestroySpeed(actualTool, true) / 32.0, 0, 16);
             boolean preferredTool = observedBlock.isPreferredTool(actualTool);
             boolean requiresCorrectTool = !observedBlock.isPreferredTool(org.bukkit.inventory.ItemStack.empty());
-            CandidateActionContext.encodeMiningPhysics(features, preferredTool, requiresCorrectTool);
             boolean silkTouch = !actualTool.isEmpty()
                     && actualTool.containsEnchantment(org.bukkit.enchantments.Enchantment.SILK_TOUCH);
             boolean shears = !actualTool.isEmpty() && actualTool.getType() == Material.SHEARS;
             breakDropMaterial = CandidateActionContext.observedDropMaterial(
                     blockEvidence.material(), preferredTool, silkTouch, shears);
+            boolean harvestsDrops = preferredTool && breakDropMaterial != null;
+            CandidateActionContext.encodeMiningPhysics(features, harvestsDrops, requiresCorrectTool, dy < 0);
         }
         if (recipe != null)
             features[27] = recipe.resultAmount() / 64.0;
@@ -1687,6 +1703,9 @@ public final class PolicyCandidates {
         CandidateActionContext.encodeMaterialProperties(features, materialProps);
         int ownedCount = directMaterial == null ? 0 : actionContext.stock().getOrDefault(directMaterial, 0);
         CandidateActionContext.encodeCraftUtility(features, type, directMaterial, materialProps, ownedHarvestCaps, ownedCount);
+        if (blockEvidence != null && breakDropMaterial == null) {
+            CandidateActionContext.encodeNonDroppingBlock(features, blockEvidence.material());
+        }
         found.put(id,
                 new Candidate(id, command, recipe, consumable, new PolicyFrame.Option(id, features, blockEvidence)));
         return true;

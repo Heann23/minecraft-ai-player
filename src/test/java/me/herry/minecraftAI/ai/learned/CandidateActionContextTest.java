@@ -627,4 +627,42 @@ class CandidateActionContextTest {
         assertEquals(0.0, stoneWithHand[CandidateActionContext.BREAK_HARVESTS_DROPS]);
         assertEquals(1.0, stoneWithHand[CandidateActionContext.BREAK_REQUIRES_CORRECT_TOOL]);
     }
+
+    @Test void nonDroppingBlockPreservesBlockIdentityWithoutPhantomUnownedAndFlagsBelowFeet() {
+        double[] leaves = new double[PolicyFrame.ACTION_SIZE];
+        CandidateActionContext.encodeMiningPhysics(leaves, false, false, false);
+        assertEquals(0.0, leaves[CandidateActionContext.BREAK_HARVESTS_DROPS]);
+        assertEquals(0.0, leaves[CandidateActionContext.BREAK_REQUIRES_CORRECT_TOOL]);
+        assertEquals(0.0, leaves[CandidateActionContext.BREAK_BELOW_FEET]);
+
+        var ctx = new CandidateActionContext.Context(Map.of(), null, false, Set.of());
+        CandidateActionContext.encode(leaves, PrimitiveType.BREAK_BLOCK, null, null, ctx);
+        CandidateActionContext.encodeMaterialProperties(leaves, CandidateActionContext.MaterialProperties.EMPTY);
+        CandidateActionContext.encodeCraftUtility(leaves, PrimitiveType.BREAK_BLOCK, null,
+                CandidateActionContext.MaterialProperties.EMPTY, CandidateActionContext.HarvestCapabilities.NONE, 0);
+        CandidateActionContext.encodeNonDroppingBlock(leaves, "OAK_LEAVES");
+
+        assertEquals(1.0, leaves[CandidateActionContext.HAS_MATERIAL]);
+        assertEquals(1.0, leaves[CandidateActionContext.MATERIAL_IS_BLOCK]);
+        assertEquals(1.0, leaves[CandidateActionContext.MATERIAL_CRAFTING_DEAD_END]);
+        assertEquals(0.0, leaves[CandidateActionContext.MATERIAL_IS_WORKSTATION]);
+        assertEquals(1.0, leaves[CandidateActionContext.OFFSET + Math.floorMod("OAK_LEAVES".hashCode(), 16)]);
+        assertEquals(0.0, leaves[CandidateActionContext.OWNED_MATERIAL]);
+        assertEquals(0.0, leaves[CandidateActionContext.UNOWNED_MATERIAL]);
+        assertEquals(0.0, leaves[CandidateActionContext.OBJECTIVE_DIRECT_MATCH]);
+        assertEquals(0.0, leaves[CandidateActionContext.OBJECTIVE_INGREDIENT_MATCH]);
+
+        double[] belowDirt = new double[PolicyFrame.ACTION_SIZE];
+        CandidateActionContext.encodeMiningPhysics(belowDirt, true, false, true);
+        assertEquals(1.0, belowDirt[CandidateActionContext.BREAK_HARVESTS_DROPS]);
+        assertEquals(0.0, belowDirt[CandidateActionContext.BREAK_REQUIRES_CORRECT_TOOL]);
+        assertEquals(1.0, belowDirt[CandidateActionContext.BREAK_BELOW_FEET]);
+
+        double[] anvil = new double[PolicyFrame.ACTION_SIZE];
+        CandidateActionContext.encodeNonDroppingBlock(anvil, "ANVIL");
+        assertEquals(1.0, anvil[CandidateActionContext.MATERIAL_IS_WORKSTATION]);
+
+        assertEquals("RAW_IRON", CandidateActionContext.observedDropMaterial("IRON_ORE", true, false, false));
+        assertNull(CandidateActionContext.observedDropMaterial("OAK_LEAVES", true, false, false));
+    }
 }
