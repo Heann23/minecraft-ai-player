@@ -1634,7 +1634,8 @@ public final class PolicyCandidates {
             var actualTool = tool == null ? org.bukkit.inventory.ItemStack.empty() : tool;
             features[57] = Math.clamp(observedBlock.getBlockData().getDestroySpeed(actualTool, true) / 32.0, 0, 16);
             boolean preferredTool = observedBlock.isPreferredTool(actualTool);
-            features[CandidateActionContext.BREAK_HARVESTS_DROPS] = preferredTool ? 1 : 0;
+            boolean requiresCorrectTool = !observedBlock.isPreferredTool(org.bukkit.inventory.ItemStack.empty());
+            CandidateActionContext.encodeMiningPhysics(features, preferredTool, requiresCorrectTool);
             boolean silkTouch = !actualTool.isEmpty()
                     && actualTool.containsEnchantment(org.bukkit.enchantments.Enchantment.SILK_TOUCH);
             boolean shears = !actualTool.isEmpty() && actualTool.getType() == Material.SHEARS;

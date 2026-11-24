@@ -2,6 +2,7 @@ package me.herry.minecraftAI.ai.action;
 
 import me.herry.minecraftAI.ai.AIBody;
 import me.herry.minecraftAI.ai.AIPlayer;
+import me.herry.minecraftAI.ai.memory.MemorySystem;
 import me.herry.minecraftAI.ai.memory.MemoryType;
 import me.herry.minecraftAI.ai.navigation.NavigationSystem;
 import me.herry.minecraftAI.ai.navigation.PathGoal;
@@ -23,6 +24,8 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.util.RayTraceResult;
 import org.bukkit.util.Vector;
 
+import java.util.UUID;
+
 /**
  * 주변에 떨어진 아이템으로 걸어가서 줍는다. 아이템은 가까이 가면 자동으로 주워진다.
  */
@@ -30,6 +33,8 @@ public final class PickupItemAction extends AbstractAction implements PrimitiveA
     private static final int TIMEOUT = 400;
     private static final int PER_ITEM_TICKS = 100;
     private static final long UNREACHABLE_TTL = 1200L;
+    static final long EXACT_UNREACHABLE_TTL = 200L;
+    private static final int DIRECT_WALK_TIMEOUT = 40;
     // 이 거리 안의 아이템이 블록에 막혀 있으면 그 블록을 캐서 길을 낸다.
     private static final double CLEAR_RANGE = 4.5;
     private static final int MAX_CLEARS = 3;
@@ -45,6 +50,7 @@ public final class PickupItemAction extends AbstractAction implements PrimitiveA
     private Item current;
     private int itemTicks;
     private boolean walkingDirectly;
+    private int directWalkTicks;
     private boolean looseApproach;
     private boolean foundAny;
     private int itemsBefore = -1;
@@ -76,6 +82,18 @@ public final class PickupItemAction extends AbstractAction implements PrimitiveA
         return new PickupItemAction(EXACT_PICKUP_RANGE, true, false, selected);
     }
 
+    public static boolean isUnreachable(AIPlayer ai, BlockPoint block) {
+        return isUnreachable(ai.getMemory(), ai.getWorldId(), block, ai.getTicks());
+    }
+
+    static boolean isUnreachable(MemorySystem memory, UUID worldId, BlockPoint block, long tick) {
+        return memory.contains(MemoryType.UNREACHABLE, worldId, block, tick);
+    }
+
+    static void markUnreachable(MemorySystem memory, UUID worldId, BlockPoint block, long tick, boolean allowClearing) {
+        memory.remember(MemoryType.UNREACHABLE, worldId, block, tick, allowClearing ? UNREACHABLE_TTL : EXACT_UNREACHABLE_TTL);
+    }
+
     public static String checkExact(AIPlayer ai, PrimitiveCommand.PickupExact selection) {
         if (!selection.world().equals(ai.getWorldId())) return "drop world changed";
         if (!(Bukkit.getEntity(selection.entityId()) instanceof Item item) || !matches(ai, item, selection))
@@ -83,6 +101,7 @@ public final class PickupItemAction extends AbstractAction implements PrimitiveA
         var player = ai.getPlayer();
         if (!isInRange(player.getLocation(), item.getLocation(), EXACT_PICKUP_RANGE)
                 || !PerceptionSystem.canSee(player, item)) return "drop outside visible pickup range";
+        if (isUnreachable(ai, Positions.of(item.getLocation()))) return "drop temporarily unreachable";
         return ai.getBody().canStoreDrop(item) ? "" : "no compatible inventory space";
     }
 
@@ -130,7 +149,8 @@ public final class PickupItemAction extends AbstractAction implements PrimitiveA
             // A drop can fall into a different cell while navigation is still approaching it.
             var goal = ai.getNavigation().getGoal();
             if (!walkingDirectly && goal != null && !goal.target().equals(Positions.of(current.getLocation()))) {
-                ai.getNavigation().navigateTo(PathGoal.arrive(Positions.of(current.getLocation()), EXACT_RADIUS));
+                ai.getNavigation().navigateTo(PathGoal.arrive(
+                        Positions.of(current.getLocation()), looseApproach ? LOOSE_RADIUS : EXACT_RADIUS));
             }
         } else if (ai.getInventory().isFull()) {
             if (!allowClearing && ai.getInventory().count(material -> true) <= itemsBefore) fail("inventory full without collecting an item");
@@ -174,6 +194,10 @@ public final class PickupItemAction extends AbstractAction implements PrimitiveA
             return;
         }
         if (walkingDirectly) {
+            if (++directWalkTicks > DIRECT_WALK_TIMEOUT) {
+                if (!clearWay(ai, player)) giveUp(ai, "took too long");
+                return;
+            }
             walkTo(ai, player, current.getLocation());
             return;
         }
@@ -182,11 +206,8 @@ public final class PickupItemAction extends AbstractAction implements PrimitiveA
         navigation.tick();
         if (navigation.getState() == NavigationSystem.State.ARRIVED) {
             walkingDirectly = true;
+            directWalkTicks = 0;
         } else if (navigation.getState() == NavigationSystem.State.FAILED) {
-            if (!allowClearing) {
-                giveUp(ai, "no path (" + navigation.getFailReason() + ")");
-                return;
-            }
             // 아이템이 있는 칸에 설 수 없으면 (블록 틈, 반블록 위 등) 최대한 가까이 가서 직접 걸어 본다.
             if (looseApproach) {
                 String reason = navigation.getFailReason();
@@ -202,6 +223,7 @@ public final class PickupItemAction extends AbstractAction implements PrimitiveA
     private void approach(AIPlayer ai) {
         itemTicks = 0;
         walkingDirectly = false;
+        directWalkTicks = 0;
         looseApproach = false;
         // 아이템이 있는 바로 그 칸까지 간다. 옆 칸이나 한 칸 위에서 멈추면 아이템이 주워지는 범위에 들지 않을 수 있다.
         ai.getNavigation().navigateTo(PathGoal.arrive(Positions.of(current.getLocation()), EXACT_RADIUS));
@@ -250,16 +272,12 @@ public final class PickupItemAction extends AbstractAction implements PrimitiveA
 
     // 닿을 수 없는 아이템(나무 위 등)은 잠시 기억해 두고 다시 주우러 가지 않는다.
     private void giveUp(AIPlayer ai, String reason) {
-        ai.debug("Could not pick up " + current.getItemStack().getType() + " at " + Positions.of(current.getLocation()) + ": " + reason);
-        if (!allowClearing) {
-            ai.getNavigation().stop();
-            current = null;
-            fail(reason);
-            return;
-        }
-        ai.getMemory().remember(MemoryType.UNREACHABLE, ai.getWorldId(), Positions.of(current.getLocation()), ai.getTicks(), UNREACHABLE_TTL);
+        BlockPoint block = Positions.of(current.getLocation());
+        ai.debug("Could not pick up " + current.getItemStack().getType() + " at " + block + ": " + reason);
+        markUnreachable(ai.getMemory(), ai.getWorldId(), block, ai.getTicks(), allowClearing);
         ai.getNavigation().stop();
         current = null;
+        if (!allowClearing) fail(reason);
     }
 
     private Item findNearest(AIPlayer ai, Player player) {

@@ -67,6 +67,7 @@ public final class CandidateActionContext {
     public static final int CRAFT_DUPLICATES_OWNED_DURABLE = 247;
     public static final int MATERIAL_CRAFTING_DEAD_END = 248;
     public static final int BREAKS_REACHABLE_WORKSTATION = 249;
+    public static final int BREAK_REQUIRES_CORRECT_TOOL = 250;
     private static final int IMPACT_START = CONSUMES_OBJECTIVE_INGREDIENT;
     private static final int IMPACT_END = ENABLES_TABLE_AND_OBJECTIVE_FEASIBILITY;
     private static final int ALLOCATION_SEARCH_LIMIT = 4096;
@@ -252,6 +253,13 @@ public final class CandidateActionContext {
         features[MATERIAL_IS_BLOCK] = props.block() ? 1 : 0;
         features[MATERIAL_IS_FOOD] = props.food() ? 1 : 0;
         features[MATERIAL_IS_FUEL] = props.fuel() ? 1 : 0;
+    }
+
+    public static void encodeMiningPhysics(double[] features, boolean harvestsDrops, boolean requiresCorrectTool) {
+        if (features.length != PolicyFrame.ACTION_SIZE)
+            throw new IllegalArgumentException("candidate action context shape");
+        features[BREAK_HARVESTS_DROPS] = harvestsDrops ? 1 : 0;
+        features[BREAK_REQUIRES_CORRECT_TOOL] = requiresCorrectTool ? 1 : 0;
     }
 
     public static void encodeCraftUtility(double[] features, PrimitiveType type, String directMaterial,

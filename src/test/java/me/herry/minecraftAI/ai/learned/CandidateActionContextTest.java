@@ -610,4 +610,21 @@ class CandidateActionContextTest {
         assertEquals(1.0, breakReachableFurnace[CandidateActionContext.BREAKS_REACHABLE_WORKSTATION]);
         assertEquals(0.0, breakReachableFurnace[CandidateActionContext.UNOWNED_MATERIAL]);
     }
+
+    @Test void miningPhysicsSeparatesToolGatedBlocksFromBareHandBlocks() {
+        double[] dirtOrLog = new double[PolicyFrame.ACTION_SIZE];
+        CandidateActionContext.encodeMiningPhysics(dirtOrLog, true, false);
+        assertEquals(1.0, dirtOrLog[CandidateActionContext.BREAK_HARVESTS_DROPS]);
+        assertEquals(0.0, dirtOrLog[CandidateActionContext.BREAK_REQUIRES_CORRECT_TOOL]);
+
+        double[] stoneWithPickaxe = new double[PolicyFrame.ACTION_SIZE];
+        CandidateActionContext.encodeMiningPhysics(stoneWithPickaxe, true, true);
+        assertEquals(1.0, stoneWithPickaxe[CandidateActionContext.BREAK_HARVESTS_DROPS]);
+        assertEquals(1.0, stoneWithPickaxe[CandidateActionContext.BREAK_REQUIRES_CORRECT_TOOL]);
+
+        double[] stoneWithHand = new double[PolicyFrame.ACTION_SIZE];
+        CandidateActionContext.encodeMiningPhysics(stoneWithHand, false, true);
+        assertEquals(0.0, stoneWithHand[CandidateActionContext.BREAK_HARVESTS_DROPS]);
+        assertEquals(1.0, stoneWithHand[CandidateActionContext.BREAK_REQUIRES_CORRECT_TOOL]);
+    }
 }

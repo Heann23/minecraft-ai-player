@@ -453,7 +453,8 @@ public final class PrimitiveAdapter {
         Player player = ai.getPlayer();
         for (Entity entity : player.getNearbyEntities(radius, radius, radius)) {
             if (entity instanceof Item item && item.isValid() && !DropJunkAction.isDiscarded(item)
-                    && PickupItemAction.isInRange(player.getLocation(), item.getLocation(), radius)) return "";
+                    && PickupItemAction.isInRange(player.getLocation(), item.getLocation(), radius)
+                    && !PickupItemAction.isUnreachable(ai, Positions.of(item.getLocation()))) return "";
         }
         return "no nearby item to pick up";
     }
