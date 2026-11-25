@@ -9,6 +9,8 @@ import continuation_policy
 CONTRACT = "minecraft-primitive-candidates/v10"
 STATE_SIZE, ACTION_SIZE, MAX_OPTIONS = 448, 304, 128
 INPUT_SIZE = STATE_SIZE + ACTION_SIZE
+STATE_ACTION_INTERACTION = "state-action-bilinear/v1"
+STATE_ACTION_RANK = 32
 
 
 def inputs(frame: dict) -> tuple[np.ndarray, np.ndarray]:
@@ -70,6 +72,21 @@ class ActorCritic:
         for group in (self.params, self.first, self.second):
             group['goal_action_w'] = np.zeros((24, ACTION_SIZE))
 
+    def enable_state_action_interaction(self, *, seed: int = 20261126, rank: int = STATE_ACTION_RANK):
+        """Explicit zero-residual low-rank state-action conditioning without semantic action advice."""
+        if self.interaction is not None:
+            raise ValueError("interaction already enabled")
+        if type(rank) is not int or not 1 <= rank <= 64:
+            raise ValueError("state-action rank must be 1..64")
+        self.interaction = STATE_ACTION_INTERACTION
+        init_rng = np.random.default_rng(seed)
+        self.params["state_action_s"] = init_rng.normal(0, 1 / math.sqrt(STATE_SIZE), (STATE_SIZE, rank))
+        self.params["state_action_b"] = np.zeros(rank)
+        self.params["state_action_a"] = np.zeros((ACTION_SIZE, rank))
+        for group in (self.first, self.second):
+            for key in ("state_action_s", "state_action_b", "state_action_a"):
+                group[key] = np.zeros_like(self.params[key])
+
     @staticmethod
     def verify_zero_goal_extension(before, after):
         restored = copy.deepcopy(after)
@@ -82,13 +99,43 @@ class ActorCritic:
         if restored != before:
             raise ValueError('goal extension changed original optimizer state')
 
+    @staticmethod
+    def verify_zero_state_action_extension(before, after):
+        restored = copy.deepcopy(after)
+        if 'interaction' in before or restored.pop('interaction', None) != STATE_ACTION_INTERACTION:
+            raise ValueError('invalid explicit state-action extension')
+        bias_p = np.asarray(restored['params'].pop('state_action_b', None), dtype=np.float64)
+        if bias_p.ndim != 1 or not 1 <= bias_p.shape[0] <= 64 or not np.isfinite(bias_p).all() or np.any(bias_p != 0):
+            raise ValueError('state-action extension must add zero state bias')
+        rank = bias_p.shape[0]
+        for group in ('first', 'second'):
+            bias_m = np.asarray(restored[group].pop('state_action_b', None), dtype=np.float64)
+            if bias_m.shape != (rank,) or not np.isfinite(bias_m).all() or np.any(bias_m != 0):
+                raise ValueError('state-action extension must add zero state bias Adam')
+        state_p = np.asarray(restored['params'].pop('state_action_s', None), dtype=np.float64)
+        if state_p.shape != (STATE_SIZE, rank) or not np.isfinite(state_p).all():
+            raise ValueError('invalid state-action projection shape')
+        for group in ('first', 'second'):
+            state_m = np.asarray(restored[group].pop('state_action_s', None), dtype=np.float64)
+            if state_m.shape != (STATE_SIZE, rank) or not np.isfinite(state_m).all() or np.any(state_m != 0):
+                raise ValueError('state-action extension must start with zero state Adam')
+        for group in ('params', 'first', 'second'):
+            act_v = np.asarray(restored[group].pop('state_action_a', None), dtype=np.float64)
+            if act_v.shape != (ACTION_SIZE, rank) or not np.isfinite(act_v).all() or np.any(act_v != 0):
+                raise ValueError('state-action extension must add zero initial action weights and Adam')
+        if restored != before:
+            raise ValueError('state-action extension changed original optimizer state')
+
     def evaluate(self, frame: dict):
         state, x = inputs(frame)
         p = self.params
         hidden = np.tanh(x @ p["actor_w"].T + p["actor_b"])
         logits = hidden @ p["actor_out"] + p["actor_bias"][0]
-        if self.interaction is not None:
+        if self.interaction == "goal-action-bilinear/v1":
             logits += x[:, STATE_SIZE:] @ (state[208:232] @ p['goal_action_w'])
+        elif self.interaction == STATE_ACTION_INTERACTION:
+            s_gate = np.tanh(state @ p["state_action_s"] + p["state_action_b"])
+            logits += x[:, STATE_SIZE:] @ (p["state_action_a"] @ s_gate)
         if self.selection in continuation_policy.SUPPORTED:
             logits = continuation_policy.scores(frame, logits, self.selection)
         logits -= logits.max()
@@ -144,8 +191,15 @@ class ActorCritic:
             scores_gradient = -coefficient * probabilities
             scores_gradient[chosen] += coefficient
             scores_gradient += entropy_weight * entropy_gradient
-            if self.interaction is not None:
+            if self.interaction == "goal-action-bilinear/v1":
                 gradients['goal_action_w'] += np.outer(state[208:232], scores_gradient @ x[:, STATE_SIZE:])
+            elif self.interaction == STATE_ACTION_INTERACTION:
+                s_gate = np.tanh(state @ self.params["state_action_s"] + self.params["state_action_b"])
+                ga = scores_gradient @ x[:, STATE_SIZE:]
+                gradients["state_action_a"] += np.outer(ga, s_gate)
+                gs = (ga @ self.params["state_action_a"]) * (1.0 - s_gate ** 2)
+                gradients["state_action_s"] += np.outer(state, gs)
+                gradients["state_action_b"] += gs
             gradients["actor_out"] += hidden.T @ scores_gradient
             gradients["actor_bias"][0] += scores_gradient.sum()
             hidden_gradient = scores_gradient[:, None] * self.params["actor_out"][None, :] * (1 - hidden ** 2)
@@ -177,7 +231,7 @@ class ActorCritic:
             self.params[key] -= step_rate * first / (np.sqrt(second) + 1e-8)
             if key in ("value_w", "value_b"):
                 self.params[key] *= 0.999
-            elif key == "actor_w":
+            elif key in ("actor_w", "state_action_s", "state_action_a"):
                 self.params[key] *= 0.99995
         if not all(np.isfinite(value).all() for value in self.params.values()):
             raise ValueError("non-finite updated policy")
@@ -251,6 +305,16 @@ class ActorCritic:
                     raise ValueError("invalid legacy goal interaction tensor")
                 cross_zeros = np.zeros((24, ACTION_SIZE - old_action))
                 upgraded[group]["goal_action_w"] = np.concatenate((cross, cross_zeros), axis=1).tolist()
+            if "state_action_s" in state[group]:
+                sa_s = np.asarray(state[group]["state_action_s"], dtype=np.float64)
+                if sa_s.ndim != 2 or sa_s.shape[0] != old_state:
+                    raise ValueError("invalid legacy state-action state tensor")
+                upgraded[group]["state_action_s"] = np.concatenate((sa_s, np.zeros((STATE_SIZE - old_state, sa_s.shape[1]))), axis=0).tolist()
+            if "state_action_a" in state[group]:
+                sa_a = np.asarray(state[group]["state_action_a"], dtype=np.float64)
+                if sa_a.ndim != 2 or sa_a.shape[0] != old_action:
+                    raise ValueError("invalid legacy state-action action tensor")
+                upgraded[group]["state_action_a"] = np.concatenate((sa_a, np.zeros((ACTION_SIZE - old_action, sa_a.shape[1]))), axis=0).tolist()
         upgraded["contract"] = CONTRACT
         return cls.from_optimizer_state(upgraded)
 
@@ -267,9 +331,15 @@ class ActorCritic:
         hidden = len(state["params"]["actor_b"])
         model = cls(0, hidden)
         if 'interaction' in state:
-            if state['interaction'] != 'goal-action-bilinear/v1':
+            if state['interaction'] == 'goal-action-bilinear/v1':
+                model.enable_goal_interaction()
+            elif state['interaction'] == STATE_ACTION_INTERACTION:
+                bias = state['params'].get('state_action_b')
+                if not isinstance(bias, list):
+                    raise ValueError('invalid state-action rank')
+                model.enable_state_action_interaction(rank=len(bias))
+            else:
                 raise ValueError('unsupported goal interaction')
-            model.enable_goal_interaction()
         model.selection = state.get("selection", "flat")
         if model.selection not in ("flat", *continuation_policy.SUPPORTED):
             raise ValueError("unsupported temporal selection law")
@@ -297,6 +367,18 @@ class ActorCritic:
         if environment_steps <= 0 or self.updates == 0:
             raise ValueError("initialization is not a trained model")
         p = self.params
+        if self.interaction == STATE_ACTION_INTERACTION:
+            return {"schema": "minecraft-rl-actor/v4",
+                    **({"selection": self.selection} if self.selection != "flat" else {}),
+                    "interaction": self.interaction,
+                    "stateActionStateWeights": p["state_action_s"].tolist(),
+                    "stateActionStateBias": p["state_action_b"].tolist(),
+                    "stateActionActionWeights": p["state_action_a"].tolist(),
+                    "contract": CONTRACT, "algorithm": "ppo",
+                    "environment": "minecraft-paper", "environmentSteps": environment_steps,
+                    "trainingRun": training_run, "rolloutSha256": rollout_sha256,
+                    "hiddenWeights": p["actor_w"].tolist(), "hiddenBias": p["actor_b"].tolist(),
+                    "outputWeights": p["actor_out"].tolist(), "outputBias": float(p["actor_bias"][0])}
         return {"schema": "minecraft-rl-actor/v3" if self.interaction is not None else "minecraft-rl-actor/v1" if self.selection == "flat" else "minecraft-rl-actor/v2",
                 **({"selection": self.selection} if self.selection != "flat" else {}),
                 **({"interaction": self.interaction, "goalActionWeights": p['goal_action_w'].tolist()} if self.interaction is not None else {}),

@@ -16,14 +16,25 @@ public final class PolicyWeights {
                            long environmentSteps, String trainingRun, String rolloutSha256,
                            double[][] hiddenWeights, double[] hiddenBias, double[] outputWeights, double outputBias,
                            String brainId, String trainingStartState, Long modelVersion, Long gradientUpdates, String selection,
-                           String interaction, double[][] goalActionWeights) {
+                           String interaction, double[][] goalActionWeights,
+                           double[][] stateActionStateWeights, double[] stateActionStateBias,
+                           double[][] stateActionActionWeights) {
+        public Artifact(String schema, String contract, String algorithm, String environment,
+                        long environmentSteps, String trainingRun, String rolloutSha256,
+                        double[][] hiddenWeights, double[] hiddenBias, double[] outputWeights, double outputBias,
+                        String brainId, String trainingStartState, Long modelVersion, Long gradientUpdates, String selection,
+                        String interaction, double[][] goalActionWeights) {
+            this(schema, contract, algorithm, environment, environmentSteps, trainingRun, rolloutSha256,
+                    hiddenWeights, hiddenBias, outputWeights, outputBias, brainId, trainingStartState, modelVersion,
+                    gradientUpdates, selection, interaction, goalActionWeights, null, null, null);
+        }
         public Artifact(String schema, String contract, String algorithm, String environment,
                         long environmentSteps, String trainingRun, String rolloutSha256,
                         double[][] hiddenWeights, double[] hiddenBias, double[] outputWeights, double outputBias,
                         String brainId, String trainingStartState, Long modelVersion, Long gradientUpdates, String selection) {
             this(schema, contract, algorithm, environment, environmentSteps, trainingRun, rolloutSha256,
                     hiddenWeights, hiddenBias, outputWeights, outputBias, brainId, trainingStartState, modelVersion,
-                    gradientUpdates, selection, null, null);
+                    gradientUpdates, selection, null, null, null, null, null);
         }
         public Artifact(String schema, String contract, String algorithm, String environment,
                         long environmentSteps, String trainingRun, String rolloutSha256,
@@ -37,24 +48,50 @@ public final class PolicyWeights {
     private final String sha256;
 
     private PolicyWeights(Artifact artifact, String sha256) {
-        if (artifact == null || !(SCHEMA.equals(artifact.schema()) || "minecraft-rl-actor/v2".equals(artifact.schema()) || "minecraft-rl-actor/v3".equals(artifact.schema())) || !PolicyFrame.CONTRACT.equals(artifact.contract())
+        if (artifact == null || !(SCHEMA.equals(artifact.schema()) || "minecraft-rl-actor/v2".equals(artifact.schema())
+                || "minecraft-rl-actor/v3".equals(artifact.schema()) || "minecraft-rl-actor/v4".equals(artifact.schema()))
+                || !PolicyFrame.CONTRACT.equals(artifact.contract())
                 || !"ppo".equals(artifact.algorithm()) || !"minecraft-paper".equals(artifact.environment())
                 || artifact.environmentSteps() <= 0 || artifact.trainingRun() == null || artifact.trainingRun().isBlank()
                 || artifact.rolloutSha256() == null || !artifact.rolloutSha256().matches("[0-9a-f]{64}"))
             throw new IllegalArgumentException("missing/incompatible trained Paper RL provenance");
         boolean temporal = "minecraft-rl-actor/v2".equals(artifact.schema());
         boolean interaction = "minecraft-rl-actor/v3".equals(artifact.schema());
-        if ((temporal || interaction && artifact.selection() != null) ? !java.util.Set.of("continue-switch-mean/v1", "continue-switch-mean/v2").contains(artifact.selection() == null ? "" : artifact.selection()) : artifact.selection() != null)
+        boolean stateActionInteraction = "minecraft-rl-actor/v4".equals(artifact.schema());
+        if ((temporal || (interaction || stateActionInteraction) && artifact.selection() != null)
+                ? !java.util.Set.of("continue-switch-mean/v1", "continue-switch-mean/v2").contains(artifact.selection() == null ? "" : artifact.selection())
+                : artifact.selection() != null)
             throw new IllegalArgumentException("actor selection law/schema mismatch");
         if (interaction) {
-            if (!"goal-action-bilinear/v1".equals(artifact.interaction()) || artifact.goalActionWeights() == null || artifact.goalActionWeights().length != 24)
+            if (!"goal-action-bilinear/v1".equals(artifact.interaction()) || artifact.goalActionWeights() == null || artifact.goalActionWeights().length != 24
+                    || artifact.stateActionStateWeights() != null || artifact.stateActionStateBias() != null || artifact.stateActionActionWeights() != null)
                 throw new IllegalArgumentException("invalid goal interaction architecture");
             for (double[] row : artifact.goalActionWeights()) {
                 if (row == null || row.length != PolicyFrame.ACTION_SIZE) throw new IllegalArgumentException("goal interaction shape mismatch");
                 for (double weight : row) finite(weight);
             }
-        } else if (artifact.interaction() != null || artifact.goalActionWeights() != null) {
-            throw new IllegalArgumentException("goal interaction requires actor/v3");
+        } else if (stateActionInteraction) {
+            if (!"state-action-bilinear/v1".equals(artifact.interaction()) || artifact.goalActionWeights() != null
+                    || artifact.stateActionStateBias() == null || artifact.stateActionStateWeights() == null
+                    || artifact.stateActionActionWeights() == null)
+                throw new IllegalArgumentException("invalid state-action interaction architecture");
+            int rank = artifact.stateActionStateBias().length;
+            if (rank < 1 || rank > 64 || artifact.stateActionStateWeights().length != PolicyFrame.STATE_SIZE
+                    || artifact.stateActionActionWeights().length != PolicyFrame.ACTION_SIZE)
+                throw new IllegalArgumentException("state-action interaction shape mismatch");
+            for (double bias : artifact.stateActionStateBias()) finite(bias);
+            for (double[] row : artifact.stateActionStateWeights()) {
+                if (row == null || row.length != rank) throw new IllegalArgumentException("state-action state matrix shape mismatch");
+                for (double weight : row) finite(weight);
+            }
+            for (double[] row : artifact.stateActionActionWeights()) {
+                if (row == null || row.length != rank) throw new IllegalArgumentException("state-action action matrix shape mismatch");
+                for (double weight : row) finite(weight);
+            }
+        } else if (artifact.interaction() != null || artifact.goalActionWeights() != null
+                || artifact.stateActionStateWeights() != null || artifact.stateActionStateBias() != null
+                || artifact.stateActionActionWeights() != null) {
+            throw new IllegalArgumentException("interaction parameters require actor/v3 or actor/v4");
         }
         int hidden = artifact.hiddenBias() == null ? 0 : artifact.hiddenBias().length;
         if (hidden < 1 || hidden > 256 || artifact.hiddenWeights() == null || artifact.hiddenWeights().length != hidden
@@ -100,6 +137,27 @@ public final class PolicyWeights {
     }
 
     private Prediction select(PolicyFrame frame, java.util.random.RandomGenerator random) {
+        double[] stateActionEff = null;
+        if ("state-action-bilinear/v1".equals(artifact.interaction())) {
+            double[] state = frame.state();
+            int rank = artifact.stateActionStateBias().length;
+            double[] gate = new double[rank];
+            for (int r = 0; r < rank; r++) {
+                double z = artifact.stateActionStateBias()[r];
+                for (int s = 0; s < PolicyFrame.STATE_SIZE; s++) {
+                    double sv = state[s];
+                    if (sv != 0) z += sv * artifact.stateActionStateWeights()[s][r];
+                }
+                gate[r] = Math.tanh(z);
+            }
+            stateActionEff = new double[PolicyFrame.ACTION_SIZE];
+            for (int a = 0; a < PolicyFrame.ACTION_SIZE; a++) {
+                double sum = 0;
+                double[] row = artifact.stateActionActionWeights()[a];
+                for (int r = 0; r < rank; r++) sum += row[r] * gate[r];
+                stateActionEff[a] = sum;
+            }
+        }
         double[] scores = new double[frame.options().size()];
         int best = 0;
         for (int option = 0; option < scores.length; option++) {
@@ -110,11 +168,18 @@ public final class PolicyWeights {
                 for (int feature = 0; feature < input.length; feature++) value += artifact.hiddenWeights()[neuron][feature] * input[feature];
                 score += Math.tanh(value) * artifact.outputWeights()[neuron];
             }
-            if (artifact.interaction() != null) for (int goal = 0; goal < 24; goal++) {
-                double context = input[208 + goal];
-                if (context == 0) continue;
-                for (int action = 0; action < PolicyFrame.ACTION_SIZE; action++)
-                    score += context * artifact.goalActionWeights()[goal][action] * input[PolicyFrame.STATE_SIZE + action];
+            if ("goal-action-bilinear/v1".equals(artifact.interaction())) {
+                for (int goal = 0; goal < 24; goal++) {
+                    double context = input[208 + goal];
+                    if (context == 0) continue;
+                    for (int action = 0; action < PolicyFrame.ACTION_SIZE; action++)
+                        score += context * artifact.goalActionWeights()[goal][action] * input[PolicyFrame.STATE_SIZE + action];
+                }
+            } else if (stateActionEff != null) {
+                for (int action = 0; action < PolicyFrame.ACTION_SIZE; action++) {
+                    double av = input[PolicyFrame.STATE_SIZE + action];
+                    if (av != 0) score += av * stateActionEff[action];
+                }
             }
             if (!Double.isFinite(score)) throw new IllegalStateException("non-finite actor output");
             scores[option] = score;

@@ -40,12 +40,13 @@ public final class PpoBridge implements AutoCloseable {
                              String rewardContract, java.util.List<String> objectiveEvents, RewardEvidence rewardEvidence,
                              PolicyTaskMemory.View nextTaskMemory, PolicyTaskMemory.Completion taskCompletion,
                              double[] appliedState) {
+        static final String GOAL_DRIVEN_RECIPE_PROGRESS = "survival-progress/v7";
         static final String FOCUSED_RECIPE_PROGRESS = "survival-progress/v6";
         static final String RECIPE_PROGRESS = "survival-progress/v5";
         private static final String INGREDIENT_PROGRESS = "survival-progress/v4";
         private static final java.util.Set<String> EVIDENCE_CONTRACTS =
                 java.util.Set.of("survival-progress/v2", "survival-progress/v3", INGREDIENT_PROGRESS, RECIPE_PROGRESS,
-                        FOCUSED_RECIPE_PROGRESS);
+                        FOCUSED_RECIPE_PROGRESS, GOAL_DRIVEN_RECIPE_PROGRESS);
         public Transition(String session, long sequence, PolicyFrame frame, int index,
                           double logProbability, double value, long modelVersion, double reward,
                           int elapsedTicks, boolean terminated, boolean truncated, long appliedTick, String nextWorld, double[] nextState,
@@ -84,19 +85,21 @@ public final class PpoBridge implements AutoCloseable {
                     terminated, truncated, appliedTick, nextWorld, nextState, "survival-progress/v1", java.util.List.of(), null, null, null, null);
         }
         public Transition {
+            boolean goalDriven = GOAL_DRIVEN_RECIPE_PROGRESS.equals(rewardContract);
             boolean focusedRecipe = FOCUSED_RECIPE_PROGRESS.equals(rewardContract);
+            double baseReward = rewardEvidence == null ? 0
+                    : goalDriven ? rewardEvidence.goalDrivenTotal(elapsedTicks, terminated)
+                    : focusedRecipe ? rewardEvidence.focusedTotal(elapsedTicks, terminated)
+                    : rewardEvidence.total(elapsedTicks, terminated);
             double expectedReward = rewardEvidence == null ? 0
-                    : Math.clamp((focusedRecipe
-                            ? rewardEvidence.focusedTotal(elapsedTicks, terminated)
-                            : rewardEvidence.total(elapsedTicks, terminated))
-                            + (taskCompletion == null ? 0 : (focusedRecipe ? 4.0 : 1.0)), -100, 100);
+                    : Math.clamp(baseReward + (taskCompletion == null ? 0 : (goalDriven || focusedRecipe ? 4.0 : 1.0)), -100, 100);
             if (rewardEvidence != null && (!EVIDENCE_CONTRACTS.contains(rewardContract)
                     || Math.abs(expectedReward - reward) > 1e-9))
                 throw new IllegalArgumentException("actual reward evidence mismatch");
             if (!"survival-progress/v1".equals(rewardContract) && !EVIDENCE_CONTRACTS.contains(rewardContract))
                 throw new IllegalArgumentException("unsupported actual reward contract");
             var preparation = rewardEvidence == null ? null : rewardEvidence.recipePreparation();
-            boolean recipeContract = focusedRecipe || RECIPE_PROGRESS.equals(rewardContract) || INGREDIENT_PROGRESS.equals(rewardContract);
+            boolean recipeContract = goalDriven || focusedRecipe || RECIPE_PROGRESS.equals(rewardContract) || INGREDIENT_PROGRESS.equals(rewardContract);
             if (recipeContract != (preparation != null)
                     || INGREDIENT_PROGRESS.equals(rewardContract) && preparation != null
                     && Math.max(preparation.before().required(), preparation.after().required()) > 9
@@ -196,6 +199,11 @@ public final class PpoBridge implements AutoCloseable {
         public double focusedTotal(int elapsedTicks, boolean terminated) {
             return Math.clamp(elapsedTicks * 0.00001 + (healthAfter - healthBefore) * 0.05
                     + discoveries * 0.02 + objectiveReward * 3.0 - (terminated ? 10 : 0)
+                    + (recipePreparation == null ? 0 : recipePreparation.reward(elapsedTicks, terminated, 2.0)), -100, 100);
+        }
+        public double goalDrivenTotal(int elapsedTicks, boolean terminated) {
+            return Math.clamp(elapsedTicks * 0.00001 + (healthAfter - healthBefore) * 0.05
+                    + objectiveReward * 3.0 - (terminated ? 10 : 0)
                     + (recipePreparation == null ? 0 : recipePreparation.reward(elapsedTicks, terminated, 2.0)), -100, 100);
         }
     }

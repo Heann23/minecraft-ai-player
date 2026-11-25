@@ -123,6 +123,63 @@ class PolicyWeightsTest {
     }
 
     @Test
+    void stateActionBilinearResidualConditionsActionScoresOnPhysicalStateAndRejectsInvalidSchemas() throws Exception {
+        double[][] stateWeights = new double[PolicyFrame.STATE_SIZE][2];
+        stateWeights[PolicyCandidates.STATE_OWNED_HARVEST_TIER][0] = 4.0;
+        double[] stateBias = new double[] { 0.0, 0.0 };
+        double[][] actionWeights = new double[PolicyFrame.ACTION_SIZE][2];
+        actionWeights[0][0] = 3.0;
+        var artifact = new PolicyWeights.Artifact("minecraft-rl-actor/v4", PolicyFrame.CONTRACT, "ppo",
+                "minecraft-paper", 1, "numerical-fixture", "0".repeat(64), new double[1][PolicyFrame.INPUT_SIZE],
+                new double[] { 0 }, new double[] { 0 }, 0, null, null, null, null, null,
+                "state-action-bilinear/v1", null, stateWeights, stateBias, actionWeights);
+        Path file = directory.resolve("state-action.json");
+        Files.writeString(file, new Gson().toJson(artifact));
+        var weights = PolicyWeights.load(file);
+
+        double[] optA = new double[PolicyFrame.ACTION_SIZE];
+        optA[0] = -0.5;
+        double[] optB = new double[PolicyFrame.ACTION_SIZE];
+        optB[0] = 0.5;
+        var options = java.util.List.of(new PolicyFrame.Option("optA", optA), new PolicyFrame.Option("optB", optB));
+
+        double[] baseState = new double[PolicyFrame.STATE_SIZE];
+        baseState[PolicyCandidates.STATE_OWNED_HARVEST_TIER] = 0.0;
+        double[] negHidden = new double[1][PolicyFrame.INPUT_SIZE];
+        negHidden[0][PolicyFrame.STATE_SIZE] = -2.0; // Base prefers optA when state[415] == 0
+        var baseArtifact = new PolicyWeights.Artifact("minecraft-rl-actor/v4", PolicyFrame.CONTRACT, "ppo",
+                "minecraft-paper", 1, "numerical-fixture", "0".repeat(64), negHidden,
+                new double[] { 0 }, new double[] { 1.0 }, 0, null, null, null, null, null,
+                "state-action-bilinear/v1", null, stateWeights, stateBias, actionWeights);
+        Files.writeString(file, new Gson().toJson(baseArtifact));
+        weights = PolicyWeights.load(file);
+
+        var barePred = weights.predict(new PolicyFrame(UUID.randomUUID(), 5, baseState, options, false));
+        assertEquals("optA", barePred.candidate());
+
+        double[] tierState = new double[PolicyFrame.STATE_SIZE];
+        tierState[PolicyCandidates.STATE_OWNED_HARVEST_TIER] = 0.25; // tanh(1.0)*3.0 = +2.2848 > base margin
+        var tierPred = weights.predict(new PolicyFrame(UUID.randomUUID(), 6, tierState, options, false));
+        assertEquals("optB", tierPred.candidate());
+        double gate = Math.tanh(1.0);
+        double scoreA = Math.tanh(1.0) - 0.5 * 3.0 * gate;
+        double scoreB = Math.tanh(-1.0) + 0.5 * 3.0 * gate;
+        double expectedProbB = 1.0 / (1.0 + Math.exp(scoreA - scoreB));
+        assertEquals(Math.log(expectedProbB), tierPred.logProbability(), 1e-12);
+
+        String wrongSchema = new Gson().toJson(baseArtifact).replace("minecraft-rl-actor/v4", "minecraft-rl-actor/v1");
+        Files.writeString(file, wrongSchema);
+        assertThrows(java.io.IOException.class, () -> PolicyWeights.load(file));
+
+        var badDims = new PolicyWeights.Artifact("minecraft-rl-actor/v4", PolicyFrame.CONTRACT, "ppo",
+                "minecraft-paper", 1, "numerical-fixture", "0".repeat(64), negHidden,
+                new double[] { 0 }, new double[] { 1.0 }, 0, null, null, null, null, null,
+                "state-action-bilinear/v1", null, new double[10][2], stateBias, actionWeights);
+        Files.writeString(file, new Gson().toJson(badDims));
+        assertThrows(java.io.IOException.class, () -> PolicyWeights.load(file));
+    }
+
+    @Test
     void activeMiningCanChangeReconsiderationWithoutInventingFreshEvidence() {
         var point = new me.herry.minecraftAI.ai.util.BlockPoint(1, 64, 2);
         var tool = new me.herry.minecraftAI.ai.primitive.control.ToolChoice(0, "AIR", java.util.Map.of());

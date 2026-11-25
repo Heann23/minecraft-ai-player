@@ -145,7 +145,7 @@ class TrainingEpisodeTest {
         assertArrayEquals(first.nextState(), second.appliedState());
     }
 
-    @Test void focusedRecipeProgressV6PrioritizesGoalCompletionAndPenalizesIngredientWaste() {
+    @Test void goalDrivenRecipeProgressV7DropsDiscoveryBonusAndPreservesV6Validation() {
         var memory = new PolicyTaskMemory();
         memory.acquire(WORLD, "WOODEN_PICKAXE", 1, 1);
         var beforeGoal = memory.observe(WORLD, Map.of("OAK_PLANKS", 3, "STICK", 2));
@@ -153,8 +153,20 @@ class TrainingEpisodeTest {
                 null, beforeGoal);
         var beforeStock = new PpoBridge.RecipeStock("minecraft:wooden_pickaxe", 9, 9);
 
-        // Case A: decorative craft consumes ingredients (9/9 -> 6/9) despite 1 new item discovery
+        // Case A: surplus decorative discovery adds zero discovery bonus (only time drift <= 0.0001)
         var episode = new TrainingEpisode();
+        episode.begin(new PolicyCandidates.Capture(requested, List.of(), body(20), Map.of("OAK_PLANKS", 3, "STICK", 2)),
+                response(), actual(20, Map.of("OAK_PLANKS", 3, "STICK", 2)), 1, beforeStock);
+        var surplusNext = new PolicyFrame(WORLD, 6, new double[PolicyFrame.STATE_SIZE], OPTIONS, false,
+                null, beforeGoal);
+        var surplus = episode.finish(surplusNext, body(20), Map.of("OAK_BUTTON", 1, "OAK_PLANKS", 3, "STICK", 2),
+                false, false, 0, List.of(), null, beforeStock);
+        assertEquals("survival-progress/v7", surplus.rewardContract());
+        double expectedSurplus = 5 * 0.00001 + 2.0 * (Math.pow(0.99997, 5) - 1.0);
+        assertEquals(expectedSurplus, surplus.reward(), 1e-9);
+        assertTrue(surplus.reward() < 0.0, "surplus discovery must earn no bonus in v7");
+
+        // Case B: decorative craft consumes ingredients (9/9 -> 6/9) despite new item discovery
         episode.begin(new PolicyCandidates.Capture(requested, List.of(), body(20), Map.of("OAK_PLANKS", 3, "STICK", 2)),
                 response(), actual(20, Map.of("OAK_PLANKS", 3, "STICK", 2)), 1, beforeStock);
         var wasteNext = new PolicyFrame(WORLD, 6, new double[PolicyFrame.STATE_SIZE], OPTIONS, false,
@@ -162,12 +174,12 @@ class TrainingEpisodeTest {
         var wasteStock = new PpoBridge.RecipeStock("minecraft:wooden_pickaxe", 6, 9);
         var waste = episode.finish(wasteNext, body(20), Map.of("OAK_BUTTON", 1, "STICK", 2), false, false,
                 0, List.of(), null, wasteStock);
-        assertEquals("survival-progress/v6", waste.rewardContract());
-        double expectedWaste = 5 * 0.00001 + 0.02 + 2.0 * (Math.pow(0.99997, 5) * (6.0 / 9.0) - 1.0);
+        assertEquals("survival-progress/v7", waste.rewardContract());
+        double expectedWaste = 5 * 0.00001 + 2.0 * (Math.pow(0.99997, 5) * (6.0 / 9.0) - 1.0);
         assertEquals(expectedWaste, waste.reward(), 1e-9);
         assertTrue(waste.reward() < -0.6, "ingredient waste must remain strongly negative despite decorative discovery");
 
-        // Case B: actual goal completion + advancement
+        // Case C: actual goal completion + advancement
         var completeNext = new PolicyFrame(WORLD, 6, new double[PolicyFrame.STATE_SIZE], OPTIONS, false,
                 null, memory.observe(WORLD, Map.of("WOODEN_PICKAXE", 1)));
         var completion = memory.settleCompletion(beforeGoal, completeNext.taskMemory(), true).orElseThrow();
@@ -176,9 +188,18 @@ class TrainingEpisodeTest {
         var completeStock = new PpoBridge.RecipeStock("minecraft:wooden_pickaxe", 6, 9);
         var complete = episode.finish(completeNext, body(20), Map.of("WOODEN_PICKAXE", 1), false, false,
                 1, List.of("advancement:minecraft:story/root"), completion, completeStock);
-        assertEquals("survival-progress/v6", complete.rewardContract());
-        double expectedComplete = 5 * 0.00001 + 0.02 + 3.0 + 2.0 * (Math.pow(0.99997, 5) - 1.0) + 4.0;
+        assertEquals("survival-progress/v7", complete.rewardContract());
+        double expectedComplete = 5 * 0.00001 + 3.0 + 2.0 * (Math.pow(0.99997, 5) - 1.0) + 4.0;
         assertEquals(expectedComplete, complete.reward(), 1e-9);
         assertTrue(complete.reward() > 7.0);
+
+        // Case D: backward compatibility with historical survival-progress/v6 evidence
+        var v6Prep = new PpoBridge.RecipeProgress(beforeStock, wasteStock, false);
+        var v6Evidence = new PpoBridge.RewardEvidence("actual-reward-evidence/v1", 20, 20, 20, 20, 0, 0, 300, 300, 1, 0, v6Prep);
+        double expectedV6 = v6Evidence.focusedTotal(5, false);
+        var v6Transition = new PpoBridge.Transition(UUID.randomUUID().toString(), 0, requested, 0, 0.0, 0.0, 0,
+                expectedV6, 5, false, false, 1, WORLD.toString(), new double[PolicyFrame.STATE_SIZE],
+                PpoBridge.Transition.FOCUSED_RECIPE_PROGRESS, List.of(), v6Evidence, wasteNext.taskMemory(), null);
+        assertEquals("survival-progress/v6", v6Transition.rewardContract());
     }
 }

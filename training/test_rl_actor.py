@@ -83,6 +83,67 @@ class ActorTests(unittest.TestCase):
         self.assertEqual(model.artifact(environment_steps=1,training_run='numerical-fixture',rollout_sha256='0'*64)['schema'],'minecraft-rl-actor/v3')
         with self.assertRaises(ValueError):ActorCritic.verify_zero_goal_extension(before,model.optimizer_state())
 
+    def test_state_action_bilinear_zero_residual_and_ppo_gradients(self):
+        import copy
+        model = ActorCritic(31, hidden=4)
+        model.fit([row(model)])
+        observed = frame()
+        observed['state'][415] = 0.25
+        before = copy.deepcopy(model.optimizer_state())
+        rng_before = copy.deepcopy(model.rng.bit_generator.state)
+        probabilities, value, _ = model.evaluate(observed)
+        model.enable_state_action_interaction(seed=77, rank=4)
+        ActorCritic.verify_zero_state_action_extension(before, model.optimizer_state())
+        self.assertEqual(model.rng.bit_generator.state, rng_before)
+        np.testing.assert_array_equal(model.evaluate(observed)[0], probabilities)
+        self.assertEqual(model.value(observed['state'])[0], value)
+
+        sample = dict(row(model), frame=observed, logProbability=math.log(float(probabilities[1])), value=value)
+        advantages = np.array([0.7])
+        targets = np.array([value + 1.0])
+        gradients, _ = model.gradients([sample], advantages, targets, entropy_weight=0.03)
+        for index in ((0, 0), (0, 2)):
+            original = model.params['state_action_a'][index]
+            eps = 1e-5
+            model.params['state_action_a'][index] = original + eps
+            plus = model.gradients([sample], advantages, targets, entropy_weight=0.03)[1]['loss']
+            model.params['state_action_a'][index] = original - eps
+            minus = model.gradients([sample], advantages, targets, entropy_weight=0.03)[1]['loss']
+            model.params['state_action_a'][index] = original
+            self.assertAlmostEqual(gradients['state_action_a'][index], (plus - minus) / (2 * eps), places=6)
+        self.assertNotEqual(gradients['state_action_a'][0, 0], 0.0)
+
+        model.fit([sample])
+        post_probs, post_val, _ = model.evaluate(observed)
+        post_sample = dict(row(model), frame=observed, logProbability=math.log(float(post_probs[1])), value=post_val)
+        post_grads, _ = model.gradients([post_sample], advantages, targets, entropy_weight=0.03)
+        for pname, index in (('state_action_a', (0, 1)), ('state_action_s', (415, 1)), ('state_action_b', (1,))):
+            original = model.params[pname][index]
+            eps = 1e-5
+            model.params[pname][index] = original + eps
+            plus = model.gradients([post_sample], advantages, targets, entropy_weight=0.03)[1]['loss']
+            model.params[pname][index] = original - eps
+            minus = model.gradients([post_sample], advantages, targets, entropy_weight=0.03)[1]['loss']
+            model.params[pname][index] = original
+            self.assertAlmostEqual(post_grads[pname][index], (plus - minus) / (2 * eps), places=6)
+            self.assertNotEqual(post_grads[pname][index], 0.0)
+
+        s_before = model.params['state_action_s'].copy()
+        a_before = model.params['state_action_a'].copy()
+        zero_grads = {key: np.zeros_like(val) for key, val in model.params.items()}
+        model.apply(zero_grads)
+        np.testing.assert_allclose(model.params['state_action_s'], s_before * 0.99995, rtol=0, atol=1e-12)
+        np.testing.assert_allclose(model.params['state_action_a'], a_before * 0.99995, rtol=0, atol=1e-12)
+
+        restored = ActorCritic.from_optimizer_state(model.optimizer_state())
+        self.assertEqual(restored.interaction, 'state-action-bilinear/v1')
+        np.testing.assert_array_equal(restored.evaluate(observed)[0], model.evaluate(observed)[0])
+        artifact = model.artifact(environment_steps=1, training_run='numerical-fixture', rollout_sha256='0' * 64)
+        self.assertEqual(artifact['schema'], 'minecraft-rl-actor/v4')
+        self.assertEqual(len(artifact['stateActionStateBias']), 4)
+        with self.assertRaises(ValueError):
+            ActorCritic.verify_zero_state_action_extension(before, model.optimizer_state())
+
     def test_temporal_ppo_gradient_matches_changed_sampling_law(self):
         import copy
         from continuation_policy import SELECTION
@@ -415,6 +476,44 @@ class ActorTests(unittest.TestCase):
             item="WOODEN_PICKAXE", required=1, beforeOwned=0, afterOwned=1,
         )
         sample["reward"] = sample["elapsedTicks"] * 0.00001 + 0.02 + 3.0 + 2.0 * (discount - 1.0) + 4.0
+        validate_transition(sample)
+
+    def test_goal_driven_recipe_progress_v7_drops_discovery_bonus_and_keeps_v6(self):
+        model = ActorCritic(7, hidden=4)
+        sample = row(model, session=str(uuid.uuid4()))
+        sample.pop("nextValue")
+        objective = {"id": str(uuid.uuid4()), "world": sample["nextWorld"],
+                     "goal": {"item": "WOODEN_PICKAXE", "count": 1}, "startedTick": 1}
+        sample["frame"]["taskMemory"] = {"objective": objective, "worldMatches": True}
+        endpoint = {"recipe": "minecraft:wooden_pickaxe", "required": 9}
+        preparation = {"before": dict(endpoint, filled=9), "after": dict(endpoint, filled=9), "achieved": False}
+        sample.update(
+            rewardContract="survival-progress/v7",
+            objectiveEvents=[],
+            nextTaskMemory=dict(objective=objective, worldMatches=True, currentlyAchieved=False),
+            rewardEvidence={
+                "schema": "actual-reward-evidence/v1", "healthBefore": 20, "healthAfter": 20,
+                "foodBefore": 20, "foodAfter": 20, "saturationBefore": 0, "saturationAfter": 0,
+                "airBefore": 300, "airAfter": 300, "discoveries": 1, "objectiveReward": 0,
+                "recipePreparation": preparation,
+            },
+        )
+        discount = 0.99997 ** sample["elapsedTicks"]
+        sample["reward"] = sample["elapsedTicks"] * 0.00001 + 2.0 * (discount - 1.0)
+        validate_transition(sample)
+        v6_reward = sample["reward"] + 0.02
+        with self.assertRaisesRegex(ValueError, "reward evidence mismatch"):
+            validate_transition(dict(sample, reward=v6_reward))
+
+        preparation["achieved"] = True
+        sample["nextTaskMemory"].update(currentlyAchieved=True, owned=1)
+        sample["objectiveEvents"] = ["advancement:minecraft:story/root"]
+        sample["rewardEvidence"]["objectiveReward"] = 1
+        sample["taskCompletion"] = dict(
+            objectiveId=objective["id"], world=sample["nextWorld"],
+            item="WOODEN_PICKAXE", required=1, beforeOwned=0, afterOwned=1,
+        )
+        sample["reward"] = sample["elapsedTicks"] * 0.00001 + 3.0 + 2.0 * (discount - 1.0) + 4.0
         validate_transition(sample)
 
     def test_reward_versions_preserve_legacy_rows_and_validate_actual_progress_event_metadata(self):

@@ -45,10 +45,11 @@ def validate_transition(row: dict):
     if set(row) - {"rewardContract", "objectiveEvents", "rewardEvidence", "nextTaskMemory", "taskCompletion", "appliedState"} != required:
         raise ValueError("transition schema mismatch; Teacher labels are not accepted")
     contract = row.get("rewardContract", "survival-progress/v1")
+    goal_driven = contract == "survival-progress/v7"
     focused_recipe = contract == "survival-progress/v6"
-    recipe_progress = contract in ("survival-progress/v4", "survival-progress/v5", "survival-progress/v6")
+    recipe_progress = contract in ("survival-progress/v4", "survival-progress/v5", "survival-progress/v6", "survival-progress/v7")
     evidence_contracts = ("survival-progress/v2", "survival-progress/v3", "survival-progress/v4",
-                          "survival-progress/v5", "survival-progress/v6")
+                          "survival-progress/v5", "survival-progress/v6", "survival-progress/v7")
     if contract not in ("survival-progress/v1", *evidence_contracts):
         raise ValueError("unsupported observed reward contract")
     events = row.get("objectiveEvents", [])
@@ -117,14 +118,15 @@ def validate_transition(row: dict):
         if any(evidence[key] < 0 for key in ("healthBefore", "healthAfter", "saturationBefore", "saturationAfter", "discoveries")) \
                 or any(not 0 <= evidence[key] <= 20 for key in ("foodBefore", "foodAfter")):
             raise ValueError("invalid reward evidence range")
-        max_recipe_units = 18 if contract in ("survival-progress/v5", "survival-progress/v6") else 9
-        prep_scale = 2.0 if focused_recipe else 0.5
+        max_recipe_units = 18 if contract in ("survival-progress/v5", "survival-progress/v6", "survival-progress/v7") else 9
+        prep_scale = 2.0 if (focused_recipe or goal_driven) else 0.5
         preparation_reward = validate_recipe_preparation(
             row, evidence["recipePreparation"], max_recipe_units, prep_scale) if recipe_progress else 0
-        if focused_recipe:
+        if focused_recipe or goal_driven:
+            disc_term = evidence["discoveries"] * 0.02 if focused_recipe else 0.0
             base = (row["elapsedTicks"] * 0.00001
                     + (evidence["healthAfter"] - evidence["healthBefore"]) * 0.05
-                    + evidence["discoveries"] * 0.02 + evidence["objectiveReward"] * 3.0
+                    + disc_term + evidence["objectiveReward"] * 3.0
                     - (10 if row["terminated"] else 0) + preparation_reward)
             expected = max(-100, min(100, max(-100, min(100, base)) + (4.0 if completion is not None else 0)))
         else:

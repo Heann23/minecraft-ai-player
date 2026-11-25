@@ -146,6 +146,43 @@ class SeedPlanTests(unittest.TestCase):
                 after['checkpointSha256']=sha256(converted);evidence_path.write_text(json.dumps(evidence))
                 with self.assertRaisesRegex(ValueError,'zero tensors'):resume_parent_directory(converted)
 
+    def test_state_action_extension_ancestry_accepts_zero_action_and_rejects_tamper(self):
+        import copy
+        from paper_lab import resume_parent_directory, sha256
+        from rl_actor import STATE_SIZE, ACTION_SIZE
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            original = root / 'original/training/checkpoints/version-one/model.json'
+            original.parent.mkdir(parents=True)
+            old = {'optimizer': {'params': {'w': [1]}, 'first': {}, 'second': {}, 'rng': {'state': 1}}, 'rolloutSha256': '0' * 64}
+            original.write_text(json.dumps(old))
+            converted = root / 'converted/checkpoints/version-two/model.json'
+            converted.parent.mkdir(parents=True)
+            new = copy.deepcopy(old)
+            new['optimizer']['interaction'] = 'state-action-bilinear/v1'
+            rank = 4
+            new['optimizer']['params']['state_action_s'] = [[0.01] * rank for _ in range(STATE_SIZE)]
+            new['optimizer']['first']['state_action_s'] = [[0.0] * rank for _ in range(STATE_SIZE)]
+            new['optimizer']['second']['state_action_s'] = [[0.0] * rank for _ in range(STATE_SIZE)]
+            for group in ('params', 'first', 'second'):
+                new['optimizer'][group]['state_action_b'] = [0.0] * rank
+                new['optimizer'][group]['state_action_a'] = [[0.0] * rank for _ in range(ACTION_SIZE)]
+            converted.write_text(json.dumps(new))
+            before = {'checkpoint': str(original), 'brainId': 'brain', 'policyVersion': 1, 'gradientUpdates': 4,
+                      'trainedEnvironmentSteps': 32, 'collectedEnvironmentSteps': 32, 'rng': {'state': 1}}
+            after = dict(before, checkpoint=str(converted), checkpointSha256=sha256(converted))
+            evidence = {'schema': 'minecraft-state-action-interaction-conversion/v1', 'sourceSession': before, 'convertedSession': after}
+            evidence_path = root / 'converted/conversion-evidence.json'
+            evidence_path.write_text(json.dumps(evidence))
+            with mock.patch('model_catalog.verify_state'):
+                self.assertEqual(resume_parent_directory(converted), root / 'original')
+                new['optimizer']['params']['state_action_a'][0][0] = 0.1
+                converted.write_text(json.dumps(new))
+                after['checkpointSha256'] = sha256(converted)
+                evidence_path.write_text(json.dumps(evidence))
+                with self.assertRaisesRegex(ValueError, 'zero initial action'):
+                    resume_parent_directory(converted)
+
     def test_native_first_input_preserves_goal_identity_and_does_not_invent_missing_evidence(self):
         with tempfile.TemporaryDirectory() as directory:
             path=Path(directory)/'console.log';goal='12345678-1234-1234-1234-123456789abc'
