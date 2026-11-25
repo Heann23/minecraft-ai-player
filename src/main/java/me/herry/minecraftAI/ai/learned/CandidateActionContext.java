@@ -195,7 +195,12 @@ public final class CandidateActionContext {
         if (hasMaterial) {
             features[OFFSET + Math.floorMod(directMaterial.hashCode(), 16)] = 1;
             features[HAS_MATERIAL] = 1;
-            features[MATERIAL_IS_WORKSTATION] = isWorkstationMaterial(directMaterial) ? 1 : 0;
+            boolean acquiresOrPlacesWorkstation = type == PrimitiveType.CRAFT_ITEM
+                    || type == PrimitiveType.PLACE_BLOCK
+                    || type == PrimitiveType.PICKUP_ITEM
+                    || takesObservedItem;
+            features[MATERIAL_IS_WORKSTATION] =
+                    (acquiresOrPlacesWorkstation && isWorkstationMaterial(directMaterial)) ? 1 : 0;
             int owned = Math.max(0, context.stock().getOrDefault(directMaterial, 0));
             features[OWNED_MATERIAL] = Math.min(16, owned / 64.0);
             features[UNOWNED_MATERIAL] = owned == 0 ? 1 : 0;
@@ -281,7 +286,7 @@ public final class CandidateActionContext {
         if (blockMaterial == null || blockMaterial.isBlank()) return;
         features[OFFSET + Math.floorMod(blockMaterial.hashCode(), 16)] = 1;
         features[HAS_MATERIAL] = 1;
-        features[MATERIAL_IS_WORKSTATION] = isWorkstationMaterial(blockMaterial) ? 1 : 0;
+        features[MATERIAL_IS_WORKSTATION] = 0;
         features[MATERIAL_IS_BLOCK] = 1;
         features[MATERIAL_CRAFTING_DEAD_END] = 1;
     }
@@ -320,22 +325,28 @@ public final class CandidateActionContext {
             if (type == PrimitiveType.PLACE_BLOCK) {
                 features[PLACES_NEEDED_WORKSTATION] = tableReachable ? 0 : 1;
                 features[PLACES_REDUNDANT_WORKSTATION] = tableReachable ? 1 : 0;
+                if (tableReachable) features[MATERIAL_IS_WORKSTATION] = 0;
             } else if (type == PrimitiveType.CRAFT_ITEM) {
                 features[CRAFTS_REDUNDANT_WORKSTATION] = (tableReachable || ownsTable) ? 1 : 0;
+                if (tableReachable || ownsTable) features[MATERIAL_IS_WORKSTATION] = 0;
                 if (tableReachable) features[UNOWNED_MATERIAL] = 0;
             } else if (type == PrimitiveType.BREAK_BLOCK && tableReachable) {
                 features[BREAKS_REACHABLE_WORKSTATION] = 1;
+                features[MATERIAL_IS_WORKSTATION] = 0;
                 features[UNOWNED_MATERIAL] = 0;
             }
         } else if ("FURNACE".equals(material)) {
             if (type == PrimitiveType.PLACE_BLOCK) {
                 features[PLACES_NEEDED_WORKSTATION] = furnaceReachable ? 0 : 1;
                 features[PLACES_REDUNDANT_WORKSTATION] = furnaceReachable ? 1 : 0;
+                if (furnaceReachable) features[MATERIAL_IS_WORKSTATION] = 0;
             } else if (type == PrimitiveType.CRAFT_ITEM) {
                 features[CRAFTS_REDUNDANT_WORKSTATION] = (furnaceReachable || ownsFurnace) ? 1 : 0;
+                if (furnaceReachable || ownsFurnace) features[MATERIAL_IS_WORKSTATION] = 0;
                 if (furnaceReachable) features[UNOWNED_MATERIAL] = 0;
             } else if (type == PrimitiveType.BREAK_BLOCK && furnaceReachable) {
                 features[BREAKS_REACHABLE_WORKSTATION] = 1;
+                features[MATERIAL_IS_WORKSTATION] = 0;
                 features[UNOWNED_MATERIAL] = 0;
             }
         }

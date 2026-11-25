@@ -660,7 +660,7 @@ class CandidateActionContextTest {
 
         double[] anvil = new double[PolicyFrame.ACTION_SIZE];
         CandidateActionContext.encodeNonDroppingBlock(anvil, "ANVIL");
-        assertEquals(1.0, anvil[CandidateActionContext.MATERIAL_IS_WORKSTATION]);
+        assertEquals(0.0, anvil[CandidateActionContext.MATERIAL_IS_WORKSTATION]);
 
         assertEquals("RAW_IRON", CandidateActionContext.observedDropMaterial("IRON_ORE", true, false, false));
         assertNull(CandidateActionContext.observedDropMaterial("OAK_LEAVES", true, false, false));
@@ -706,5 +706,58 @@ class CandidateActionContextTest {
         assertEquals(9, RecipePreparation.withTable(furnace, tables, eightCobble, false, true).filled());
         assertEquals(10, RecipePreparation.withTable(furnace, tables, eightCobble, true, false).filled());
         assertEquals(10, RecipePreparation.withTable(furnace, tables, eightCobble, true, false).required());
+    }
+
+    @Test void workstationAcquisitionFlagExcludesBreakingDroppingEquippingAndRedundantActions() {
+        var emptyCtx = new CandidateActionContext.Context(Map.of(), null, false, Set.of());
+
+        double[] craftTable = new double[PolicyFrame.ACTION_SIZE];
+        CandidateActionContext.encode(craftTable, PrimitiveType.CRAFT_ITEM, "CRAFTING_TABLE", null, emptyCtx);
+        assertEquals(1.0, craftTable[CandidateActionContext.MATERIAL_IS_WORKSTATION]);
+        CandidateActionContext.encodeWorkstationContext(craftTable, PrimitiveType.CRAFT_ITEM, "CRAFTING_TABLE",
+                true, false, false, false);
+        assertEquals(1.0, craftTable[CandidateActionContext.CRAFTS_REDUNDANT_WORKSTATION]);
+        assertEquals(0.0, craftTable[CandidateActionContext.MATERIAL_IS_WORKSTATION]);
+
+        double[] placeNeeded = new double[PolicyFrame.ACTION_SIZE];
+        CandidateActionContext.encode(placeNeeded, PrimitiveType.PLACE_BLOCK, "CRAFTING_TABLE", null, emptyCtx);
+        assertEquals(1.0, placeNeeded[CandidateActionContext.MATERIAL_IS_WORKSTATION]);
+        CandidateActionContext.encodeWorkstationContext(placeNeeded, PrimitiveType.PLACE_BLOCK, "CRAFTING_TABLE",
+                false, true, false, false);
+        assertEquals(1.0, placeNeeded[CandidateActionContext.PLACES_NEEDED_WORKSTATION]);
+        assertEquals(1.0, placeNeeded[CandidateActionContext.MATERIAL_IS_WORKSTATION]);
+
+        double[] placeRedundant = new double[PolicyFrame.ACTION_SIZE];
+        CandidateActionContext.encode(placeRedundant, PrimitiveType.PLACE_BLOCK, "CRAFTING_TABLE", null, emptyCtx);
+        CandidateActionContext.encodeWorkstationContext(placeRedundant, PrimitiveType.PLACE_BLOCK, "CRAFTING_TABLE",
+                true, true, false, false);
+        assertEquals(1.0, placeRedundant[CandidateActionContext.PLACES_REDUNDANT_WORKSTATION]);
+        assertEquals(0.0, placeRedundant[CandidateActionContext.MATERIAL_IS_WORKSTATION]);
+
+        double[] pickupTable = new double[PolicyFrame.ACTION_SIZE];
+        CandidateActionContext.encode(pickupTable, PrimitiveType.PICKUP_ITEM, "CRAFTING_TABLE", null, emptyCtx);
+        assertEquals(1.0, pickupTable[CandidateActionContext.MATERIAL_IS_WORKSTATION]);
+
+        for (PrimitiveType nonAcquisition : List.of(
+                PrimitiveType.BREAK_BLOCK, PrimitiveType.DROP_ITEM, PrimitiveType.EQUIP_ITEM)) {
+            double[] f = new double[PolicyFrame.ACTION_SIZE];
+            CandidateActionContext.encode(f, nonAcquisition, "CRAFTING_TABLE", null, emptyCtx);
+            assertEquals(0.0, f[CandidateActionContext.MATERIAL_IS_WORKSTATION], nonAcquisition.name());
+        }
+
+        double[] craftOwnedFurnace = new double[PolicyFrame.ACTION_SIZE];
+        CandidateActionContext.encode(craftOwnedFurnace, PrimitiveType.CRAFT_ITEM, "FURNACE", null, emptyCtx);
+        assertEquals(1.0, craftOwnedFurnace[CandidateActionContext.MATERIAL_IS_WORKSTATION]);
+        CandidateActionContext.encodeWorkstationContext(craftOwnedFurnace, PrimitiveType.CRAFT_ITEM, "FURNACE",
+                false, false, false, true);
+        assertEquals(1.0, craftOwnedFurnace[CandidateActionContext.CRAFTS_REDUNDANT_WORKSTATION]);
+        assertEquals(0.0, craftOwnedFurnace[CandidateActionContext.MATERIAL_IS_WORKSTATION]);
+
+        double[] placeRedundantFurnace = new double[PolicyFrame.ACTION_SIZE];
+        CandidateActionContext.encode(placeRedundantFurnace, PrimitiveType.PLACE_BLOCK, "FURNACE", null, emptyCtx);
+        CandidateActionContext.encodeWorkstationContext(placeRedundantFurnace, PrimitiveType.PLACE_BLOCK, "FURNACE",
+                false, false, true, true);
+        assertEquals(1.0, placeRedundantFurnace[CandidateActionContext.PLACES_REDUNDANT_WORKSTATION]);
+        assertEquals(0.0, placeRedundantFurnace[CandidateActionContext.MATERIAL_IS_WORKSTATION]);
     }
 }
