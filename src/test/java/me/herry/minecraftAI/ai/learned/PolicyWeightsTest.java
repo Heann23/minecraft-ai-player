@@ -145,7 +145,7 @@ class PolicyWeightsTest {
 
         double[] baseState = new double[PolicyFrame.STATE_SIZE];
         baseState[PolicyCandidates.STATE_OWNED_HARVEST_TIER] = 0.0;
-        double[] negHidden = new double[1][PolicyFrame.INPUT_SIZE];
+        double[][] negHidden = new double[1][PolicyFrame.INPUT_SIZE];
         negHidden[0][PolicyFrame.STATE_SIZE] = -2.0; // Base prefers optA when state[415] == 0
         var baseArtifact = new PolicyWeights.Artifact("minecraft-rl-actor/v4", PolicyFrame.CONTRACT, "ppo",
                 "minecraft-paper", 1, "numerical-fixture", "0".repeat(64), negHidden,
