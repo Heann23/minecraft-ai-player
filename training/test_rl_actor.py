@@ -153,6 +153,14 @@ class ActorTests(unittest.TestCase):
     def test_advantage_variance_floor_dampens_near_zero_batches_without_stalling_real_signal(self):
         noise_model = ActorCritic(43, hidden=4)
         signal_model = ActorCritic(43, hidden=4)
+        # Warm up both optimizers identically so Adam second moments reflect real reward scale, matching resumed PPO.
+        warmup = [
+            row(noise_model, session="w", sequence=i, reward=r, terminal=True)
+            for i, r in enumerate((0.0, 2.0, -2.0, 0.0))
+        ]
+        noise_model.fit(warmup, epochs=1, minibatch=4)
+        signal_model.fit(warmup, epochs=1, minibatch=4)
+
         init_out = noise_model.params["actor_out"].copy()
         noise_rows = [
             row(noise_model, session="s", sequence=i, reward=r, terminal=True)
@@ -162,6 +170,17 @@ class ActorTests(unittest.TestCase):
             row(signal_model, session="s", sequence=i, reward=r, terminal=True)
             for i, r in enumerate((0.0, 2.0, -2.0, 0.0))
         ]
+        noise_adv, noise_ret = generalized_advantages(noise_rows)
+        signal_adv, signal_ret = generalized_advantages(signal_rows)
+        noise_adv = (noise_adv - noise_adv.mean()) / math.hypot(float(noise_adv.std()), 0.5)
+        signal_adv = (signal_adv - signal_adv.mean()) / math.hypot(float(signal_adv.std()), 0.5)
+        noise_g, _ = noise_model.gradients(noise_rows, noise_adv, noise_ret, entropy_weight=0.0)
+        signal_g, _ = signal_model.gradients(signal_rows, signal_adv, signal_ret, entropy_weight=0.0)
+        self.assertLess(
+            float(np.linalg.norm(noise_g["actor_out"])),
+            0.05 * float(np.linalg.norm(signal_g["actor_out"])),
+        )
+
         noise_model.fit(noise_rows, epochs=1, minibatch=4)
         signal_model.fit(signal_rows, epochs=1, minibatch=4)
         noise_move = float(np.linalg.norm(noise_model.params["actor_out"] - init_out))
