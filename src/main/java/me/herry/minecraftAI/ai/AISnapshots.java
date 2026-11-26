@@ -31,6 +31,7 @@ final class AISnapshots {
     static AISnapshot capture(AIPlayer ai) {
         AISnapshot snapshot = new AISnapshot();
         snapshot.name = ai.getName();
+        snapshot.executionId = ai.executionId();
         AISkin skin = ai.getSkin();
         if (skin != null) {
             snapshot.skinValue = skin.value();
@@ -52,6 +53,7 @@ final class AISnapshots {
         snapshot.pitch = location.getPitch();
 
         snapshot.sections.put(MEMORY, ai.getMemory().exportState(ai.getTicks()));
+        snapshot.sections.put("policyTaskMemory", ai.getPolicyTaskMemory().exportState());
         snapshot.sections.put(WORLD_MODEL, ai.getWorldModel().exportState());
         snapshot.sections.put(BODY, alive ? BodyState.capture(player) : BodyState.captureDead(player));
         BuildJob job = ai.getBuildJob();
@@ -73,8 +75,17 @@ final class AISnapshots {
     }
 
     static void restore(AIPlayer ai, AISnapshot snapshot, Logger logger) {
+        ai.restoreExecutionId(snapshot.executionId != null ? snapshot.executionId : java.util.UUID.nameUUIDFromBytes(
+                ("minecraft-ai-legacy-execution:" + snapshot.name.toLowerCase(java.util.Locale.ROOT)).getBytes(java.nio.charset.StandardCharsets.UTF_8)));
         ai.restoreTicks(snapshot.ticks);
         ai.getMemory().importState(snapshot.section(MEMORY));
+        ai.getPolicyTaskMemory().importState(snapshot.section("policyTaskMemory"));
+        var restoredTask = ai.getPolicyTaskMemory().observe(ai.getWorldId(), Map.of()).objective();
+        if (restoredTask != null) {
+            var item = org.bukkit.Material.matchMaterial(restoredTask.goal().item());
+            if (item == null || item.isAir() || !item.isItem())
+                throw new IllegalArgumentException("saved policy objective item is not registered");
+        }
         ai.getWorldModel().importState(snapshot.section(WORLD_MODEL));
         BodyState.apply(ai.getPlayer(), snapshot.section(BODY), logger);
         Map<String, Object> build = snapshot.section(BUILD);

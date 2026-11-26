@@ -23,6 +23,7 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.HumanoidArm;
 import net.minecraft.world.entity.player.ChatVisiblity;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 import org.bukkit.Bukkit;
@@ -32,8 +33,15 @@ import org.bukkit.craftbukkit.CraftServer;
 import org.bukkit.block.BlockFace;
 import org.bukkit.craftbukkit.CraftWorld;
 import org.bukkit.craftbukkit.block.CraftBlock;
+import org.bukkit.craftbukkit.entity.CraftEnderDragon;
+import org.bukkit.craftbukkit.entity.CraftItem;
+import org.bukkit.entity.EnderDragon;
+import org.bukkit.entity.EnderDragonPart;
+import org.bukkit.entity.Item;
 import org.bukkit.entity.Player;
 import org.bukkit.event.player.PlayerRespawnEvent;
+
+import java.util.UUID;
 
 /**
  * FakePlayer 를 AIBody 로 감싼 구현체. 서버 내부 코드(NMS)를 쓰는 곳은 이 패키지뿐이다.
@@ -174,10 +182,59 @@ public final class FakePlayerBody implements AIBody {
     }
 
     @Override
+    public boolean useOffHandItem() {
+        if (!isUsable()) return false;
+        ItemStack stack = handle.getItemInHand(InteractionHand.OFF_HAND);
+        if (stack.isEmpty()) return false;
+        return handle.gameMode.useItem(handle, handle.level(), stack, InteractionHand.OFF_HAND).consumesAction();
+    }
+
+    @Override
+    public boolean canShootBow() {
+        if (!isUsable()) return false;
+        ItemStack bow = handle.getMainHandItem();
+        return bow.is(Items.BOW) && !handle.getProjectile(bow).isEmpty();
+    }
+
+    @Override
+    public boolean releaseBow() {
+        if (!canShootBow() || !handle.isUsingItem() || handle.getUsedItemHand() != InteractionHand.MAIN_HAND) return false;
+        handle.releaseUsingItem();
+        return true;
+    }
+
+    @Override
+    public EnderDragonPart dragonHead(EnderDragon dragon) {
+        return (EnderDragonPart) ((CraftEnderDragon) dragon).getHandle().head.getBukkitEntity();
+    }
+
+    @Override
+    public boolean canStoreDrop(Item drop) {
+        return isUsable() && handle.getInventory().canHold(((CraftItem) drop).getHandle().getItem()) > 0;
+    }
+
+    @Override
+    public void watchItemPickup(@Nullable UUID entityId) {
+        handle.watchItemPickup(entityId);
+    }
+
+    @Override
+    public boolean pickedUpWatchedItem() {
+        return handle.pickedUpWatchedItem();
+    }
+
+    @Override
     public boolean useItemOn(BlockPoint block, BlockFace face) {
         if (!isUsable()) return false;
         ItemStack stack = handle.getItemInHand(InteractionHand.MAIN_HAND);
         if (stack.isEmpty()) return false;
+        return interactBlock(block, face);
+    }
+
+    @Override
+    public boolean interactBlock(BlockPoint block, BlockFace face) {
+        if (!isUsable()) return false;
+        ItemStack stack = handle.getItemInHand(InteractionHand.MAIN_HAND);
         BlockPos pos = new BlockPos(block.x(), block.y(), block.z());
         Direction direction = CraftBlock.blockFaceToNotch(face);
         // 클라이언트가 보내는 것처럼 그 면의 한가운데를 눌렀다고 알린다.

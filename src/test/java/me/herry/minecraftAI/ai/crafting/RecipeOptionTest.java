@@ -30,4 +30,32 @@ class RecipeOptionTest {
         assertEquals(List.of("LOG"), option.ingredients().getFirst().alternatives());
         assertThrows(UnsupportedOperationException.class, () -> option.ingredients().clear());
     }
+
+    @Test void FeasibleFilterExcludesUncraftableTableAndMissingIngredientRecipesWithoutFalseNegatives() {
+        var table = new RecipeOption("minecraft:crafting_table", "CRAFTING_TABLE", 1, false, false,
+                List.of(new RecipeOption.Ingredient(4, List.of("OAK_PLANKS", "BIRCH_PLANKS"), false)));
+        var pickaxe = new RecipeOption("minecraft:wooden_pickaxe", "WOODEN_PICKAXE", 1, true, false,
+                List.of(new RecipeOption.Ingredient(3, List.of("OAK_PLANKS", "BIRCH_PLANKS"), false),
+                        new RecipeOption.Ingredient(2, List.of("STICK"), false)));
+        var ironPickaxe = new RecipeOption("minecraft:iron_pickaxe", "IRON_PICKAXE", 1, true, false,
+                List.of(new RecipeOption.Ingredient(3, List.of("IRON_INGOT"), false),
+                        new RecipeOption.Ingredient(2, List.of("STICK"), false)));
+        var overlapping = new RecipeOption("test:overlap", "OVERLAP", 1, false, false,
+                List.of(new RecipeOption.Ingredient(1, List.of("OAK_PLANKS", "BIRCH_PLANKS"), false),
+                        new RecipeOption.Ingredient(1, List.of("OAK_PLANKS"), false)));
+        var all = List.of(table, pickaxe, ironPickaxe, overlapping);
+
+        var stock = java.util.Map.of("BIRCH_PLANKS", 4, "STICK", 2);
+        var withoutTable = CraftingSystem.filterFeasible(all, stock, () -> false);
+        assertEquals(List.of(table), withoutTable);
+
+        var withTable = CraftingSystem.filterFeasible(all, stock, () -> true);
+        assertEquals(List.of(table, pickaxe), withTable);
+
+        // Overlapping alternatives: OAK_PLANKS=1, BIRCH_PLANKS=1 satisfies both groups without false negative
+        var overlapStock = java.util.Map.of("OAK_PLANKS", 1, "BIRCH_PLANKS", 1);
+        assertTrue(CraftingSystem.hasRequiredIngredients(overlapping, overlapStock));
+        // Only OAK_PLANKS=1 fails union count (1 < 2)
+        assertFalse(CraftingSystem.hasRequiredIngredients(overlapping, java.util.Map.of("OAK_PLANKS", 1)));
+    }
 }

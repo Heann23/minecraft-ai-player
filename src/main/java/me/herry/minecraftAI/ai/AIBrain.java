@@ -2,6 +2,7 @@ package me.herry.minecraftAI.ai;
 
 import me.herry.minecraftAI.ai.action.Action;
 import me.herry.minecraftAI.ai.action.ActionStatus;
+import me.herry.minecraftAI.ai.action.BreakBlockAction;
 import me.herry.minecraftAI.ai.action.RunAwayAction;
 import me.herry.minecraftAI.ai.action.WaitAction;
 import me.herry.minecraftAI.ai.autonomy.AutonomyFeedback;
@@ -42,6 +43,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.EnumSet;
 import java.util.Set;
+import org.bukkit.Material;
+import org.bukkit.Tag;
 import org.bukkit.World;
 
 /**
@@ -89,6 +92,19 @@ final class AIBrain {
     private final RecoveryTracker recovery = new RecoveryTracker();
     private final DecisionLog log = new DecisionLog();
     private final OverworldAutonomy autonomy = new OverworldAutonomy();
+    private final me.herry.minecraftAI.ai.learned.PolicyCandidates learnedCandidates = new me.herry.minecraftAI.ai.learned.PolicyCandidates();
+    private final me.herry.minecraftAI.ai.learned.PolicyWeights learnedPolicy;
+    private final java.util.Random inferenceRandom;
+    private java.util.UUID lastFingerprintedObjective;
+    private final me.herry.minecraftAI.ai.learned.TrainingControl trainingControl;
+    private me.herry.minecraftAI.ai.learned.PolicyCandidates.Candidate activeLearned;
+    private PortalDeparture portalDeparture;
+    private java.util.UUID learnedWorld;
+    private long learnedStartedAt;
+    private long learnedNextChoiceAt;
+    private double learnedHealthAtChoice;
+    private boolean learnedLane;
+    private record PortalDeparture(java.util.UUID source, java.util.UUID destination, String inputId, long observedTick) {}
     private @Nullable OverworldAutonomy.Decision activeAutonomy;
     private boolean autonomyPreparation;
     // 목표 명세, 스킬, 관측, 학습용 기록. 판단에는 쓰지 않는다.
@@ -117,6 +133,10 @@ final class AIBrain {
     AIBrain(AIPlayer ai, AIServices services) {
         this.ai = ai;
         this.planner = services.planner();
+        this.learnedPolicy = services.learnedPolicy();
+        this.inferenceRandom = ai.getConfig().inferenceSeed == null ? null : new java.util.Random(ai.getConfig().inferenceSeed);
+        this.trainingControl = services.trainingBridge() == null ? null
+                : new me.herry.minecraftAI.ai.learned.TrainingControl(services.trainingBridge(), services.warn());
         this.journal = DecisionJournal.create(ai, services);
     }
 
@@ -140,6 +160,17 @@ final class AIBrain {
             // 새로 훑어본 결과를 근처의 동료와 나눈다 (동료가 있을 때만).
             ai.getTeam().shareDiscoveries(ai);
         }
+        if (ai.getConfig().learnedControl && controlledProgram == null && !primitiveLease) {
+            tickLearned(now);
+            profiler.end(TickProfiler.Section.TOTAL, tickStarted);
+            profiler.endTick();
+            return;
+        }
+        if (learnedLane) {
+            if (trainingControl != null) trainingControl.end(ai, activeLearned, (int) Math.min(2400, now - learnedStartedAt));
+            if (plan != null) plan.cancel(ai);
+            plan = null; activeLearned = null; learnedLane = false;
+        }
         if (now % ai.getConfig().updateInterval == 0) {
             if (controlledProgram == null && !primitiveLease) think(now);
             else ai.getPerceptionSystem().update();
@@ -154,6 +185,14 @@ final class AIBrain {
 
     // 진행 중인 행동과 계획을 모두 버리고 처음 상태로 돌아간다.
     void reset() {
+        portalDeparture = null;
+        if (trainingControl != null) trainingControl.end(ai, activeLearned, (int) Math.min(2400, ai.getTicks() - learnedStartedAt));
+        else if (learnedLane && learnedPolicy != null && ai.getBody().isUsable()) {
+            var observed = me.herry.minecraftAI.ai.learned.PolicyCandidates.observe(ai, activeLearned,
+                    (int) Math.min(2400, ai.getTicks() - learnedStartedAt));
+            var task = ai.getPolicyTaskMemory().observe(ai.getWorldId(), observed.stock());
+            ai.getPolicyTaskMemory().settleCompletion(task, task, false);
+        }
         cancelPrimitiveProgram("lifecycle reset", false);
         if (plan != null) plan.cancel(ai);
         plan = null;
@@ -167,8 +206,31 @@ final class AIBrain {
         FarmingPlans.invalidate(ai);
         me.herry.minecraftAI.ai.plan.IrrigationPlans.invalidate(ai);
         activeAutonomy = null;
+        activeLearned = null; learnedWorld = null; learnedLane = false;
         ai.getNavigation().stop();
         ai.getBody().clearInputs();
+    }
+
+    void observePortalDeparture(java.util.UUID source, java.util.UUID destination, boolean end) {
+        if (!learnedLane || activeLearned == null || plan == null || plan.current() == null
+                || plan.current().getStatus() != ActionStatus.RUNNING) return;
+        var command = activeLearned.command();
+        boolean matches = end
+                ? command instanceof me.herry.minecraftAI.ai.primitive.control.PrimitiveCommand.EnterEndPortal endPortal && endPortal.world().equals(source)
+                : command instanceof me.herry.minecraftAI.ai.primitive.control.PrimitiveCommand.EnterNetherPortal netherPortal && netherPortal.world().equals(source);
+        if (matches) portalDeparture = new PortalDeparture(source, destination, activeLearned.inputId(), ai.getTicks());
+    }
+
+    void observeWorldArrival(java.util.UUID source) {
+        var departure = portalDeparture;
+        portalDeparture = null;
+        if (departure == null || activeLearned == null || !departure.source().equals(source)
+                || !departure.destination().equals(ai.getWorldId()) || !departure.inputId().equals(activeLearned.inputId())
+                || ai.getTicks() - departure.observedTick() > 40) return;
+        String reason = activeLearned.command() instanceof me.herry.minecraftAI.ai.primitive.control.PrimitiveCommand.EnterEndPortal
+                ? "end portal arrival" : "nether portal arrival";
+        ai.getPolicyTaskMemory().ended(ai.getWorldId(), ai.getTicks(), activeLearned.id(), "SUCCESS", reason);
+        ai.debug("Learned portal arrival: choice=" + activeLearned.id() + " from=" + source + " to=" + ai.getWorldId());
     }
 
     // 닿지 못해서 포기했던 상대라도 먼저 때려 오면 다시 맞서 싸울 수 있게 한다.
@@ -209,6 +271,9 @@ final class AIBrain {
     boolean hasPrimitiveControl() { return primitiveLease || controlledProgram != null; }
 
     private void interruptTeacherForPrimitiveControl() {
+        if (learnedLane && trainingControl != null)
+            trainingControl.end(ai, activeLearned, (int) Math.min(2400, ai.getTicks() - learnedStartedAt));
+        learnedLane = false; activeLearned = null;
         if (plan != null) plan.cancel(ai);
         journal.planEnded(ai.getTicks(), Experience.Outcome.INTERRUPTED, "explicit primitive control");
         // Prepared/external control is never appended to an autonomous Teacher episode.
@@ -237,7 +302,7 @@ final class AIBrain {
         primitiveLease = false;
         primitiveLeaseWorld = null;
         plan = null;
-        if (resumeJournal) journal.beginEpisode(Experience.StartReason.START);
+        if (resumeJournal) if (!ai.getConfig().learnedControl) journal.beginEpisode(Experience.StartReason.START);
         return true;
     }
 
@@ -263,6 +328,9 @@ final class AIBrain {
     }
 
     void setForcedGoal(@Nullable GoalType goal) {
+        if (ai.getConfig().learnedControl && goal != null) {
+            ai.debug("Legacy forced goals are not policy-conditioned learned requests"); return;
+        }
         cancelPrimitiveProgram("forced goal changed", true);
         forcedGoal = goal;
         activeAutonomy = null;
@@ -281,6 +349,9 @@ final class AIBrain {
      * 위험을 피하거나 싸우는 중이 아니면 하던 계획을 접고 바로 부탁한 일로 넘어간다.
      */
     void setDirective(@Nullable Directive directive) {
+        if (ai.getConfig().learnedControl && directive != null) {
+            ai.debug("Legacy directives do not switch learned execution to Teacher"); return;
+        }
         cancelPrimitiveProgram("directive changed", true);
         this.directive = directive;
         autonomy.invalidate();
@@ -382,10 +453,217 @@ final class AIBrain {
         }
     }
 
+    /** Learned mode owns the same Plan/input lane; GoalSystem, heuristic utilities and Teacher are not consulted. */
+    private void tickLearned(long now) {
+        if (trainingControl != null && trainingControl.isTransitioning()) return;
+        if (!learnedLane || !ai.getWorldId().equals(learnedWorld)) {
+            if (trainingControl != null && learnedLane) trainingControl.end(ai, activeLearned, (int) Math.min(2400, now - learnedStartedAt));
+            if (plan != null) plan.cancel(ai);
+            plan = null; activeLearned = null; activeAutonomy = null; activeTrace = null;
+            currentGoal = GoalType.IDLE;
+            journal.endEpisode(Experience.EndReason.STOPPED);
+            learnedLane = true; learnedWorld = ai.getWorldId();
+        }
+        if (learnedPolicy == null && trainingControl == null) { ai.getNavigation().stop(); ai.getBody().clearInputs(); return; }
+        boolean shouldChoose = learnedChoiceDue(now);
+        if (now % ai.getConfig().updateInterval == 0) {
+            ai.getPerceptionSystem().update();
+            ai.getMemory().recordVisit(ai.getWorldId(), ai.getPosition());
+            ai.getWorldModel().markExplored(ai.getWorldId(), ai.getPosition().x() >> 4, ai.getPosition().z() >> 4);
+            if (trainingControl == null && !ai.getWorkBudget().isExhausted()
+                    && shouldChoose) {
+                try {
+                    var captured = learnedCandidates.capture(ai, activeLearned, (int) Math.min(2400, now - learnedStartedAt));
+                    var predicted = learnedPolicy.sample(captured.frame(), inferenceRandom == null
+                            ? java.util.concurrent.ThreadLocalRandom.current() : inferenceRandom);
+                    var selected = captured.candidates().get(predicted.index());
+                    var task = captured.frame().taskMemory();
+                    if (ai.isDebugEnabled() && task != null && task.objective() != null
+                            && !task.objective().id().equals(lastFingerprintedObjective)) {
+                        var fingerprints = me.herry.minecraftAI.ai.learned.PolicyInputFingerprint.of(captured.frame());
+                        ai.debug("PolicyInputFirst goal=" + task.objective().id() + " tick=" + captured.frame().serverTick()
+                                + " state=" + fingerprints.state() + " outsideGoal=" + fingerprints.stateOutsideObjective()
+                                + " candidates=" + fingerprints.orderedCandidates() + " count=" + captured.frame().options().size()
+                                + " model=" + predicted.modelSha256() + " index=" + predicted.index()
+                                + " logProbability=" + predicted.logProbability());
+                        lastFingerprintedObjective = task.objective().id();
+                    }
+                    if (task != null && task.objective() != null) {
+                        // Native Java inference has no TrainingControl episode. Consume observed achievement
+                        // without a learning credit, including a goal already held at the first observation.
+                        ai.getPolicyTaskMemory().settleCompletion(task, task, false);
+                    }
+                    if (ai.isDebugEnabled() && task != null && task.objective() != null) {
+                        String item = task.objective().goal().item();
+                        var frame = captured.frame();
+                        long visibleRays = frame.sight() == null ? -1 : frame.sight().rays().stream()
+                                .filter(ray -> ray.block() != null && item.equals(ray.block().material())).count();
+                        long candidates = frame.options().stream().filter(option -> option.id().startsWith("mine:")
+                                && option.blockEvidence() != null && item.equals(option.blockEvidence().material())).count();
+                        long freshCandidates = frame.options().stream().filter(option -> option.id().startsWith("mine:")
+                                && option.blockEvidence() != null && item.equals(option.blockEvidence().material())
+                                && option.blockEvidence().observedTick() == frame.serverTick()).count();
+                        var chosenBlock = selected.encoded().blockEvidence();
+                        boolean chosenTarget = selected.id().startsWith("mine:") && chosenBlock != null && item.equals(chosenBlock.material());
+                        long targetCraftCandidates = captured.candidates().stream()
+                                .filter(candidate -> candidate.recipe() != null && item.equals(candidate.recipe().result())).count();
+                        boolean chosenTargetCraft = selected.recipe() != null && item.equals(selected.recipe().result());
+                        long knownRays = frame.sight() == null ? 0 : frame.sight().rays().stream()
+                                .filter(ray -> ray.distance() >= 0).count();
+                        long logRays = frame.sight() == null ? 0 : frame.sight().rays().stream()
+                                .filter(ray -> ray.block() != null && isLog(ray.block().material())).count();
+                        long logCandidates = frame.options().stream().filter(option -> option.blockEvidence() != null
+                                && isLog(option.blockEvidence().material())).count();
+                        ai.debug("GoalSample world=" + captured.frame().world() + " goal=" + task.objective().id()
+                                + " tick=" + captured.frame().serverTick() + " item=" + task.objective().goal().item()
+                                + " required=" + task.objective().goal().count() + " owned=" + task.owned()
+                                + " matched=" + task.worldMatches() + " visibleRays=" + visibleRays
+                                + " candidates=" + candidates + " freshCandidates=" + freshCandidates + " chosenTarget=" + chosenTarget
+                                + " feet=" + ai.getPosition().encode()
+                                + " craftCandidates=" + targetCraftCandidates + " chosenCraft=" + chosenTargetCraft
+                                + " knownLogRays=" + knownRays + " logRays=" + logRays + " logCandidates=" + logCandidates
+                                + " chosenLog=" + (chosenBlock != null && isLog(chosenBlock.material())));
+                    }
+                    if (activeLearned == null || !selected.inputId().equals(activeLearned.inputId()) || plan == null || plan.isFinished()) {
+                        cancelLearnedForReplacement(ai, selected.id());
+                        plan = null; activeLearned = null;
+                        var action = selected.create(ai);
+                        plan = new Plan(GoalType.IDLE, List.of(action));
+                        activeLearned = selected; learnedStartedAt = now;
+                        ai.debug("Model " + predicted.modelSha256() + " selected " + predicted.candidate());
+                    }
+                    rememberLearnedChoice(selected, now);
+                } catch (RuntimeException failure) {
+                    if (plan != null) plan.cancel(ai);
+                    plan = null; activeLearned = null;
+                    ai.getBody().clearInputs();
+                    ai.debug("Learned execution unavailable: " + failure.getClass().getSimpleName() + ": " + failure.getMessage());
+                }
+            }
+        }
+        if (trainingControl != null) {
+            var decision = trainingControl.poll(ai, activeLearned, (int) Math.min(2400, now - learnedStartedAt),
+                    now % ai.getConfig().updateInterval == 0 && shouldChoose);
+            if (decision != null) {
+                if (decision.response().rolloutBoundary()) {
+                    cancelLearnedForReplacement(ai, "ppo-rollout-boundary");
+                    plan = null; activeLearned = null; ai.getBody().clearInputs();
+                    return;
+                }
+                try {
+                    var selected = decision.selected();
+                    if (activeLearned == null || !selected.inputId().equals(activeLearned.inputId()) || plan == null || plan.isFinished()) {
+                        cancelLearnedForReplacement(ai, selected.id());
+                        plan = null; activeLearned = null;
+                        plan = new Plan(GoalType.IDLE, List.of(selected.create(ai)));
+                        activeLearned = selected; learnedStartedAt = now;
+                    }
+                    rememberLearnedChoice(selected, now);
+                    trainingControl.applied(ai, decision);
+                } catch (RuntimeException failure) {
+                    if (plan != null) plan.cancel(ai);
+                    plan = null; activeLearned = null; ai.getBody().clearInputs();
+                    ai.debug("Training decision not executed: " + decision.selected().id() + " — "
+                            + failure.getClass().getSimpleName() + ": " + failure.getMessage());
+                }
+            }
+        }
+        Action action = plan == null ? null : plan.current();
+        if (action == null) return;
+        action.update(ai);
+        if (action.getStatus() == ActionStatus.SUCCESS || action.getStatus() == ActionStatus.FAILED) {
+            ai.debug("Model action ended: " + action.getName() + " " + action.getStatus() + " " + action.getFailReason());
+            ai.getPolicyTaskMemory().ended(ai.getWorldId(), ai.getTicks(), activeLearned == null ? action.getName() : activeLearned.id(),
+                    action.getStatus().name(), action.getFailReason());
+            plan = null; activeLearned = null;
+        }
+    }
+
     /**
      * 이번에 할 단기 목표를 정한다. 관리자가 고정한 목표가 가장 먼저이고, 그다음이 긴급 목표,
      * 그다음이 사람이 부탁한 일, 마지막이 스스로 고른 목표다.
      */
+    public me.herry.minecraftAI.ai.learned.ExecutionPolicyContext.Execution learnedExecution() {
+        Action action = plan == null ? null : plan.current();
+        boolean active = learnedLane && activeLearned != null && action != null && !plan.isFinished();
+        var mining = active && action instanceof me.herry.minecraftAI.ai.action.BreakBlockAction block ? block.miningProgress() : null;
+        return new me.herry.minecraftAI.ai.learned.ExecutionPolicyContext.Execution(active,
+                active && action.getStatus() == ActionStatus.RUNNING, mining != null,
+                mining == null ? 0 : mining.progress(), mining == null ? 0 : mining.actionTicks(),
+                mining == null ? 0 : mining.aimTicks(), active ? activeLearned.inputId() : "");
+    }
+
+    private void rememberLearnedChoice(me.herry.minecraftAI.ai.learned.PolicyCandidates.Candidate selected, long now) {
+        activeLearned = selected;
+        learnedNextChoiceAt = now + selected.reconsiderAfterTicks();
+        learnedHealthAtChoice = ai.getPlayer().getHealth();
+    }
+
+    private boolean learnedChoiceDue(long now) {
+        if (plan == null || plan.isFinished() || now >= learnedNextChoiceAt) return true;
+        if (!(plan.current() instanceof BreakBlockAction)) return false;
+        var player = ai.getPlayer();
+        double health = player.getHealth();
+        return health < learnedHealthAtChoice || health <= 6.0 || player.isInLava()
+                || player.getFireTicks() > 0 || player.isInWater() && player.getRemainingAir() <= 60;
+    }
+
+    private static boolean isLog(String name) {
+        Material material = Material.getMaterial(name);
+        return material != null && Tag.LOGS.isTagged(material);
+    }
+
+    private void cancelLearnedForReplacement(AIPlayer ai, String replacement) {
+        if (plan == null) return;
+        Action interrupted = plan.current();
+        boolean wasRunning = interrupted != null && interrupted.getStatus() == ActionStatus.RUNNING;
+        String choice = activeLearned == null ? (interrupted == null ? "" : interrupted.getName()) : activeLearned.id();
+        var mining = interrupted instanceof me.herry.minecraftAI.ai.action.BreakBlockAction block ? block.miningProgress() : null;
+        plan.cancel(ai);
+        // Record the actual cancellation result, not a failure invented from the next policy choice.
+        if (wasRunning && interrupted.getStatus() == ActionStatus.FAILED && "cancelled".equals(interrupted.getFailReason())) {
+            ai.getPolicyTaskMemory().ended(ai.getWorldId(), ai.getTicks(), choice, "FAILED", "cancelled");
+            ai.debug("Model action cancelled: " + interrupted.getName() + " choice=" + choice + " next=" + replacement
+                    + " tick=" + Integer.toUnsignedLong(org.bukkit.Bukkit.getCurrentTick()) + " reason=cancelled");
+            if (mining != null) ai.debug("Model mining cancelled: choice=" + choice + " target=" + mining.target()
+                    + " material=" + mining.material() + " current=" + mining.current() + " currentMaterial=" + mining.currentMaterial()
+                    + " progress=" + mining.progress() + " aimTicks=" + mining.aimTicks() + " actionTicks=" + mining.actionTicks()
+                    + " tick=" + Integer.toUnsignedLong(org.bukkit.Bukkit.getCurrentTick()));
+        }
+    }
+
+    void recordLearningObjective(double actualReward) {
+        if (learnedLane && trainingControl != null) trainingControl.objective(actualReward);
+    }
+
+    void recordLearningAdvancement(String key, boolean completed, boolean displayed) {
+        // Retain observed completion while stopped too; the ledger itself requires an active transition for credit.
+        if (trainingControl != null) trainingControl.advancement(key, completed, displayed);
+    }
+
+    List<String> policyDetails() {
+        if (trainingControl != null) return trainingControl.details();
+        if (learnedPolicy != null) return learnedPolicy.details();
+        return List.of(ai.getConfig().learnedControl ? "호환 모델 없음 — 실행 중지" : "Teacher 진단 모드 — 학습 모델 아님");
+    }
+
+    String policyLabel() { return trainingControl == null ? "자율 플레이" : trainingControl.modeLabel(); }
+    String connectedBrainId() { return trainingControl == null ? null : trainingControl.brainId(); }
+    java.util.concurrent.CompletableFuture<Void> prepareLearningChange() {
+        if (trainingControl == null) return java.util.concurrent.CompletableFuture.failedFuture(new IllegalStateException("backend unavailable"));
+        var drained = trainingControl.endAsync(ai, activeLearned, (int) Math.min(2400, ai.getTicks() - learnedStartedAt));
+        if (plan != null) plan.cancel(ai);
+        plan = null; activeLearned = null;
+        ai.getNavigation().stop(); ai.getBody().clearInputs();
+        return drained;
+    }
+    void acceptLearningChange(me.herry.minecraftAI.ai.learned.PpoBridge.Status status) {
+        if (trainingControl != null) trainingControl.acceptControl(status);
+    }
+    void acceptKnownStatus(me.herry.minecraftAI.ai.learned.PpoBridge.Status status, long receivedTick) {
+        if (trainingControl != null) trainingControl.acceptKnownStatus(status, receivedTick);
+    }
+
     private Choice choose(Situation situation, long now) {
         if (forcedGoal != null) return new Choice(forcedGoal, Double.MAX_VALUE, DecisionTrace.Origin.FORCED);
 
@@ -454,7 +732,6 @@ final class AIBrain {
         activeTrace = trace;
         log.record(trace);
         ai.debug("Reason: " + trace.reason());
-        ai.getTeam().announceGoal(ai, choice.goal());
     }
 
     private DecisionTrace trace(Choice choice, Situation situation, long now, @Nullable GoalType previous) {
@@ -552,7 +829,7 @@ final class AIBrain {
                 } else {
                     primitiveLease = false;
                     primitiveLeaseWorld = null;
-                    journal.beginEpisode(Experience.StartReason.START);
+                    if (!ai.getConfig().learnedControl) journal.beginEpisode(Experience.StartReason.START);
                 }
             }
             return;

@@ -18,6 +18,7 @@ public final class SnapshotCodec {
         Map<String, Object> map = new LinkedHashMap<>();
         map.put("version", AISnapshot.VERSION);
         map.put("name", snapshot.name);
+        if (snapshot.executionId != null) map.put("executionId", snapshot.executionId.toString());
         if (snapshot.skinValue != null) map.put("skinValue", snapshot.skinValue);
         if (snapshot.skinSignature != null) map.put("skinSignature", snapshot.skinSignature);
         if (snapshot.world != null) map.put("world", snapshot.world.toString());
@@ -42,6 +43,8 @@ public final class SnapshotCodec {
 
         AISnapshot snapshot = new AISnapshot();
         snapshot.name = name;
+        snapshot.executionId = uuid(map.get("executionId"));
+        if (map.containsKey("executionId") && snapshot.executionId == null) return null;
         snapshot.skinValue = map.get("skinValue") instanceof String value ? value : null;
         snapshot.skinSignature = map.get("skinSignature") instanceof String signature ? signature : null;
         snapshot.world = uuid(map.get("world"));

@@ -2,6 +2,7 @@ package me.herry.minecraftAI.ai.perception;
 
 import org.bukkit.Location;
 import org.bukkit.World;
+import org.bukkit.entity.EnderCrystal;
 import org.bukkit.entity.Item;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
@@ -54,6 +55,7 @@ public final class Perception {
     ItemStack heldItem;
 
     final List<LivingEntity> hostiles = new ArrayList<>();
+    final List<EnderCrystal> endCrystals = new ArrayList<>();
     final List<LivingEntity> animals = new ArrayList<>();
     final List<Player> players = new ArrayList<>();
     final List<Item> drops = new ArrayList<>();
@@ -160,6 +162,10 @@ public final class Perception {
 
     public List<LivingEntity> getHostiles() {
         return hostiles;
+    }
+
+    public List<EnderCrystal> getEndCrystals() {
+        return endCrystals;
     }
 
     public List<LivingEntity> getAnimals() {

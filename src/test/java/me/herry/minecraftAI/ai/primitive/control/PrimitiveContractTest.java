@@ -17,6 +17,20 @@ class PrimitiveContractTest {
     private static final PrimitiveTarget.Point ORIGIN = new PrimitiveTarget.Point(0.5, 64, 0.5);
 
     @Test
+    void furnaceTransfersDistinguishExactStorageFromTheOutputSlot() {
+        var target = new BlockPoint(1, 64, 0);
+        var input = new PrimitiveCommand.FurnaceTransfer(WORLD, target, PrimitiveCommand.FurnaceSlot.INGREDIENT, 35, "RAW_IRON");
+        var result = new PrimitiveCommand.FurnaceTransfer(WORLD, target, PrimitiveCommand.FurnaceSlot.RESULT, -1, "IRON_INGOT");
+        assertEquals(target, input.target());
+        assertEquals(35, input.inventorySlot());
+        assertEquals(-1, result.inventorySlot());
+        assertThrows(IllegalArgumentException.class, () ->
+                new PrimitiveCommand.FurnaceTransfer(WORLD, target, PrimitiveCommand.FurnaceSlot.FUEL, 36, "COAL"));
+        assertThrows(IllegalArgumentException.class, () ->
+                new PrimitiveCommand.FurnaceTransfer(WORLD, target, PrimitiveCommand.FurnaceSlot.RESULT, 0, "IRON_INGOT"));
+    }
+
+    @Test
     void blockActionSuccessDoesNotClaimCollectedResourceSuccess() {
         var before = snapshot(100, 20, true, List.of());
         var after = snapshot(120, 20, true, List.of());

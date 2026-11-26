@@ -9,17 +9,23 @@ import me.herry.minecraftAI.ai.action.BreakBlockAction;
 import me.herry.minecraftAI.ai.action.CraftItemAction;
 import me.herry.minecraftAI.ai.action.DropJunkAction;
 import me.herry.minecraftAI.ai.action.EatFoodAction;
+import me.herry.minecraftAI.ai.action.EnterPortalAction;
+import me.herry.minecraftAI.ai.action.EnderEyeAction;
 import me.herry.minecraftAI.ai.action.ExactPlaceBlockAction;
+import me.herry.minecraftAI.ai.action.FurnaceSlotAction;
+import me.herry.minecraftAI.ai.action.IgniteAction;
 import me.herry.minecraftAI.ai.action.JumpAction;
 import me.herry.minecraftAI.ai.action.LookAtAction;
 import me.herry.minecraftAI.ai.action.MoveToAction;
 import me.herry.minecraftAI.ai.action.PickupItemAction;
 import me.herry.minecraftAI.ai.action.SelectHotbarSlotAction;
+import me.herry.minecraftAI.ai.action.ShootBowAction;
 import me.herry.minecraftAI.ai.action.SlotEquipAction;
 import me.herry.minecraftAI.ai.action.SneakAction;
 import me.herry.minecraftAI.ai.action.SwimAction;
 import me.herry.minecraftAI.ai.action.WaitAction;
 import me.herry.minecraftAI.ai.inventory.JunkPolicy;
+import me.herry.minecraftAI.ai.learned.StrikeExactAction;
 import me.herry.minecraftAI.ai.memory.MemoryType;
 import me.herry.minecraftAI.ai.navigation.BlockClass;
 import me.herry.minecraftAI.ai.navigation.BukkitTerrainView;
@@ -41,6 +47,8 @@ import org.bukkit.Material;
 import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockFace;
+import org.bukkit.entity.EnderCrystal;
+import org.bukkit.entity.EnderDragon;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Item;
 import org.bukkit.entity.LivingEntity;
@@ -62,12 +70,12 @@ import java.util.TreeMap;
 public final class PrimitiveAdapter {
     public static final int MAX_CANDIDATES = 32;
     private static final double LOCAL_RANGE = 32.0;
-    private static final double REACH = 4.9;
+    public static final double BLOCK_REACH = 4.9;
     private static final BlockFace[] FACES = {
             BlockFace.DOWN, BlockFace.UP, BlockFace.NORTH, BlockFace.SOUTH, BlockFace.EAST, BlockFace.WEST
     };
     private static final EnumSet<PrimitiveType> SUPPORTED = EnumSet.complementOf(
-            EnumSet.of(PrimitiveType.INTERACT_BLOCK, PrimitiveType.INTERACT_ENTITY));
+            EnumSet.of(PrimitiveType.INTERACT_ENTITY, PrimitiveType.MOVE_INPUT));
 
     private PrimitiveAdapter() {
     }
@@ -85,7 +93,7 @@ public final class PrimitiveAdapter {
                 case JUMP -> "Press jump once and land";
                 case BREAK_BLOCK -> "Mine exactly one visible block with the selected slot and enchantments";
                 case PLACE_BLOCK -> "Place one selected solid block at the selected cell";
-                case USE_ITEM -> "Consume one safe food item using the normal eating action";
+                case USE_ITEM -> "Eat, ignite a portal, throw a held eye, or socket it in a selected frame";
                 case ATTACK -> "Fight the selected living entity without switching to another target";
                 case PICKUP_ITEM -> "Walk to nearby drops using the existing pickup action";
                 case DROP_ITEM -> "Discard stacks selected by the existing junk policy";
@@ -95,17 +103,21 @@ public final class PrimitiveAdapter {
                 case WAIT -> "Wait for a bounded number of ticks";
                 case SNEAK -> "Hold sneak for a bounded number of ticks and release it";
                 case SWIM -> "Use swimming inputs toward a local point in water";
-                case INTERACT_BLOCK, INTERACT_ENTITY -> "Unavailable in control schema version 1";
+                case MOVE_INPUT -> "Hold selected player movement keys via the learned candidate lane";
+                case INTERACT_BLOCK -> "Use a chosen furnace slot or enter an active portal";
+                case INTERACT_ENTITY -> "Unavailable in control schema version 1";
             };
             String limitation = switch (type) {
-                case USE_ITEM -> "Food only; bucket, bow and other item uses need explicit contracts";
+                case USE_ITEM -> "Food, portal ignition and ender eyes; other item uses need explicit contracts";
                 case ATTACK -> "Existing combat action chooses a weapon and may chase; this is not a single-hit input";
                 case PICKUP_ITEM -> "No implicit obstruction mining; a blocked drop fails and requires another chosen command";
                 case DROP_ITEM -> "Junk policy selection, not arbitrary item disposal";
                 case CRAFT_ITEM -> "Recipe action may craft intermediate ingredients; not individual grid clicks";
                 case BREAK_BLOCK -> "Reach, visibility, correct drop tool, floor, home, lava and falling-block guards apply";
                 case PLACE_BLOCK -> "Solid single-cell non-gravity blocks only";
-                case INTERACT_BLOCK, INTERACT_ENTITY -> "Unsupported commands are rejected, never replaced with a guessed action";
+                case MOVE_INPUT -> "Learned candidate lane only; standalone control schema version 1 does not expose these keys";
+                case INTERACT_BLOCK -> "One ordinary furnace transfer or one local active portal entry per action";
+                case INTERACT_ENTITY -> "Unsupported commands are rejected, never replaced with a guessed action";
                 default -> "Availability must be checked for the concrete command before execution";
             };
             result.add(new Capability(type, SUPPORTED.contains(type), effect, limitation));
@@ -237,11 +249,28 @@ public final class PrimitiveAdapter {
             case PrimitiveCommand.PlaceBlock place -> checkPlacement(ai, place);
             case PrimitiveCommand.Eat ignored -> ai.getPlayer().getFoodLevel() >= 20 ? "not hungry"
                     : ai.getInventory().bestFoodSlot() < 0 ? "no safe food" : "";
+            case PrimitiveCommand.IgnitePortal ignite -> IgniteAction.heldToolUnavailable(ai.getPlayer(), ignite.world(), ignite.floor());
+            case PrimitiveCommand.FillBucket fill -> me.herry.minecraftAI.ai.action.FillBucketAction.heldBucketUnavailable(
+                    ai.getPlayer(), fill.world(), fill.source(), material(fill.fluid()));
+            case PrimitiveCommand.PourBucket pour -> me.herry.minecraftAI.ai.action.PourBucketAction.heldBucketUnavailable(
+                    ai.getPlayer(), pour.world(), pour.support(), material(pour.bucket()));
+            case PrimitiveCommand.EnterNetherPortal enter -> checkPortalEntry(ai, enter.world(), enter.portal(), Material.NETHER_PORTAL);
+            case PrimitiveCommand.EnterEndPortal enter -> checkPortalEntry(ai, enter.world(), enter.portal(), Material.END_PORTAL);
+            case PrimitiveCommand.ThrowEnderEye eye -> checkHeldEye(ai, eye.world());
+            case PrimitiveCommand.SocketEnderEye eye -> checkEyeSocket(ai, eye);
+            case PrimitiveCommand.ShootBow shot -> ShootBowAction.check(ai, shot);
+            case PrimitiveCommand.ShieldBlock shield -> me.herry.minecraftAI.ai.action.ShieldBlockAction.unavailableReason(ai, shield);
+            case PrimitiveCommand.DropExact drop -> me.herry.minecraftAI.ai.action.DropExactAction.unavailableReason(ai, drop);
             case PrimitiveCommand.Attack attack -> checkAttack(ai, attack);
             case PrimitiveCommand.Pickup pickup -> checkPickup(ai, pickup.radius());
+            case PrimitiveCommand.PickupExact pickup -> PickupItemAction.checkExact(ai, pickup);
             case PrimitiveCommand.Equip equip -> checkTool(ai, equip.tool());
             case PrimitiveCommand.SelectSlot select -> select.slot() < 0 || select.slot() > 8 ? "hotbar slot must be 0..8" : "";
             case PrimitiveCommand.Craft craft -> checkCraft(ai, craft);
+            case PrimitiveCommand.FurnaceTransfer furnace -> checkFurnace(ai, furnace);
+            case PrimitiveCommand.LootChest chest -> me.herry.minecraftAI.ai.action.ExactLootChestAction.unavailableReason(ai, chest);
+            case PrimitiveCommand.UseBed bed -> me.herry.minecraftAI.ai.action.ExactUseBedAction.unavailableReason(ai, bed);
+            case PrimitiveCommand.ToggleBlock toggle -> me.herry.minecraftAI.ai.action.ToggleBlockAction.unavailableReason(ai, toggle);
             case PrimitiveCommand.Wait wait -> checkTicks(wait.ticks(), 200);
             case PrimitiveCommand.Sneak sneak -> checkTicks(sneak.ticks(), 200);
             case PrimitiveCommand.Swim swim -> checkSwimming(ai, swim);
@@ -269,11 +298,33 @@ public final class PrimitiveAdapter {
             case PrimitiveCommand.BreakBlock mine -> BreakBlockAction.withTool(mine.target(), mine.tool(), mine.sneaking());
             case PrimitiveCommand.PlaceBlock place -> new ExactPlaceBlockAction(place.target(), material(place.material()));
             case PrimitiveCommand.Eat ignored -> new EatFoodAction();
-            case PrimitiveCommand.Attack attack -> AttackEntityAction.exactTarget((LivingEntity) Bukkit.getEntity(attack.entityId()));
+            case PrimitiveCommand.IgnitePortal ignite -> new IgniteAction(ignite.floor(), ignite.world());
+            case PrimitiveCommand.FillBucket fill -> new me.herry.minecraftAI.ai.action.FillBucketAction(
+                    fill.source(), fill.world(), material(fill.fluid()));
+            case PrimitiveCommand.PourBucket pour -> new me.herry.minecraftAI.ai.action.PourBucketAction(
+                    pour.support(), pour.world(), material(pour.bucket()));
+            case PrimitiveCommand.EnterNetherPortal enter -> new EnterPortalAction(enter.portal());
+            case PrimitiveCommand.EnterEndPortal enter -> new EnterPortalAction(enter.portal(), Material.END_PORTAL);
+            case PrimitiveCommand.ThrowEnderEye eye -> new EnderEyeAction(eye);
+            case PrimitiveCommand.SocketEnderEye eye -> new EnderEyeAction(eye);
+            case PrimitiveCommand.ShootBow shot -> new ShootBowAction(shot);
+            case PrimitiveCommand.ShieldBlock shield -> new me.herry.minecraftAI.ai.action.ShieldBlockAction(shield);
+            case PrimitiveCommand.DropExact drop -> new me.herry.minecraftAI.ai.action.DropExactAction(drop);
+            case PrimitiveCommand.Attack attack -> {
+                Entity target = Bukkit.getEntity(attack.entityId());
+                yield target instanceof EnderCrystal || target instanceof EnderDragon
+                        ? new StrikeExactAction(ai.getWorldId(), attack.entityId())
+                        : AttackEntityAction.exactTarget((LivingEntity) target);
+            }
             case PrimitiveCommand.Pickup pickup -> PickupItemAction.direct(pickup.radius(), true);
+            case PrimitiveCommand.PickupExact pickup -> PickupItemAction.exact(pickup);
             case PrimitiveCommand.Equip equip -> new SlotEquipAction(equip.tool());
             case PrimitiveCommand.SelectSlot select -> new SelectHotbarSlotAction(select.slot());
             case PrimitiveCommand.Craft craft -> new CraftItemAction(material(craft.material()), craft.amount());
+            case PrimitiveCommand.FurnaceTransfer furnace -> new FurnaceSlotAction(furnace);
+            case PrimitiveCommand.LootChest chest -> new me.herry.minecraftAI.ai.action.ExactLootChestAction(chest);
+            case PrimitiveCommand.UseBed bed -> new me.herry.minecraftAI.ai.action.ExactUseBedAction(bed);
+            case PrimitiveCommand.ToggleBlock toggle -> new me.herry.minecraftAI.ai.action.ToggleBlockAction(toggle);
             case PrimitiveCommand.Wait wait -> new WaitAction(wait.ticks());
             case PrimitiveCommand.Sneak sneak -> new SneakAction(sneak.ticks());
             case PrimitiveCommand.Swim swim -> new SwimAction(swim.target(), swim.timeoutTicks());
@@ -297,7 +348,7 @@ public final class PrimitiveAdapter {
     }
 
     private static String checkMining(AIPlayer ai, PrimitiveCommand.BreakBlock mine) {
-        String reason = checkBlock(ai, mine.target(), REACH);
+        String reason = checkBlock(ai, mine.target(), BLOCK_REACH);
         if (!reason.isEmpty()) return reason;
         reason = checkTool(ai, mine.tool());
         if (!reason.isEmpty()) return reason;
@@ -343,12 +394,53 @@ public final class PrimitiveAdapter {
     private static String checkPlacement(AIPlayer ai, PrimitiveCommand.PlaceBlock place) {
         Material material = material(place.material());
         if (material == null) return "unknown material";
-        String reason = checkBlock(ai, place.target(), REACH);
+        String reason = checkBlock(ai, place.target(), BLOCK_REACH);
         return reason.isEmpty() ? ExactPlaceBlockAction.unavailableReason(ai, place.target(), material) : reason;
+    }
+
+    private static String checkFurnace(AIPlayer ai, PrimitiveCommand.FurnaceTransfer transfer) {
+        if (!ai.getWorldId().equals(transfer.world())) return "furnace world changed";
+        String reason = checkBlock(ai, transfer.target(), BLOCK_REACH);
+        if (!reason.isEmpty()) return reason;
+        if (!visibleBlock(ai.getPlayer(), transfer.target())) return "furnace is blocked from view";
+        if (ai.getFurnaceJob() != null && ai.getFurnaceJob().isAt(transfer.world(), transfer.target())) return "furnace in use by an active job";
+        return FurnaceSlotAction.unavailableReason(ai, transfer);
+    }
+
+    private static String checkPortalEntry(AIPlayer ai, java.util.UUID source, BlockPoint portal, Material portalMaterial) {
+        if (!ai.getWorldId().equals(source)) return "portal world changed";
+        var world = ai.getPlayer().getWorld();
+        if (world.getEnvironment() != World.Environment.NORMAL
+                && !(world.getEnvironment() == World.Environment.NETHER && portalMaterial == Material.NETHER_PORTAL))
+            return "portal travel is unavailable in this dimension";
+        var reason = checkBlock(ai, portal, BLOCK_REACH);
+        if (!reason.isEmpty()) return reason;
+        if (Positions.block(world, portal).getType() != portalMaterial) return "target portal is inactive";
+        // The horizontal End portal surface is at 12/16 of the block, above its center.
+        double sightHeight = portalMaterial == Material.END_PORTAL ? 0.75 : 0.5;
+        return visibleBlock(ai.getPlayer(), portal, sightHeight) ? "" : "portal is blocked from view";
+    }
+
+    private static String checkHeldEye(AIPlayer ai, java.util.UUID world) {
+        if (!ai.getWorldId().equals(world)) return "eye use world changed";
+        if (ai.getPlayer().getWorld().getEnvironment() != World.Environment.NORMAL) return "eye use requires the Overworld";
+        return ai.getPlayer().getInventory().getItemInMainHand().getType() == Material.ENDER_EYE ? "" : "no held ender eye";
+    }
+
+    private static String checkEyeSocket(AIPlayer ai, PrimitiveCommand.SocketEnderEye eye) {
+        String reason = checkHeldEye(ai, eye.world());
+        if (reason.isEmpty()) reason = checkBlock(ai, eye.frame(), BLOCK_REACH);
+        if (!reason.isEmpty()) return reason;
+        var block = Positions.block(ai.getPlayer().getWorld(), eye.frame());
+        if (!(block.getBlockData() instanceof org.bukkit.block.data.type.EndPortalFrame frame) || frame.hasEye())
+            return "selected frame has no empty eye socket";
+        return visibleBlock(ai.getPlayer(), eye.frame()) ? "" : "frame is blocked from view";
     }
 
     private static String checkAttack(AIPlayer ai, PrimitiveCommand.Attack attack) {
         Entity entity = Bukkit.getEntity(attack.entityId());
+        if (entity instanceof EnderCrystal || entity instanceof EnderDragon)
+            return StrikeExactAction.canReach(ai, entity) ? "" : "target outside visible melee reach";
         if (!(entity instanceof LivingEntity target) || target instanceof Player) return "target is not an attackable non-player living entity";
         if (!target.isValid() || target.isDead() || !target.getWorld().equals(ai.getPlayer().getWorld())) return "target is unavailable in this world";
         if (target.getLocation().distanceSquared(ai.getPlayer().getLocation()) > 16.0 * 16.0) return "combat target exceeds local range";
@@ -361,7 +453,8 @@ public final class PrimitiveAdapter {
         Player player = ai.getPlayer();
         for (Entity entity : player.getNearbyEntities(radius, radius, radius)) {
             if (entity instanceof Item item && item.isValid() && !DropJunkAction.isDiscarded(item)
-                    && PickupItemAction.isInRange(player.getLocation(), item.getLocation(), radius)) return "";
+                    && PickupItemAction.isInRange(player.getLocation(), item.getLocation(), radius)
+                    && !PickupItemAction.isUnreachable(ai, Positions.of(item.getLocation()))) return "";
         }
         return "no nearby item to pick up";
     }
@@ -427,9 +520,13 @@ public final class PrimitiveAdapter {
     }
 
     private static boolean visibleBlock(Player player, BlockPoint target) {
+        return visibleBlock(player, target, 0.5);
+    }
+
+    private static boolean visibleBlock(Player player, BlockPoint target, double height) {
         Location eye = player.getEyeLocation();
         World world = player.getWorld();
-        Location center = Positions.center(world, target);
+        Location center = new Location(world, target.x() + 0.5, target.y() + height, target.z() + 0.5);
         int minX = Math.min(eye.getBlockX(), target.x()) >> 4;
         int maxX = Math.max(eye.getBlockX(), target.x()) >> 4;
         int minZ = Math.min(eye.getBlockZ(), target.z()) >> 4;

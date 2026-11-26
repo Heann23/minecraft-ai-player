@@ -1,6 +1,5 @@
 package me.herry.minecraftAI.ai.brain;
 
-import me.herry.minecraftAI.ai.comm.Intent;
 import me.herry.minecraftAI.ai.goal.GoalType;
 import me.herry.minecraftAI.ai.goal.Milestone;
 import me.herry.minecraftAI.ai.goal.Situation;
@@ -179,7 +178,6 @@ class BrainTest {
     @Test
     void explanationWithoutAnyDecision() {
         assertEquals(1, DecisionExplainer.describe(null, "None").size());
-        assertFalse(DecisionExplainer.brief(null).isBlank());
         assertTrue(DecisionExplainer.candidates(null).isEmpty());
     }
 
@@ -205,17 +203,17 @@ class BrainTest {
     @Test
     void directivePicksTheGoalFromWhatIsKnown() {
         Situation situation = new Situation();
-        Directive iron = Directive.gather(Intent.Subject.IRON, "Steve", 0L);
+        Directive iron = Directive.gather(Directive.Subject.IRON, "Steve", 0L);
         assertEquals(GoalType.FIND_IRON, iron.goalFor(situation));
         situation.knowsIron = true;
         assertEquals(GoalType.MINE_IRON, iron.goalFor(situation));
 
-        Directive wood = Directive.gather(Intent.Subject.WOOD, "Steve", 0L);
+        Directive wood = Directive.gather(Directive.Subject.WOOD, "Steve", 0L);
         assertEquals(GoalType.FIND_WOOD, wood.goalFor(situation));
         situation.knowsTree = true;
         assertEquals(GoalType.COLLECT_WOOD, wood.goalFor(situation));
 
-        Directive diamond = Directive.gather(Intent.Subject.DIAMOND, "Steve", 0L);
+        Directive diamond = Directive.gather(Directive.Subject.DIAMOND, "Steve", 0L);
         assertEquals(GoalType.FIND_DIAMOND, diamond.goalFor(situation));
         situation.knowsDiamond = true;
         assertEquals(GoalType.MINE_DIAMOND, diamond.goalFor(situation));
@@ -227,15 +225,15 @@ class BrainTest {
     void directiveIsRefusedWhenItCannotBeDone() {
         Situation situation = new Situation();
         assertNotNull(Directive.goHome("Steve", 0L).rejection(situation));
-        assertNotNull(Directive.gather(Intent.Subject.IRON, "Steve", 0L).rejection(situation));
-        assertNotNull(Directive.gather(Intent.Subject.DIAMOND, "Steve", 0L).rejection(situation));
+        assertNotNull(Directive.gather(Directive.Subject.IRON, "Steve", 0L).rejection(situation));
+        assertNotNull(Directive.gather(Directive.Subject.DIAMOND, "Steve", 0L).rejection(situation));
         // 나무는 맨손으로도 구할 수 있다.
-        assertNull(Directive.gather(Intent.Subject.WOOD, "Steve", 0L).rejection(situation));
+        assertNull(Directive.gather(Directive.Subject.WOOD, "Steve", 0L).rejection(situation));
 
         situation.homeKnown = true;
         situation.canMineIron = true;
         assertNull(Directive.goHome("Steve", 0L).rejection(situation));
-        assertNull(Directive.gather(Intent.Subject.IRON, "Steve", 0L).rejection(situation));
+        assertNull(Directive.gather(Directive.Subject.IRON, "Steve", 0L).rejection(situation));
     }
 
     @Test
@@ -252,7 +250,7 @@ class BrainTest {
         assertTrue(home.isDone(situation));
 
         // 자원 모으기는 시간이 다 될 때까지 계속한다.
-        Directive gather = Directive.gather(Intent.Subject.WOOD, "Steve", 0L);
+        Directive gather = Directive.gather(Directive.Subject.WOOD, "Steve", 0L);
         assertFalse(gather.isDone(situation));
         assertTrue(gather.isExpired(Directive.GATHER_TICKS));
         assertTrue(gather.describe().contains("Steve"));

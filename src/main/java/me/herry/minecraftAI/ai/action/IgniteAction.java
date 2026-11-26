@@ -15,6 +15,8 @@ import org.bukkit.entity.Player;
 import org.bukkit.util.RayTraceResult;
 import org.bukkit.util.Vector;
 
+import java.util.UUID;
+
 /**
  * 부싯돌과 부시로 블록의 윗면에 불을 붙인다. 포탈 틀의 아랫줄 흑요석에 붙이면 틀 안이 네더 포탈이 된다.
  * 진짜 플레이어가 블록을 우클릭했을 때와 같은 서버 경로를 타지만, 그 경로는 거리와 시야를 다시 확인하지 않는다.
@@ -28,21 +30,51 @@ public final class IgniteAction extends AbstractAction implements PrimitiveActio
 
     private final BlockPoint floor;
     private final BlockPoint cell;
+    private final UUID requiredWorld;
     private World world;
 
     /**
      * @param floor 윗면에 불을 붙일 블록. 불(또는 포탈)은 그 바로 위 칸에 생긴다
      */
     public IgniteAction(BlockPoint floor) {
+        this(floor, null);
+    }
+
+    public IgniteAction(BlockPoint floor, UUID requiredWorld) {
         super("Ignite", TIMEOUT);
         this.floor = floor;
         this.cell = floor.offset(0, 1, 0);
+        this.requiredWorld = requiredWorld;
+    }
+
+    public static String heldToolUnavailable(Player player, UUID requiredWorld, BlockPoint floor) {
+        World world = player.getWorld();
+        if (!world.getUID().equals(requiredWorld)) return "portal base world changed";
+        if (player.getInventory().getItemInMainHand().getType() != Material.FLINT_AND_STEEL) return "no held flint and steel";
+        if (floor.y() < world.getMinHeight() || floor.y() + 1 >= world.getMaxHeight() || !Positions.isLoaded(world, floor))
+            return "portal base unavailable";
+        if (Positions.block(world, floor).getType() != Material.OBSIDIAN
+                || !Positions.block(world, floor.offset(0, 1, 0)).isEmpty()) return "portal base needs exposed obsidian";
+        Location eye = player.getEyeLocation();
+        Location top = top(world, floor);
+        if (eye.distanceSquared(top) > MAX_REACH * MAX_REACH || eye.getY() <= top.getY()) return "portal base top outside reach";
+        for (int x = Math.min(eye.getBlockX(), floor.x()) >> 4; x <= Math.max(eye.getBlockX(), floor.x()) >> 4; x++)
+            for (int z = Math.min(eye.getBlockZ(), floor.z()) >> 4; z <= Math.max(eye.getBlockZ(), floor.z()) >> 4; z++)
+                if (!world.isChunkLoaded(x, z)) return "portal sight path is unloaded";
+        RayTraceResult hit = rayToTop(world, eye, top);
+        return hit != null && hit.getHitBlock() != null && hit.getHitBlockFace() == BlockFace.UP
+                && Positions.of(hit.getHitBlock()).equals(floor) ? "" : "portal base top is not visible";
     }
 
     @Override
     protected void onStart(AIPlayer ai) {
         world = ai.getPlayer().getWorld();
-        if (!ai.getInventory().equip(Material.FLINT_AND_STEEL)) {
+        if (requiredWorld != null) {
+            String reason = heldToolUnavailable(ai.getPlayer(), requiredWorld, floor);
+            if (!reason.isEmpty()) { fail(reason); return; }
+            ai.getNavigation().stop();
+            ai.getBody().clearInputs();
+        } else if (!ai.getInventory().equip(Material.FLINT_AND_STEEL)) {
             fail("no flint and steel");
             return;
         }
@@ -57,12 +89,16 @@ public final class IgniteAction extends AbstractAction implements PrimitiveActio
             fail("world changed");
             return;
         }
+        if (requiredWorld != null) {
+            String reason = heldToolUnavailable(player, requiredWorld, floor);
+            if (!reason.isEmpty()) { fail(reason); return; }
+        }
         if (isLit(Positions.block(world, cell).getType())) {
             succeed();
             return;
         }
         Location eye = player.getEyeLocation();
-        Location top = new Location(world, floor.x() + 0.5, floor.y() + 1.0, floor.z() + 0.5);
+        Location top = top(world, floor);
         double distance = eye.distance(top);
         if (distance > MAX_REACH) {
             fail("out of reach");
@@ -74,11 +110,12 @@ public final class IgniteAction extends AbstractAction implements PrimitiveActio
             if (getElapsed() >= MAX_AIM_TICKS) fail("cannot aim");
             return;
         }
-        Vector direction = top.toVector().subtract(eye.toVector()).normalize();
-        RayTraceResult hit = world.rayTraceBlocks(eye, direction, distance + 0.2, FluidCollisionMode.NEVER, true);
-        if (hit == null || hit.getHitBlock() == null || !Positions.of(hit.getHitBlock()).equals(floor)) {
-            fail("not visible");
-            return;
+        if (requiredWorld == null) {
+            RayTraceResult hit = rayToTop(world, eye, top);
+            if (hit == null || hit.getHitBlock() == null || !Positions.of(hit.getHitBlock()).equals(floor)) {
+                fail("not visible");
+                return;
+            }
         }
         if (player.getInventory().getItemInMainHand().getType() != Material.FLINT_AND_STEEL) {
             fail("no flint and steel");
@@ -96,6 +133,15 @@ public final class IgniteAction extends AbstractAction implements PrimitiveActio
         } else {
             fail("use denied");
         }
+    }
+
+    private static Location top(World world, BlockPoint floor) {
+        return new Location(world, floor.x() + 0.5, floor.y() + 1.0, floor.z() + 0.5);
+    }
+
+    private static RayTraceResult rayToTop(World world, Location eye, Location top) {
+        Vector direction = top.toVector().subtract(eye.toVector()).normalize();
+        return world.rayTraceBlocks(eye, direction, eye.distance(top) + 0.2, FluidCollisionMode.NEVER, true);
     }
 
     private static boolean isLit(Material type) {

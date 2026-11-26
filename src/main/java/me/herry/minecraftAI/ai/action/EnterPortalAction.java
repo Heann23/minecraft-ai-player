@@ -24,6 +24,7 @@ public final class EnterPortalAction extends AbstractAction {
     private static final int FLIP_TICKS = 30;
 
     private final BlockPoint portal;
+    private final Material portalMaterial;
     private World world;
     private boolean leaving;
     private int leavingTicks;
@@ -31,8 +32,13 @@ public final class EnterPortalAction extends AbstractAction {
     private int side = 1;
 
     public EnterPortalAction(BlockPoint portal) {
+        this(portal, Material.NETHER_PORTAL);
+    }
+
+    public EnterPortalAction(BlockPoint portal, Material portalMaterial) {
         super("EnterPortal", TIMEOUT);
         this.portal = portal;
+        this.portalMaterial = portalMaterial;
     }
 
     @Override
@@ -50,12 +56,18 @@ public final class EnterPortalAction extends AbstractAction {
             succeed();
             return;
         }
-        if (!Positions.isLoaded(world, portal) || Positions.block(world, portal).getType() != Material.NETHER_PORTAL) {
+        if (!Positions.isLoaded(world, portal) || Positions.block(world, portal).getType() != portalMaterial) {
             fail("no portal");
             return;
         }
         AIBody body = ai.getBody();
         Location location = player.getLocation();
+        if (portalMaterial == Material.END_PORTAL) {
+            boolean above = portal.y() > location.getY() + 0.1;
+            walkToward(body, location, portal.x() + 0.5, portal.z() + 0.5, true);
+            body.inputJump(body.isGrounded() && (above || body.isBlockedHorizontally()));
+            return;
+        }
         boolean inside = isInPortal(player);
         // 포탈의 틀이 동서로 서 있으면 남북으로 드나든다.
         boolean alongX = isFrameOrPortal(portal.offset(1, 0, 0)) || isFrameOrPortal(portal.offset(-1, 0, 0));

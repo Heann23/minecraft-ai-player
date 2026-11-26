@@ -18,6 +18,8 @@ import org.bukkit.entity.AbstractSkeleton;
 import org.bukkit.entity.Animals;
 import org.bukkit.entity.Creeper;
 import org.bukkit.entity.Cod;
+import org.bukkit.entity.EnderCrystal;
+import org.bukkit.entity.EnderSignal;
 import org.bukkit.entity.Enderman;
 import org.bukkit.entity.Enemy;
 import org.bukkit.entity.Entity;
@@ -47,6 +49,7 @@ public final class PerceptionSystem {
     private final AIConfig config;
     private final BlockScanner scanner;
     private final Perception perception = new Perception();
+    private final EnderEyeTrack eyeTrack = new EnderEyeTrack();
 
     public PerceptionSystem(AIBody body, AIConfig config, WorkBudget budget) {
         this.body = body;
@@ -56,6 +59,14 @@ public final class PerceptionSystem {
 
     public Perception getPerception() {
         return perception;
+    }
+
+    public void trackThrownEye(EnderSignal signal) {
+        eyeTrack.begin(signal);
+    }
+
+    public EnderEyeTrack.Observation observeThrownEye() {
+        return eyeTrack.observe(body.getPlayer());
     }
 
     /**
@@ -142,11 +153,13 @@ public final class PerceptionSystem {
 
     public void reset() {
         scanner.reset();
+        eyeTrack.clear();
         perception.entityScanStamp = null;
         perception.world = null;
         perception.location = null;
         perception.heldItem = null;
         perception.hostiles.clear();
+        perception.endCrystals.clear();
         perception.animals.clear();
         perception.players.clear();
         perception.drops.clear();
@@ -155,6 +168,7 @@ public final class PerceptionSystem {
 
     private void scanEntities(Player player, Location location) {
         perception.hostiles.clear();
+        perception.endCrystals.clear();
         perception.animals.clear();
         perception.players.clear();
         perception.drops.clear();
@@ -162,7 +176,9 @@ public final class PerceptionSystem {
         double range = config.entityRange;
         for (Entity entity : player.getNearbyEntities(range, range, range)) {
             if (!entity.isValid() || entity.isDead()) continue;
-            if (entity instanceof Item item) {
+            if (entity instanceof EnderCrystal crystal) {
+                perception.endCrystals.add(crystal);
+            } else if (entity instanceof Item item) {
                 perception.drops.add(item);
             } else if (entity instanceof Player other) {
                 perception.players.add(other);
@@ -175,6 +191,7 @@ public final class PerceptionSystem {
         // getNearbyEntities 는 같은 월드의 엔티티만 돌려주므로 여기서는 월드 비교 없이 거리를 잴 수 있다.
         Comparator<Entity> byDistance = Comparator.comparingDouble(entity -> entity.getLocation().distanceSquared(location));
         perception.hostiles.sort(byDistance);
+        perception.endCrystals.sort(byDistance);
         perception.animals.sort(byDistance);
         perception.players.sort(byDistance);
         perception.drops.sort(byDistance);

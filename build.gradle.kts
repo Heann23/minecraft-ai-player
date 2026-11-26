@@ -25,13 +25,7 @@ dependencies {
     // 테스트 서버(paper-26.3-140)와 동일한 빌드에 맞춘다.
     paperweight.paperDevBundle("26.3.build.140-beta")
 
-    implementation("net.dv8tion:JDA:6.7.0")
     implementation("com.google.code.gson:gson:2.14.0")
-    implementation("club.minnced:jdave-api:0.1.8")
-    runtimeOnly("club.minnced:jdave-native-win-x86-64:0.1.8")
-    runtimeOnly("club.minnced:jdave-native-linux-x86-64:0.1.8")
-    runtimeOnly("club.minnced:jdave-native-linux-aarch64:0.1.8")
-    runtimeOnly("club.minnced:jdave-native-darwin:0.1.8")
 
     testImplementation(platform("org.junit:junit-bom:5.13.4"))
     testImplementation("org.junit.jupiter:junit-jupiter")
@@ -60,7 +54,6 @@ tasks {
 
     test {
         useJUnitPlatform()
-        jvmArgs("--enable-native-access=ALL-UNNAMED")
     }
 }
 
@@ -94,7 +87,7 @@ val deployPlugin = tasks.register("deployPlugin") {
     }
 }
 
-// Discord 네이티브·서비스를 포함한 파일이 배포 대상이다. Paper/NMS는 compileOnly로 유지한다.
+// 런타임 의존성을 포함한 Shadow JAR를 배포한다. Paper/NMS는 compileOnly로 유지한다.
 tasks.jar {
     archiveClassifier = "plain"
 }
@@ -106,40 +99,23 @@ tasks.shadowJar {
     filesMatching("META-INF/*.kotlin_module") { duplicatesStrategy = DuplicatesStrategy.INCLUDE }
     exclude("META-INF/*.SF", "META-INF/*.RSA", "META-INF/*.DSA", "**/module-info.class")
     dependencies { exclude(dependency("org.slf4j:slf4j-api:.*")) }
-    relocate("com.google.gson", "me.herry.minecraftAI.discord.internal.gson")
-    relocate("com.fasterxml.jackson", "me.herry.minecraftAI.discord.internal.jackson")
+    relocate("com.google.gson", "me.herry.minecraftAI.internal.gson")
     failOnDuplicateEntries = true
     finalizedBy(deployPlugin)
 }
 
-// 실제 배포 파일에 음성 네이티브와 adapter가 있고 서버 자체가 섞이지 않았는지 검사한다.
-val verifyDiscordJar = tasks.register("verifyDiscordJar") {
+// Paper/NMS가 런타임 JAR에 섞이면 서버와 충돌할 수 있다.
+val verifyPluginJar = tasks.register("verifyPluginJar") {
     val artifact = tasks.shadowJar.flatMap { it.archiveFile }
     dependsOn(tasks.shadowJar)
     inputs.file(artifact)
     doLast {
         ZipFile(artifact.get().asFile).use { zip ->
-            val entries = zip.entries().asSequence().map { it.name }.toSet()
-            listOf("net/dv8tion/jda/api/JDA.class", "club/minnced/discord/jdave/interop/JDaveSessionFactory.class",
-                "me/herry/minecraftAI/discord/internal/gson/Strictness.class", "club/minnced/opus/util/OpusLibrary.class",
-                "natives/win-x86-64/dave.dll", "natives/linux-x86-64/libdave.so",
-                "natives/linux-aarch64/libdave.so", "natives/darwin/libdave.dylib").forEach {
-                check(it in entries) { "Discord runtime resource missing: $it" }
-            }
-            check(entries.none { it.startsWith("org/bukkit/") || it.startsWith("net/minecraft/") }) {
+            val entries = zip.entries().asSequence()
+            check(entries.none { it.name.startsWith("org/bukkit/") || it.name.startsWith("net/minecraft/") }) {
                 "Paper/NMS must not be packaged in the plugin"
             }
         }
     }
 }
-tasks.check { dependsOn(verifyDiscordJar) }
-
-val verifyDiscordRuntime = tasks.register<JavaExec>("verifyDiscordRuntime") {
-    dependsOn(tasks.shadowJar, tasks.compileTestJava)
-    mainClass = "me.herry.minecraftAI.discord.DiscordJarSmoke"
-    classpath = files(sourceSets.test.get().output.classesDirs, tasks.shadowJar.flatMap { it.archiveFile },
-        configurations.runtimeClasspath.get().filter { it.name.startsWith("slf4j-api-") })
-    javaLauncher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(25) }
-    jvmArgs("--enable-native-access=ALL-UNNAMED")
-}
-tasks.check { dependsOn(verifyDiscordRuntime) }
+tasks.check { dependsOn(verifyPluginJar) }

@@ -58,13 +58,29 @@ public final class BreakBlockAction extends AbstractAction implements PrimitiveA
     // 지금 실제로 캐고 있는 블록. 목표 블록이 다른 블록에 가려져 있으면 가리고 있는 블록이 된다.
     private BlockPoint current;
     private Material currentType;
-    private float progress;
+    private double progress;
     private int aimTicks;
     private int obstructionsCleared;
     private boolean crackShown;
     // 0 이상이면 캔 자리로 모래나 자갈이 떨어지기를 기다리는 중이다.
     private int settleTicks = -1;
     private int refills;
+    private boolean executionEndLogged;
+
+    /** Cached execution facts only. Reading this does not inspect the world or advance mining. */
+    public record MiningProgress(String target, String material, String current, String currentMaterial,
+                                 float progress, int aimTicks, int actionTicks) {}
+
+    public MiningProgress miningProgress() {
+        return new MiningProgress(target.encode(), expected == null ? "UNKNOWN" : expected.name(),
+                current == null ? "UNKNOWN" : current.encode(), currentType == null ? "UNKNOWN" : currentType.name(),
+                (float) progress, aimTicks, getElapsed());
+    }
+
+    /** Round the accumulated game speed once, as with a constant speed multiplied by elapsed ticks. */
+    static boolean completedMining(double accumulatedProgress) {
+        return (float) accumulatedProgress >= 1.0F;
+    }
 
     public BreakBlockAction(BlockPoint target) {
         this(target, false);
@@ -121,6 +137,7 @@ public final class BreakBlockAction extends AbstractAction implements PrimitiveA
 
     @Override
     protected void onStart(AIPlayer ai) {
+        if (exactTarget) ai.debug("MiningExecution start target=" + target.encode());
         Player player = ai.getPlayer();
         world = player.getWorld();
         if (!Positions.isLoaded(world, target)) {
@@ -218,10 +235,11 @@ public final class BreakBlockAction extends AbstractAction implements PrimitiveA
             fail("cannot break");
             return;
         }
+        if (exactTarget && progress == 0) ai.debug("MiningExecution progress-start target=" + target.encode() + " material=" + currentType.name());
         progress += speed;
         if (getElapsed() % SWING_INTERVAL == 0) player.swingMainHand();
-        showCrack(player, center, Math.min(progress, 1.0F));
-        if (progress < 1.0F) return;
+        showCrack(player, center, Math.min((float) progress, 1.0F));
+        if (!completedMining(progress)) return;
 
         if (!player.breakBlock(block) || block.getType() == currentType) {
             // 다른 플러그인이 막은 경우
@@ -242,6 +260,12 @@ public final class BreakBlockAction extends AbstractAction implements PrimitiveA
 
     @Override
     protected void onEnd(AIPlayer ai) {
+        if (exactTarget && !executionEndLogged) {
+            executionEndLogged = true;
+            ai.debug("MiningExecution end target=" + target.encode() + " status=" + getStatus().name()
+                    + " cancelled=" + getFailReason().equals("cancelled") + " progress=" + progress
+                    + " actionTicks=" + getElapsed());
+        }
         ai.getBody().inputJump(false);
         if (exactTarget) ai.getBody().inputSneak(false);
         if (crackShown && world != null && current != null) showCrack(ai.getPlayer(), Positions.center(world, current), 0.0F);
@@ -322,7 +346,7 @@ public final class BreakBlockAction extends AbstractAction implements PrimitiveA
         if (!next.equals(target)) ai.debug("Clearing " + block.getType() + " at " + next + " that hides " + target);
         current = next;
         currentType = block.getType();
-        progress = 0.0F;
+        progress = 0;
         aimTicks = 0;
         if (exactTarget) {
             if (chosenTool.slot() < 0 || chosenTool.slot() >= 36

@@ -49,13 +49,117 @@ public sealed interface PrimitiveCommand {
         @Override public PrimitiveType type() { return PrimitiveType.USE_ITEM; }
     }
 
+    /** Use the already-held flint and steel on the top face of the selected portal base block. */
+    record IgnitePortal(UUID world, BlockPoint floor) implements PrimitiveCommand {
+        public IgnitePortal {
+            Objects.requireNonNull(world, "world");
+            floor = ContractValues.block(floor);
+        }
+
+        @Override public PrimitiveType type() { return PrimitiveType.USE_ITEM; }
+    }
+
+    /** Scoop a visible, reachable water or lava source block using the already-held empty bucket. */
+    record FillBucket(UUID world, BlockPoint source, String fluid) implements PrimitiveCommand {
+        public FillBucket {
+            Objects.requireNonNull(world, "world");
+            source = ContractValues.block(source);
+            fluid = ContractValues.material(fluid);
+            if (!fluid.equals("WATER") && !fluid.equals("LAVA"))
+                throw new IllegalArgumentException("bucket fill requires WATER or LAVA source");
+        }
+
+        @Override public PrimitiveType type() { return PrimitiveType.USE_ITEM; }
+    }
+
+    /** Pour the already-held water or lava bucket onto the top face of the selected solid support block. */
+    record PourBucket(UUID world, BlockPoint support, String bucket) implements PrimitiveCommand {
+        public PourBucket {
+            Objects.requireNonNull(world, "world");
+            support = ContractValues.block(support);
+            bucket = ContractValues.material(bucket);
+            if (!bucket.equals("WATER_BUCKET") && !bucket.equals("LAVA_BUCKET"))
+                throw new IllegalArgumentException("bucket pour requires WATER_BUCKET or LAVA_BUCKET");
+        }
+
+        @Override public PrimitiveType type() { return PrimitiveType.USE_ITEM; }
+    }
+
+    /** Walk into the selected active Nether portal cell and wait for normal dimension travel. */
+    record EnterNetherPortal(UUID world, BlockPoint portal) implements PrimitiveCommand {
+        public EnterNetherPortal {
+            Objects.requireNonNull(world, "world");
+            portal = ContractValues.block(portal);
+        }
+
+        @Override public PrimitiveType type() { return PrimitiveType.INTERACT_BLOCK; }
+    }
+
+    record EnterEndPortal(UUID world, BlockPoint portal) implements PrimitiveCommand {
+        public EnterEndPortal {
+            Objects.requireNonNull(world, "world");
+            portal = ContractValues.block(portal);
+        }
+
+        @Override public PrimitiveType type() { return PrimitiveType.INTERACT_BLOCK; }
+    }
+
+    record ThrowEnderEye(UUID world) implements PrimitiveCommand {
+        public ThrowEnderEye { Objects.requireNonNull(world, "world"); }
+        @Override public PrimitiveType type() { return PrimitiveType.USE_ITEM; }
+    }
+
+    record SocketEnderEye(UUID world, BlockPoint frame) implements PrimitiveCommand {
+        public SocketEnderEye {
+            Objects.requireNonNull(world, "world");
+            frame = ContractValues.block(frame);
+        }
+        @Override public PrimitiveType type() { return PrimitiveType.USE_ITEM; }
+    }
+
     record Attack(UUID entityId) implements PrimitiveCommand {
         public Attack { Objects.requireNonNull(entityId, "entityId"); }
         @Override public PrimitiveType type() { return PrimitiveType.ATTACK; }
     }
 
+    record ShootBow(UUID world, UUID entityId) implements PrimitiveCommand {
+        public ShootBow {
+            Objects.requireNonNull(world, "world");
+            Objects.requireNonNull(entityId, "entityId");
+        }
+        @Override public PrimitiveType type() { return PrimitiveType.USE_ITEM; }
+    }
+
+    /** Raise an already-held main-hand or off-hand shield through the normal item-use path. */
+    record ShieldBlock(UUID world, boolean offHand, int holdTicks) implements PrimitiveCommand {
+        public ShieldBlock {
+            Objects.requireNonNull(world, "world");
+            ContractValues.range(holdTicks, 1, 100, "holdTicks");
+        }
+        @Override public PrimitiveType type() { return PrimitiveType.USE_ITEM; }
+    }
+
+    /** Discard the exact selected storage slot stack via the normal inventory throw input. */
+    record DropExact(UUID world, int slot, String material) implements PrimitiveCommand {
+        public DropExact {
+            Objects.requireNonNull(world, "world");
+            ContractValues.range(slot, 0, 35, "slot");
+            material = ContractValues.material(material);
+        }
+        @Override public PrimitiveType type() { return PrimitiveType.DROP_ITEM; }
+    }
+
     record Pickup(double radius) implements PrimitiveCommand {
         public Pickup { ContractValues.finiteRange(radius, 0.1, 16, "radius"); }
+        @Override public PrimitiveType type() { return PrimitiveType.PICKUP_ITEM; }
+    }
+
+    record PickupExact(UUID world, UUID entityId, String material) implements PrimitiveCommand {
+        public PickupExact {
+            Objects.requireNonNull(world, "world");
+            Objects.requireNonNull(entityId, "entityId");
+            material = ContractValues.material(material);
+        }
         @Override public PrimitiveType type() { return PrimitiveType.PICKUP_ITEM; }
     }
 
@@ -75,6 +179,50 @@ public sealed interface PrimitiveCommand {
             ContractValues.range(amount, 1, 64, "amount");
         }
         @Override public PrimitiveType type() { return PrimitiveType.CRAFT_ITEM; }
+    }
+
+    enum FurnaceSlot { INGREDIENT, FUEL, RESULT }
+
+    /** Insert one item from the selected storage slot, or take the matching result into storage. */
+    record FurnaceTransfer(UUID world, BlockPoint target, FurnaceSlot slot, int inventorySlot,
+                            String material) implements PrimitiveCommand {
+        public FurnaceTransfer {
+            Objects.requireNonNull(world, "world");
+            target = ContractValues.block(target);
+            Objects.requireNonNull(slot, "slot");
+            ContractValues.range(inventorySlot, slot == FurnaceSlot.RESULT ? -1 : 0,
+                    slot == FurnaceSlot.RESULT ? -1 : 35, "inventorySlot");
+            material = ContractValues.material(material);
+        }
+
+        @Override public PrimitiveType type() { return PrimitiveType.INTERACT_BLOCK; }
+    }
+
+    /** Open a visible reachable chest or barrel via normal block interaction and collect items that fit. */
+    record LootChest(UUID world, BlockPoint chest) implements PrimitiveCommand {
+        public LootChest {
+            Objects.requireNonNull(world, "world");
+            chest = ContractValues.block(chest);
+        }
+        @Override public PrimitiveType type() { return PrimitiveType.INTERACT_BLOCK; }
+    }
+
+    /** Right-click a visible reachable bed through the normal server interaction path (set spawn / sleep). */
+    record UseBed(UUID world, BlockPoint bed) implements PrimitiveCommand {
+        public UseBed {
+            Objects.requireNonNull(world, "world");
+            bed = ContractValues.block(bed);
+        }
+        @Override public PrimitiveType type() { return PrimitiveType.INTERACT_BLOCK; }
+    }
+
+    /** Toggle a visible reachable door, trapdoor, fence gate, button, or lever via normal interaction. */
+    record ToggleBlock(UUID world, BlockPoint target) implements PrimitiveCommand {
+        public ToggleBlock {
+            Objects.requireNonNull(world, "world");
+            target = ContractValues.block(target);
+        }
+        @Override public PrimitiveType type() { return PrimitiveType.INTERACT_BLOCK; }
     }
 
     record Wait(int ticks) implements PrimitiveCommand {
