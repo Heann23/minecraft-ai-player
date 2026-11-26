@@ -11,7 +11,7 @@ STATE_SIZE, ACTION_SIZE, MAX_OPTIONS = 448, 304, 128
 INPUT_SIZE = STATE_SIZE + ACTION_SIZE
 STATE_ACTION_INTERACTION = "state-action-bilinear/v1"
 STATE_ACTION_RANK = 32
-ADVANTAGE_STD_FLOOR = 0.5
+ADVANTAGE_STD_FLOOR = 1.0
 
 
 def inputs(frame: dict) -> tuple[np.ndarray, np.ndarray]:
@@ -228,10 +228,19 @@ class ActorCritic:
             self.second[key] = 0.999 * self.second[key] + 0.001 * gradient * gradient
             first = self.first[key] / (1 - 0.9 ** self.updates)
             second = self.second[key] / (1 - 0.999 ** self.updates)
-            step_rate = rate * 100.0 if key == "value_bias" else rate
+            if key == "value_bias":
+                step_rate = rate * 100.0
+            elif key == "state_action_a":
+                step_rate = rate / math.sqrt(self.params["state_action_a"].shape[1])
+            elif key in ("state_action_s", "state_action_b"):
+                step_rate = rate * 0.5
+            else:
+                step_rate = rate
             self.params[key] -= step_rate * first / (np.sqrt(second) + 1e-8)
-            if key in ("value_w", "value_b", "state_action_s", "state_action_b"):
+            if key in ("value_w", "value_b"):
                 self.params[key] *= 0.999
+            elif key == "state_action_s":
+                self.params[key] *= 0.9997
             elif key == "state_action_a":
                 self.params[key] *= 0.9995
             elif key == "actor_w":
@@ -253,6 +262,10 @@ class ActorCritic:
                 gradient, report = self.gradients([rows[i] for i in indices], advantages[indices], returns[indices])
                 self.apply(gradient)
                 stats.append(report)
+        if self.interaction == STATE_ACTION_INTERACTION and len(rows) > 1:
+            mean_state = np.mean([row["frame"]["state"] for row in rows], axis=0)
+            mean_pre = mean_state @ self.params["state_action_s"] + self.params["state_action_b"]
+            self.params["state_action_b"] -= 0.25 * mean_pre
         self.version += 1
         return {key: float(np.mean([report[key] for report in stats])) for key in ("loss", "entropy", "explorationRegularizer")}
 

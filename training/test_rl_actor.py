@@ -11,7 +11,7 @@ from unittest import mock
 import numpy as np
 import brain_session
 
-from rl_actor import ActorCritic, inputs, generalized_advantages, STATE_SIZE, ACTION_SIZE
+from rl_actor import ActorCritic, inputs, generalized_advantages, STATE_SIZE, ACTION_SIZE, ADVANTAGE_STD_FLOOR
 from train_paper_ppo import PaperTrainer, SCHEMA, CONTROL_SCHEMA, resume_checkpoint, serve, exchange_request, validate_transition
 
 
@@ -137,8 +137,8 @@ class ActorTests(unittest.TestCase):
         a_before = decay_model.params['state_action_a'].copy()
         zero_grads = {key: np.zeros_like(val) for key, val in decay_model.params.items()}
         decay_model.apply(zero_grads)
-        np.testing.assert_allclose(decay_model.params['state_action_s'], s_before * 0.999, rtol=0, atol=1e-12)
-        np.testing.assert_allclose(decay_model.params['state_action_b'], b_before * 0.999, rtol=0, atol=1e-12)
+        np.testing.assert_allclose(decay_model.params['state_action_s'], s_before * 0.9997, rtol=0, atol=1e-12)
+        np.testing.assert_allclose(decay_model.params['state_action_b'], b_before, rtol=0, atol=1e-12)
         np.testing.assert_allclose(decay_model.params['state_action_a'], a_before * 0.9995, rtol=0, atol=1e-12)
 
         restored = ActorCritic.from_optimizer_state(model.optimizer_state())
@@ -181,8 +181,9 @@ class ActorTests(unittest.TestCase):
 
         noise_adv, noise_ret = generalized_advantages(noise_rows)
         signal_adv, signal_ret = generalized_advantages(signal_rows)
-        noise_adv = (noise_adv - noise_adv.mean()) / math.hypot(float(noise_adv.std()), 0.5)
-        signal_adv = (signal_adv - signal_adv.mean()) / math.hypot(float(signal_adv.std()), 0.5)
+        self.assertEqual(ADVANTAGE_STD_FLOOR, 1.0)
+        noise_adv = (noise_adv - noise_adv.mean()) / math.hypot(float(noise_adv.std()), ADVANTAGE_STD_FLOOR)
+        signal_adv = (signal_adv - signal_adv.mean()) / math.hypot(float(signal_adv.std()), ADVANTAGE_STD_FLOOR)
         noise_g, _ = noise_model.gradients(noise_rows, noise_adv, noise_ret, entropy_weight=0.0)
         signal_g, _ = signal_model.gradients(signal_rows, signal_adv, signal_ret, entropy_weight=0.0)
         self.assertGreater(float(np.linalg.norm(signal_g["actor_out"])), 1e-4)
@@ -197,6 +198,50 @@ class ActorTests(unittest.TestCase):
         signal_move = float(np.linalg.norm(signal_model.params["actor_out"] - init_out))
         self.assertGreater(signal_move, 1e-4)
         self.assertLess(noise_move, 0.1 * signal_move)
+
+    def test_state_action_bilinear_centers_gate_and_scales_action_step_by_sqrt_rank(self):
+        model = ActorCritic(51, hidden=4)
+        model.enable_state_action_interaction(seed=19, rank=4)
+        model.params["state_action_s"].fill(0.0)
+        model.params["state_action_s"][432, :] = 1.0
+        model.params["state_action_s"][415, :] = 1.5
+        rows = []
+        for seq, tier in enumerate((0.0, 0.5, 0.0, 0.5)):
+            observed = frame()
+            observed["state"][432] = 1.0
+            observed["state"][415] = tier
+            probs, value, _ = model.evaluate(observed)
+            chosen = seq % 2
+            rows.append({
+                "session": "c", "sequence": seq, "frame": observed, "index": chosen,
+                "logProbability": math.log(float(probs[chosen])), "value": value,
+                "modelVersion": model.version, "reward": 0.0, "elapsedTicks": 5,
+                "terminated": True, "truncated": False, "nextValue": 0,
+                "appliedTick": observed["serverTick"], "nextWorld": observed["world"],
+                "nextState": observed["state"],
+            })
+        states = np.asarray([r["frame"]["state"] for r in rows], dtype=np.float64)
+        before_mean = float(np.abs(np.mean(states @ model.params["state_action_s"] + model.params["state_action_b"], axis=0)).mean())
+        model.fit(rows, epochs=1, minibatch=4)
+        after_mean = float(np.abs(np.mean(states @ model.params["state_action_s"] + model.params["state_action_b"], axis=0)).mean())
+        contrast = float(np.abs((states[1] - states[0]) @ model.params["state_action_s"]).mean())
+        self.assertLess(after_mean, 0.85 * before_mean)
+        self.assertGreater(contrast, 0.5)
+
+        m4 = ActorCritic(53, hidden=4)
+        m16 = ActorCritic(53, hidden=4)
+        m4.enable_state_action_interaction(seed=23, rank=4)
+        m16.enable_state_action_interaction(seed=23, rank=16)
+        g4 = {k: np.zeros_like(v) for k, v in m4.params.items()}
+        g16 = {k: np.zeros_like(v) for k, v in m16.params.items()}
+        g4["state_action_a"].fill(1e-3)
+        g16["state_action_a"].fill(1e-3)
+        m4.apply(g4)
+        m16.apply(g16)
+        d4 = float(np.abs(m4.params["state_action_a"]).mean())
+        d16 = float(np.abs(m16.params["state_action_a"]).mean())
+        self.assertGreater(d4, 1e-4)
+        self.assertAlmostEqual(d16 / d4, 0.5, places=6)
 
     def test_temporal_ppo_gradient_matches_changed_sampling_law(self):
         import copy

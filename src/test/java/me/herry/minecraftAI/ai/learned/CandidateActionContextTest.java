@@ -678,6 +678,38 @@ class CandidateActionContextTest {
             assertEquals(0.0, f[CandidateActionContext.MATERIAL_IS_FUEL], nonAcq.name());
             assertEquals(1.0, f[CandidateActionContext.MATERIAL_IS_BLOCK], nonAcq.name());
         }
+        var toolProps = new CandidateActionContext.MaterialProperties(
+                4, true, true, true, 6.0, true, true, false, true, true);
+        double[] dropTool = new double[PolicyFrame.ACTION_SIZE];
+        CandidateActionContext.encodeMaterialProperties(dropTool, toolProps, PrimitiveType.DROP_ITEM);
+        for (int idx : new int[] {
+                CandidateActionContext.MATERIAL_DEPENDENT_RECIPES,
+                CandidateActionContext.MATERIAL_HAS_DURABILITY,
+                CandidateActionContext.MATERIAL_HARVESTS_STONE,
+                CandidateActionContext.MATERIAL_HARVESTS_IRON_ORE,
+                CandidateActionContext.MATERIAL_STONE_DESTROY_SPEED,
+                CandidateActionContext.MATERIAL_HARVESTS_DIAMOND_ORE,
+                CandidateActionContext.MATERIAL_HARVESTS_OBSIDIAN,
+                CandidateActionContext.MATERIAL_IS_FOOD,
+                CandidateActionContext.MATERIAL_IS_FUEL
+        }) {
+            assertEquals(0.0, dropTool[idx], "drop idx " + idx);
+        }
+        assertEquals(0.0, dropTool[CandidateActionContext.MATERIAL_IS_BLOCK]);
+
+        for (PrimitiveType keep : List.of(
+                PrimitiveType.CRAFT_ITEM, PrimitiveType.BREAK_BLOCK,
+                PrimitiveType.PICKUP_ITEM, PrimitiveType.INTERACT_BLOCK, PrimitiveType.EQUIP_ITEM)) {
+            double[] f = new double[PolicyFrame.ACTION_SIZE];
+            CandidateActionContext.encodeMaterialProperties(f, toolProps, keep);
+            assertEquals(1.0, f[CandidateActionContext.MATERIAL_HAS_DURABILITY], keep.name());
+            assertEquals(1.0, f[CandidateActionContext.MATERIAL_HARVESTS_STONE], keep.name());
+            assertEquals(1.0, f[CandidateActionContext.MATERIAL_HARVESTS_IRON_ORE], keep.name());
+            assertEquals(6.0 / 16.0, f[CandidateActionContext.MATERIAL_STONE_DESTROY_SPEED], 1e-12, keep.name());
+            assertEquals(1.0, f[CandidateActionContext.MATERIAL_HARVESTS_DIAMOND_ORE], keep.name());
+            assertEquals(1.0, f[CandidateActionContext.MATERIAL_HARVESTS_OBSIDIAN], keep.name());
+            assertEquals(1.0, f[CandidateActionContext.MATERIAL_IS_FOOD], keep.name());
+        }
         for (PrimitiveType acq : List.of(
                 PrimitiveType.CRAFT_ITEM, PrimitiveType.BREAK_BLOCK,
                 PrimitiveType.PICKUP_ITEM, PrimitiveType.INTERACT_BLOCK)) {

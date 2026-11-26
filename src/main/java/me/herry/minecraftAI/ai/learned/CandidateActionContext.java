@@ -263,8 +263,18 @@ public final class CandidateActionContext {
 
     public static void encodeMaterialProperties(double[] features, MaterialProperties props, PrimitiveType type) {
         encodeMaterialProperties(features, props);
-        if (type == PrimitiveType.PLACE_BLOCK || type == PrimitiveType.DROP_ITEM) {
+        if (type == PrimitiveType.PLACE_BLOCK) {
             features[MATERIAL_DEPENDENT_RECIPES] = 0;
+            features[MATERIAL_IS_FUEL] = 0;
+        } else if (type == PrimitiveType.DROP_ITEM) {
+            features[MATERIAL_DEPENDENT_RECIPES] = 0;
+            features[MATERIAL_HAS_DURABILITY] = 0;
+            features[MATERIAL_HARVESTS_STONE] = 0;
+            features[MATERIAL_HARVESTS_IRON_ORE] = 0;
+            features[MATERIAL_STONE_DESTROY_SPEED] = 0;
+            features[MATERIAL_HARVESTS_DIAMOND_ORE] = 0;
+            features[MATERIAL_HARVESTS_OBSIDIAN] = 0;
+            features[MATERIAL_IS_FOOD] = 0;
             features[MATERIAL_IS_FUEL] = 0;
         }
     }
