@@ -131,12 +131,15 @@ class ActorTests(unittest.TestCase):
         decay_model = ActorCritic(31, hidden=4)
         decay_model.enable_state_action_interaction(seed=77, rank=4)
         decay_model.params['state_action_a'].fill(0.5)
+        decay_model.params['state_action_b'].fill(0.4)
         s_before = decay_model.params['state_action_s'].copy()
+        b_before = decay_model.params['state_action_b'].copy()
         a_before = decay_model.params['state_action_a'].copy()
         zero_grads = {key: np.zeros_like(val) for key, val in decay_model.params.items()}
         decay_model.apply(zero_grads)
-        np.testing.assert_allclose(decay_model.params['state_action_s'], s_before * 0.99995, rtol=0, atol=1e-12)
-        np.testing.assert_allclose(decay_model.params['state_action_a'], a_before * 0.99995, rtol=0, atol=1e-12)
+        np.testing.assert_allclose(decay_model.params['state_action_s'], s_before * 0.999, rtol=0, atol=1e-12)
+        np.testing.assert_allclose(decay_model.params['state_action_b'], b_before * 0.999, rtol=0, atol=1e-12)
+        np.testing.assert_allclose(decay_model.params['state_action_a'], a_before * 0.9995, rtol=0, atol=1e-12)
 
         restored = ActorCritic.from_optimizer_state(model.optimizer_state())
         self.assertEqual(restored.interaction, 'state-action-bilinear/v1')
@@ -146,6 +149,25 @@ class ActorTests(unittest.TestCase):
         self.assertEqual(len(artifact['stateActionStateBias']), 4)
         with self.assertRaises(ValueError):
             ActorCritic.verify_zero_state_action_extension(before, model.optimizer_state())
+
+    def test_advantage_variance_floor_dampens_near_zero_batches_without_stalling_real_signal(self):
+        noise_model = ActorCritic(43, hidden=4)
+        signal_model = ActorCritic(43, hidden=4)
+        init_out = noise_model.params["actor_out"].copy()
+        noise_rows = [
+            row(noise_model, session="s", sequence=i, reward=r, terminal=True)
+            for i, r in enumerate((0.0, 0.002, -0.002, 0.0))
+        ]
+        signal_rows = [
+            row(signal_model, session="s", sequence=i, reward=r, terminal=True)
+            for i, r in enumerate((0.0, 2.0, -2.0, 0.0))
+        ]
+        noise_model.fit(noise_rows, epochs=1, minibatch=4)
+        signal_model.fit(signal_rows, epochs=1, minibatch=4)
+        noise_move = float(np.linalg.norm(noise_model.params["actor_out"] - init_out))
+        signal_move = float(np.linalg.norm(signal_model.params["actor_out"] - init_out))
+        self.assertGreater(signal_move, 1e-4)
+        self.assertLess(noise_move, 0.1 * signal_move)
 
     def test_temporal_ppo_gradient_matches_changed_sampling_law(self):
         import copy

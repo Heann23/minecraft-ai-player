@@ -11,6 +11,7 @@ STATE_SIZE, ACTION_SIZE, MAX_OPTIONS = 448, 304, 128
 INPUT_SIZE = STATE_SIZE + ACTION_SIZE
 STATE_ACTION_INTERACTION = "state-action-bilinear/v1"
 STATE_ACTION_RANK = 32
+ADVANTAGE_STD_FLOOR = 0.5
 
 
 def inputs(frame: dict) -> tuple[np.ndarray, np.ndarray]:
@@ -80,7 +81,7 @@ class ActorCritic:
             raise ValueError("state-action rank must be 1..64")
         self.interaction = STATE_ACTION_INTERACTION
         init_rng = np.random.default_rng(seed)
-        self.params["state_action_s"] = init_rng.normal(0, 1 / math.sqrt(STATE_SIZE), (STATE_SIZE, rank))
+        self.params["state_action_s"] = init_rng.normal(0, 0.25 / math.sqrt(STATE_SIZE), (STATE_SIZE, rank))
         self.params["state_action_b"] = np.zeros(rank)
         self.params["state_action_a"] = np.zeros((ACTION_SIZE, rank))
         for group in (self.first, self.second):
@@ -229,9 +230,11 @@ class ActorCritic:
             second = self.second[key] / (1 - 0.999 ** self.updates)
             step_rate = rate * 100.0 if key == "value_bias" else rate
             self.params[key] -= step_rate * first / (np.sqrt(second) + 1e-8)
-            if key in ("value_w", "value_b"):
+            if key in ("value_w", "value_b", "state_action_s", "state_action_b"):
                 self.params[key] *= 0.999
-            elif key in ("actor_w", "state_action_s", "state_action_a"):
+            elif key == "state_action_a":
+                self.params[key] *= 0.9995
+            elif key == "actor_w":
                 self.params[key] *= 0.99995
         if not all(np.isfinite(value).all() for value in self.params.values()):
             raise ValueError("non-finite updated policy")
@@ -241,7 +244,7 @@ class ActorCritic:
             raise ValueError("PPO requires transitions from the current behavior-policy version")
         advantages, returns = generalized_advantages(rows)
         if len(rows) > 1:
-            advantages = (advantages - advantages.mean()) / max(1e-8, float(advantages.std()))
+            advantages = (advantages - advantages.mean()) / math.hypot(float(advantages.std()), ADVANTAGE_STD_FLOOR)
         stats = []
         for _ in range(epochs):
             order = self.rng.permutation(len(rows))

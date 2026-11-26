@@ -1705,10 +1705,11 @@ public final class PolicyCandidates {
                         && transfer.slot() == PrimitiveCommand.FurnaceSlot.RESULT;
         CandidateActionContext.encode(features, type, directMaterial, recipe, actionContext, takesObservedItem);
         var materialProps = resolveMaterialProperties(ai, directMaterial);
-        CandidateActionContext.encodeMaterialProperties(features, materialProps);
+        CandidateActionContext.encodeMaterialProperties(features, materialProps, type);
         int ownedCount = directMaterial == null ? 0 : actionContext.stock().getOrDefault(directMaterial, 0);
         CandidateActionContext.encodeCraftUtility(features, type, directMaterial, materialProps, ownedHarvestCaps, ownedCount);
         if (blockEvidence != null && breakDropMaterial == null) {
+            Arrays.fill(features, 32, 48, 0);
             CandidateActionContext.encodeNonDroppingBlock(features, blockEvidence.material());
         }
         found.put(id,

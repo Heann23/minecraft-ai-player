@@ -261,6 +261,14 @@ public final class CandidateActionContext {
         features[MATERIAL_IS_FUEL] = props.fuel() ? 1 : 0;
     }
 
+    public static void encodeMaterialProperties(double[] features, MaterialProperties props, PrimitiveType type) {
+        encodeMaterialProperties(features, props);
+        if (type == PrimitiveType.PLACE_BLOCK || type == PrimitiveType.DROP_ITEM) {
+            features[MATERIAL_DEPENDENT_RECIPES] = 0;
+            features[MATERIAL_IS_FUEL] = 0;
+        }
+    }
+
     public static void encodeMiningPhysics(double[] features, boolean harvestsDrops, boolean requiresCorrectTool) {
         encodeMiningPhysics(features, harvestsDrops, requiresCorrectTool, false);
     }
@@ -275,17 +283,17 @@ public final class CandidateActionContext {
     }
 
     /**
-     * Truthfully encodes block-identity facts for a BreakBlock candidate that produces no guaranteed item drop
-     * (e.g. leaves/grass without shears/silk touch, or rock/ore with an inadequate tool). Preserves zero
-     * acquisition/ownership/objective-match flags while preventing zero-drop blocks from masquerading as
-     * material-less actions.
+     * Truthfully encodes block-only facts for a BreakBlock candidate that produces no guaranteed item drop
+     * (e.g. leaves/grass without shears/silk touch, or rock/ore with an inadequate tool). Leaves the
+     * acquired-item hash buckets empty and HAS_MATERIAL at 0 so zero-drop foliage never collides with
+     * craftable tools or ores, while marking non-dropping block physics explicitly.
      */
     public static void encodeNonDroppingBlock(double[] features, String blockMaterial) {
         if (features.length != PolicyFrame.ACTION_SIZE)
             throw new IllegalArgumentException("candidate action context shape");
         if (blockMaterial == null || blockMaterial.isBlank()) return;
-        features[OFFSET + Math.floorMod(blockMaterial.hashCode(), 16)] = 1;
-        features[HAS_MATERIAL] = 1;
+        java.util.Arrays.fill(features, OFFSET, OFFSET + 16, 0);
+        features[HAS_MATERIAL] = 0;
         features[MATERIAL_IS_WORKSTATION] = 0;
         features[MATERIAL_IS_BLOCK] = 1;
         features[MATERIAL_CRAFTING_DEAD_END] = 1;

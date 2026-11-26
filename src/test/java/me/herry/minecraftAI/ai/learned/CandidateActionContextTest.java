@@ -642,11 +642,13 @@ class CandidateActionContextTest {
                 CandidateActionContext.MaterialProperties.EMPTY, CandidateActionContext.HarvestCapabilities.NONE, 0);
         CandidateActionContext.encodeNonDroppingBlock(leaves, "OAK_LEAVES");
 
-        assertEquals(1.0, leaves[CandidateActionContext.HAS_MATERIAL]);
+        assertEquals(0.0, leaves[CandidateActionContext.HAS_MATERIAL]);
         assertEquals(1.0, leaves[CandidateActionContext.MATERIAL_IS_BLOCK]);
         assertEquals(1.0, leaves[CandidateActionContext.MATERIAL_CRAFTING_DEAD_END]);
         assertEquals(0.0, leaves[CandidateActionContext.MATERIAL_IS_WORKSTATION]);
-        assertEquals(1.0, leaves[CandidateActionContext.OFFSET + Math.floorMod("OAK_LEAVES".hashCode(), 16)]);
+        for (int b = 0; b < 16; b++) {
+            assertEquals(0.0, leaves[CandidateActionContext.OFFSET + b], "non-dropping bucket " + b);
+        }
         assertEquals(0.0, leaves[CandidateActionContext.OWNED_MATERIAL]);
         assertEquals(0.0, leaves[CandidateActionContext.UNOWNED_MATERIAL]);
         assertEquals(0.0, leaves[CandidateActionContext.OBJECTIVE_DIRECT_MATCH]);
@@ -664,6 +666,27 @@ class CandidateActionContextTest {
 
         assertEquals("RAW_IRON", CandidateActionContext.observedDropMaterial("IRON_ORE", true, false, false));
         assertNull(CandidateActionContext.observedDropMaterial("OAK_LEAVES", true, false, false));
+    }
+
+    @Test void placementAndDropClearAcquisitionRecipeAndFuelProperties() {
+        var plankProps = new CandidateActionContext.MaterialProperties(
+                16, false, false, false, 1.0, false, false, true, false, true);
+        for (PrimitiveType nonAcq : List.of(PrimitiveType.PLACE_BLOCK, PrimitiveType.DROP_ITEM)) {
+            double[] f = new double[PolicyFrame.ACTION_SIZE];
+            CandidateActionContext.encodeMaterialProperties(f, plankProps, nonAcq);
+            assertEquals(0.0, f[CandidateActionContext.MATERIAL_DEPENDENT_RECIPES], nonAcq.name());
+            assertEquals(0.0, f[CandidateActionContext.MATERIAL_IS_FUEL], nonAcq.name());
+            assertEquals(1.0, f[CandidateActionContext.MATERIAL_IS_BLOCK], nonAcq.name());
+        }
+        for (PrimitiveType acq : List.of(
+                PrimitiveType.CRAFT_ITEM, PrimitiveType.BREAK_BLOCK,
+                PrimitiveType.PICKUP_ITEM, PrimitiveType.INTERACT_BLOCK)) {
+            double[] f = new double[PolicyFrame.ACTION_SIZE];
+            CandidateActionContext.encodeMaterialProperties(f, plankProps, acq);
+            assertEquals(1.0, f[CandidateActionContext.MATERIAL_DEPENDENT_RECIPES], acq.name());
+            assertEquals(1.0, f[CandidateActionContext.MATERIAL_IS_FUEL], acq.name());
+            assertEquals(1.0, f[CandidateActionContext.MATERIAL_IS_BLOCK], acq.name());
+        }
     }
 
     @Test void disjointTableRecipeDoesNotPenalizeLeavingTableBeforeIngredientsAreGathered() {
