@@ -191,7 +191,7 @@ class TrainingEpisodeTest {
         assertEquals("survival-progress/v7", complete.rewardContract());
         double expectedComplete = 5 * 0.00001 + 3.0 + 2.0 * (Math.pow(0.99997, 5) - 1.0) + 4.0;
         assertEquals(expectedComplete, complete.reward(), 1e-9);
-        assertTrue(complete.reward() > 7.0);
+        assertTrue(complete.reward() > 6.99);
 
         // Case D: backward compatibility with historical survival-progress/v6 evidence
         var v6Prep = new PpoBridge.RecipeProgress(beforeStock, wasteStock, false);
