@@ -128,12 +128,15 @@ class ActorTests(unittest.TestCase):
             self.assertAlmostEqual(post_grads[pname][index], (plus - minus) / (2 * eps), places=6)
             self.assertNotEqual(post_grads[pname][index], 0.0)
 
-        s_before = model.params['state_action_s'].copy()
-        a_before = model.params['state_action_a'].copy()
-        zero_grads = {key: np.zeros_like(val) for key, val in model.params.items()}
-        model.apply(zero_grads)
-        np.testing.assert_allclose(model.params['state_action_s'], s_before * 0.99995, rtol=0, atol=1e-12)
-        np.testing.assert_allclose(model.params['state_action_a'], a_before * 0.99995, rtol=0, atol=1e-12)
+        decay_model = ActorCritic(31, hidden=4)
+        decay_model.enable_state_action_interaction(seed=77, rank=4)
+        decay_model.params['state_action_a'].fill(0.5)
+        s_before = decay_model.params['state_action_s'].copy()
+        a_before = decay_model.params['state_action_a'].copy()
+        zero_grads = {key: np.zeros_like(val) for key, val in decay_model.params.items()}
+        decay_model.apply(zero_grads)
+        np.testing.assert_allclose(decay_model.params['state_action_s'], s_before * 0.99995, rtol=0, atol=1e-12)
+        np.testing.assert_allclose(decay_model.params['state_action_a'], a_before * 0.99995, rtol=0, atol=1e-12)
 
         restored = ActorCritic.from_optimizer_state(model.optimizer_state())
         self.assertEqual(restored.interaction, 'state-action-bilinear/v1')
@@ -480,7 +483,7 @@ class ActorTests(unittest.TestCase):
 
     def test_goal_driven_recipe_progress_v7_drops_discovery_bonus_and_keeps_v6(self):
         model = ActorCritic(7, hidden=4)
-        sample = row(model, session=str(uuid.uuid4()))
+        sample = row(model, session=str(uuid.uuid4()), terminal=False)
         sample.pop("nextValue")
         objective = {"id": str(uuid.uuid4()), "world": sample["nextWorld"],
                      "goal": {"item": "WOODEN_PICKAXE", "count": 1}, "startedTick": 1}
