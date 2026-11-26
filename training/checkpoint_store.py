@@ -6,10 +6,22 @@ import json
 import os
 from pathlib import Path
 import re
+import time
 import uuid
 
 SCHEMA = "minecraft-paper-checkpoint-bundle/v1"
 FILES = ("minecraft-rl-actor.json", "optimizer-checkpoint.json", "training-report.json")
+
+
+def _replace_with_retry(source: Path, destination: Path, *, attempts: int = 20):
+    for attempt in range(attempts):
+        try:
+            os.replace(source, destination)
+            return
+        except PermissionError:
+            if attempt == attempts - 1:
+                raise
+            time.sleep(0.02 * (attempt + 1))
 
 
 def encoded(value):
@@ -20,7 +32,7 @@ def durable_replace(path: Path, data: bytes):
     temporary = path.with_name(path.name + "." + uuid.uuid4().hex + ".tmp")
     with temporary.open("xb") as stream:
         stream.write(data); stream.flush(); os.fsync(stream.fileno())
-    os.replace(temporary, path)
+    _replace_with_retry(temporary, path)
 
 
 def publish(root: Path, artifact: dict, checkpoint: dict, report: dict):
@@ -41,7 +53,7 @@ def publish(root: Path, artifact: dict, checkpoint: dict, report: dict):
     durable_replace(temporary / "manifest.json", manifest_bytes)
     name = "version-" + str(report["modelVersion"]).zfill(12) + "-" + uuid.uuid4().hex
     destination = generations / name
-    os.replace(temporary, destination)
+    _replace_with_retry(temporary, destination)
     # No member of an earlier generation is ever overwritten. The pointer is committed only after all members.
     durable_replace(root / "latest-checkpoint.json", encoded({"schema": SCHEMA, "bundle": "checkpoints/" + name,
                     "manifestSha256": hashlib.sha256(manifest_bytes).hexdigest()}))
