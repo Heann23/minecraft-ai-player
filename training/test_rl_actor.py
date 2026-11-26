@@ -151,31 +151,41 @@ class ActorTests(unittest.TestCase):
             ActorCritic.verify_zero_state_action_extension(before, model.optimizer_state())
 
     def test_advantage_variance_floor_dampens_near_zero_batches_without_stalling_real_signal(self):
+        def pair_rows(model, session, magnitude):
+            observed = frame()
+            probabilities, value, _ = model.evaluate(observed)
+            rows = []
+            for seq, (idx, rew) in enumerate(((0, -magnitude), (1, magnitude), (0, -magnitude), (1, magnitude))):
+                rows.append({
+                    "session": session, "sequence": seq, "frame": observed, "index": idx,
+                    "logProbability": math.log(float(probabilities[idx])), "value": value,
+                    "modelVersion": model.version, "reward": rew, "elapsedTicks": 5,
+                    "terminated": True, "truncated": False, "nextValue": 0,
+                    "appliedTick": observed["serverTick"], "nextWorld": observed["world"],
+                    "nextState": observed["state"],
+                })
+            return rows
+
         noise_model = ActorCritic(43, hidden=4)
         signal_model = ActorCritic(43, hidden=4)
-        # Warm up both optimizers identically so Adam second moments reflect real reward scale, matching resumed PPO.
-        warmup = [
-            row(noise_model, session="w", sequence=i, reward=r, terminal=True)
-            for i, r in enumerate((0.0, 2.0, -2.0, 0.0))
-        ]
-        noise_model.fit(warmup, epochs=1, minibatch=4)
-        signal_model.fit(warmup, epochs=1, minibatch=4)
+        # Warm up identical Adam second moments (reflecting resumed PPO scale), then clear first-moment carryover.
+        noise_model.fit(pair_rows(noise_model, "w", 2.0), epochs=1, minibatch=4)
+        signal_model.fit(pair_rows(signal_model, "w", 2.0), epochs=1, minibatch=4)
+        for m in (noise_model, signal_model):
+            for key in m.first:
+                m.first[key].fill(0.0)
 
         init_out = noise_model.params["actor_out"].copy()
-        noise_rows = [
-            row(noise_model, session="s", sequence=i, reward=r, terminal=True)
-            for i, r in enumerate((0.0, 0.002, -0.002, 0.0))
-        ]
-        signal_rows = [
-            row(signal_model, session="s", sequence=i, reward=r, terminal=True)
-            for i, r in enumerate((0.0, 2.0, -2.0, 0.0))
-        ]
+        noise_rows = pair_rows(noise_model, "s", 0.002)
+        signal_rows = pair_rows(signal_model, "s", 2.0)
+
         noise_adv, noise_ret = generalized_advantages(noise_rows)
         signal_adv, signal_ret = generalized_advantages(signal_rows)
         noise_adv = (noise_adv - noise_adv.mean()) / math.hypot(float(noise_adv.std()), 0.5)
         signal_adv = (signal_adv - signal_adv.mean()) / math.hypot(float(signal_adv.std()), 0.5)
         noise_g, _ = noise_model.gradients(noise_rows, noise_adv, noise_ret, entropy_weight=0.0)
         signal_g, _ = signal_model.gradients(signal_rows, signal_adv, signal_ret, entropy_weight=0.0)
+        self.assertGreater(float(np.linalg.norm(signal_g["actor_out"])), 1e-4)
         self.assertLess(
             float(np.linalg.norm(noise_g["actor_out"])),
             0.05 * float(np.linalg.norm(signal_g["actor_out"])),
